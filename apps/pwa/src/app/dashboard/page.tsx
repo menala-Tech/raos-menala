@@ -6,7 +6,8 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import {
   ScanLine, Clock, UserCheck, MessageCircle,
-  Target, CheckCircle2, AlertCircle, Bell
+  Target, CheckCircle2, AlertCircle, Bell,
+  TrendingUp, ShieldCheck
 } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
@@ -54,11 +55,17 @@ export default function DashboardPage() {
     load()
   }, [router])
 
+  const isAdmin = user && ['koordinator', 'admin', 'direksi'].includes(user.role)
+
   const quick = [
     { href: '/scan',     icon: ScanLine,     label: 'Scan\nBarcode',  color: 'bg-blue-500' },
     { href: '/absensi',  icon: UserCheck,    label: 'Absensi',        color: 'bg-green-500' },
     { href: '/riwayat',  icon: Clock,        label: 'Riwayat',        color: 'bg-orange-500' },
     { href: '/chat',     icon: MessageCircle,label: 'Chat\nRoom',     color: 'bg-purple-500' },
+    { href: '/kpi',      icon: TrendingUp,   label: 'KPI\nSaya',      color: 'bg-pink-500' },
+    ...(isAdmin
+      ? [{ href: '/admin', icon: ShieldCheck, label: 'Panel\nAdmin', color: 'bg-secondary' }]
+      : []),
   ]
 
   return (

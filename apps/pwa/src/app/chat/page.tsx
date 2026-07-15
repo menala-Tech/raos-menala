@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
+import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import { ArrowLeft, Send, MessageCircle } from 'lucide-react'
 import Link from 'next/link'
 import type { ChatRoom, ChatMessage, UserProfile } from '@/types'
@@ -103,6 +104,7 @@ function ChatPageInner() {
 
   if (activeRoom) {
     return (
+      <SwipeBackWrapper onBack={() => setActiveRoom(null)}>
       <div className="flex flex-col h-screen max-w-md mx-auto">
         {/* Chat Header */}
         <div className="bg-secondary text-white px-4 pt-10 pb-3 flex items-center gap-3 flex-shrink-0">
@@ -162,6 +164,7 @@ function ChatPageInner() {
           </button>
         </div>
       </div>
+      </SwipeBackWrapper>
     )
   }
 

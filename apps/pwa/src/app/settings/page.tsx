@@ -6,8 +6,9 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import {
   User, Smartphone, MapPin, Bell, Shield,
-  Database, Info, HelpCircle, LogOut, ChevronRight
+  Database, Info, HelpCircle, LogOut, ChevronRight, MessageCircle
 } from 'lucide-react'
+import Link from 'next/link'
 import type { UserProfile } from '@/types'
 
 type Section = null | 'akun' | 'aplikasi' | 'lokasi' | 'notifikasi' | 'keamanan' | 'data'
@@ -113,6 +114,9 @@ export default function SettingsPage() {
             <button className="flex items-center gap-3 w-full text-gray-600">
               <HelpCircle size={18} /> <span>Bantuan & Panduan</span>
             </button>
+            <Link href="/chat?room=umum" className="flex items-center gap-3 w-full text-gray-600">
+              <MessageCircle size={18} /> <span>Hubungi Admin</span>
+            </Link>
           </div>
         </div>
 

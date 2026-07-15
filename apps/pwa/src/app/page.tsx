@@ -1,19 +1,36 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
-import { Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react'
+import { Eye, EyeOff, Lock, Mail, ShieldCheck, Send, ArrowLeft, Loader2 } from 'lucide-react'
+
+type Mode = 'password' | 'magic-link' | 'forgot-password'
 
 export default function LoginPage() {
   const router = useRouter()
+  const [checkingSession, setCheckingSession] = useState(true)
+  const [mode, setMode] = useState<Mode>('password')
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [remember, setRemember] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  // Sesi aktif → langsung ke dashboard, tidak perlu login ulang tiap buka app
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        router.replace('/dashboard')
+      } else {
+        setCheckingSession(false)
+      }
+    })
+  }, [router])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -28,11 +45,74 @@ export default function LoginPage() {
     router.push('/dashboard')
   }
 
-  async function handleGoogleLogin() {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+  async function handleMagicLink(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    setInfo('')
+
+    const { data: isRegistered } = await supabase.rpc('email_is_registered_staff', {
+      check_email: email,
     })
+
+    if (!isRegistered) {
+      setError('Email tidak terdaftar sebagai staff aktif. Hubungi Admin untuk didaftarkan.')
+      setLoading(false)
+      return
+    }
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/dashboard` },
+    })
+
+    if (error) {
+      setError(
+        error.message.includes('invalid')
+          ? 'Server email belum dikonfigurasi untuk domain ini. Hubungi Admin sistem.'
+          : 'Gagal mengirim link masuk. Coba lagi.'
+      )
+    } else {
+      setInfo(`Link masuk telah dikirim ke ${email}. Buka email dan klik link untuk masuk.`)
+    }
+    setLoading(false)
+  }
+
+  async function handleForgotPassword(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    setInfo('')
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+
+    if (error) {
+      setError(
+        error.message.includes('invalid')
+          ? 'Server email belum dikonfigurasi untuk domain ini. Hubungi Admin sistem.'
+          : 'Gagal mengirim link reset. Periksa email dan coba lagi.'
+      )
+    } else {
+      setInfo(`Link atur ulang kata sandi telah dikirim ke ${email}.`)
+    }
+    setLoading(false)
+  }
+
+  function switchMode(next: Mode) {
+    setMode(next)
+    setError('')
+    setInfo('')
+    setPassword('')
+  }
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen bg-secondary flex items-center justify-center">
+        <Loader2 className="text-primary animate-spin" size={32} />
+      </div>
+    )
   }
 
   return (
@@ -68,90 +148,178 @@ export default function LoginPage() {
           AIRPORT OPERATION SYSTEM
         </p>
         <p className="text-white/40 text-xs text-center mt-4">
-          Silakan masuk untuk melanjutkan
+          {mode === 'password' && 'Silakan masuk untuk melanjutkan'}
+          {mode === 'magic-link' && 'Masuk cepat tanpa kata sandi'}
+          {mode === 'forgot-password' && 'Atur ulang kata sandi Anda'}
         </p>
       </div>
 
       {/* Form */}
       <div className="bg-white rounded-t-3xl px-6 pt-8 pb-10 shadow-2xl">
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div className="relative">
-            <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
-            <input
-              type="email"
-              placeholder="Email atau ID Staff"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="input pl-10"
-              required
-            />
-          </div>
-
-          <div className="relative">
-            <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />
-            <input
-              type={showPass ? 'text' : 'password'}
-              placeholder="Kata Sandi"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="input pl-10 pr-10"
-              required
-            />
-            <button
-              type="button"
-              onClick={() => setShowPass(!showPass)}
-              className="absolute right-3 top-3.5 text-gray-400"
-            >
-              {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between text-sm">
-            <label className="flex items-center gap-2 text-gray-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={e => setRemember(e.target.checked)}
-                className="rounded"
-              />
-              Ingat saya
-            </label>
-            <button type="button" className="text-primary font-medium">
-              Lupa Kata Sandi?
-            </button>
-          </div>
-
-          {error && (
-            <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">
-              {error}
-            </p>
-          )}
-
-          <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Memproses...' : 'MASUK'}
+        {mode !== 'password' && (
+          <button
+            onClick={() => switchMode('password')}
+            className="flex items-center gap-1.5 text-gray-500 text-sm font-medium mb-4"
+          >
+            <ArrowLeft size={16} /> Kembali ke login kata sandi
           </button>
-        </form>
+        )}
 
-        <div className="flex items-center my-4">
-          <div className="flex-1 border-t border-gray-200" />
-          <span className="px-3 text-gray-400 text-xs">atau masuk dengan</span>
-          <div className="flex-1 border-t border-gray-200" />
-        </div>
+        {/* ===== MODE: PASSWORD (default) ===== */}
+        {mode === 'password' && (
+          <>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="relative">
+                <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
+                <input
+                  type="email"
+                  placeholder="Email atau ID Staff"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  className="input pl-10"
+                  autoComplete="username"
+                  required
+                />
+              </div>
 
-        <button onClick={handleGoogleLogin} className="btn-secondary flex items-center justify-center gap-2">
-          <svg width="18" height="18" viewBox="0 0 24 24">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-          </svg>
-          Masuk dengan Google
-        </button>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  placeholder="Kata Sandi"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="input pl-10 pr-10"
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3 top-3.5 text-gray-400"
+                >
+                  {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
 
-        <p className="text-center text-gray-400 text-xs mt-4">
-          Belum punya akun?{' '}
-          <span className="text-primary font-medium">Hubungi Admin</span>
-        </p>
+              <div className="flex items-center justify-between text-sm">
+                <label className="flex items-center gap-2 text-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={e => setRemember(e.target.checked)}
+                    className="rounded"
+                  />
+                  Ingat saya
+                </label>
+                <button
+                  type="button"
+                  onClick={() => switchMode('forgot-password')}
+                  className="text-primary font-medium"
+                >
+                  Lupa Kata Sandi?
+                </button>
+              </div>
+
+              {error && (
+                <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">
+                  {error}
+                </p>
+              )}
+
+              <button type="submit" className="btn-primary" disabled={loading}>
+                {loading ? 'Memproses...' : 'MASUK'}
+              </button>
+            </form>
+
+            <div className="flex items-center my-4">
+              <div className="flex-1 border-t border-gray-200" />
+              <span className="px-3 text-gray-400 text-xs">atau</span>
+              <div className="flex-1 border-t border-gray-200" />
+            </div>
+
+            <button
+              onClick={() => switchMode('magic-link')}
+              className="btn-secondary flex items-center justify-center gap-2"
+            >
+              <Send size={16} />
+              Masuk dengan Link Email
+            </button>
+
+            <p className="text-center text-gray-400 text-xs mt-4">
+              Belum punya akun?{' '}
+              <a href="/chat?room=umum" className="text-primary font-medium">
+                Hubungi Admin
+              </a>
+            </p>
+          </>
+        )}
+
+        {/* ===== MODE: MAGIC LINK ===== */}
+        {mode === 'magic-link' && (
+          <form onSubmit={handleMagicLink} className="space-y-4">
+            <p className="text-xs text-gray-500">
+              Masukkan email staff yang terdaftar. Kami akan kirim link pribadi —
+              klik link tersebut untuk langsung masuk tanpa kata sandi.
+            </p>
+            <div className="relative">
+              <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
+              <input
+                type="email"
+                placeholder="Email Staff Terdaftar"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="input pl-10"
+                autoComplete="username"
+                required
+              />
+            </div>
+
+            {error && (
+              <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>
+            )}
+            {info && (
+              <p className="text-green-600 text-sm text-center bg-green-50 py-2 rounded-lg">{info}</p>
+            )}
+
+            <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={loading}>
+              {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+              {loading ? 'Mengirim...' : 'Kirim Link Masuk'}
+            </button>
+          </form>
+        )}
+
+        {/* ===== MODE: FORGOT PASSWORD ===== */}
+        {mode === 'forgot-password' && (
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <p className="text-xs text-gray-500">
+              Masukkan email akun Anda. Kami akan kirim link untuk mengatur ulang kata sandi.
+            </p>
+            <div className="relative">
+              <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
+              <input
+                type="email"
+                placeholder="Email Akun"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="input pl-10"
+                autoComplete="username"
+                required
+              />
+            </div>
+
+            {error && (
+              <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>
+            )}
+            {info && (
+              <p className="text-green-600 text-sm text-center bg-green-50 py-2 rounded-lg">{info}</p>
+            )}
+
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? 'Mengirim...' : 'Kirim Link Reset'}
+            </button>
+          </form>
+        )}
 
         <div className="mt-6 flex items-center justify-center gap-1.5 text-gray-400">
           <ShieldCheck size={14} />

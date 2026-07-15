@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { Suspense, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
@@ -10,7 +10,16 @@ import type { ChatRoom, ChatMessage, UserProfile } from '@/types'
 import clsx from 'clsx'
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChatPageInner />
+    </Suspense>
+  )
+}
+
+function ChatPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [user, setUser] = useState<UserProfile | null>(null)
   const [rooms, setRooms] = useState<ChatRoom[]>([])
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null)
@@ -36,8 +45,16 @@ export default function ChatPage() {
         .eq('is_active', true)
         .order('name')
       setRooms(roomData ?? [])
+
+      // Deep link ?room=umum (dipakai dari tombol "Hubungi Admin")
+      const targetCategory = searchParams.get('room')
+      if (targetCategory) {
+        const match = roomData?.find(r => r.category === targetCategory)
+        if (match) setActiveRoom(match)
+      }
     }
     init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
   useEffect(() => {

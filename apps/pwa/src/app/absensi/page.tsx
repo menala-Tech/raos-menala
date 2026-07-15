@@ -7,6 +7,7 @@ import AppShell from '@/components/layout/AppShell'
 import { ArrowLeft, Camera, MapPin, CheckCircle2, Clock, UserCheck } from 'lucide-react'
 import Link from 'next/link'
 import SelfieCapture from '@/components/SelfieCapture'
+import { checkGeofence, type GeofenceResult } from '@/lib/geo'
 import type { UserProfile, Attendance } from '@/types'
 
 export default function AbsensiPage() {
@@ -15,6 +16,8 @@ export default function AbsensiPage() {
   const [today, setToday] = useState<Attendance | null>(null)
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [locationValid, setLocationValid] = useState(false)
+  const [geofence, setGeofence] = useState<GeofenceResult | null>(null)
+  const [locationStatus, setLocationStatus] = useState<'checking' | 'done' | 'unavailable'>('checking')
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState<'form' | 'camera' | 'success'>('form')
   const [type, setType] = useState<'in' | 'out'>('in')
@@ -41,11 +44,16 @@ export default function AbsensiPage() {
       setToday(att)
 
       navigator.geolocation.getCurrentPosition(
-        pos => {
-          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-          setLocationValid(true)
+        async pos => {
+          const lat = pos.coords.latitude
+          const lng = pos.coords.longitude
+          setLocation({ lat, lng })
+          const result = await checkGeofence(lat, lng)
+          setGeofence(result)
+          setLocationValid(result.isValid)
+          setLocationStatus('done')
         },
-        () => setLocationValid(false),
+        () => setLocationStatus('unavailable'),
         { enableHighAccuracy: true }
       )
     }
@@ -86,6 +94,7 @@ export default function AbsensiPage() {
           check_in_at: now,
           check_in_lat: location?.lat ?? null,
           check_in_lng: location?.lng ?? null,
+          pickup_point_id: geofence?.nearestPointId ?? null,
           selfie_in_url: selfiePath,
           is_location_valid: locationValid,
           status: 'hadir',
@@ -141,13 +150,18 @@ export default function AbsensiPage() {
           </div>
         </div>
 
-        {/* Location */}
+        {/* Location — validasi geo-fence sesuai radius per pickup point */}
         <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg
           ${locationValid ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
           <MapPin size={14} />
-          {locationValid
-            ? 'Lokasi valid — Area Bandara Soetta'
-            : 'GPS tidak terdeteksi — absensi tetap bisa dilakukan (ditandai tanpa lokasi)'}
+          {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
+          {locationStatus === 'unavailable' &&
+            'GPS tidak terdeteksi — absensi tetap bisa dilakukan (ditandai tanpa lokasi)'}
+          {locationStatus === 'done' && geofence && (
+            geofence.isValid
+              ? `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`
+              : `Di luar radius geo-fence — ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Absensi tetap bisa dilakukan.`
+          )}
         </div>
 
         {/* Status Absensi */}
@@ -240,7 +254,11 @@ export default function AbsensiPage() {
               <p className="font-bold text-primary text-xl">
                 {now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
               </p>
-              <p>Lokasi: {locationValid ? 'Terdeteksi — Valid ✓' : 'Tidak terdeteksi (mode tanpa GPS)'}</p>
+              <p>
+                Lokasi: {geofence
+                  ? `${geofence.nearestPointName} — ${locationValid ? 'Dalam radius ✓' : `${geofence.distanceMeters}m di luar radius`}`
+                  : 'Tidak terdeteksi (mode tanpa GPS)'}
+              </p>
             </div>
             <button className="btn-primary" onClick={() => setStep('form')}>
               Kembali

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import BarcodeScanner from '@/components/BarcodeScanner'
+import { checkGeofence, type GeofenceResult } from '@/lib/geo'
 import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
@@ -17,7 +18,8 @@ export default function ScanPage() {
   const [scanState, setScanState] = useState<ScanState>('idle')
   const [lastScan, setLastScan] = useState<any>(null)
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
-  const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid'>('checking')
+  const [geofence, setGeofence] = useState<GeofenceResult | null>(null)
+  const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid' | 'unavailable'>('checking')
   const [inputMode, setInputMode] = useState<'camera' | 'manual'>('manual')
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -35,11 +37,15 @@ export default function ScanPage() {
     init()
 
     navigator.geolocation.getCurrentPosition(
-      pos => {
-        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-        setLocationStatus('valid')
+      async pos => {
+        const lat = pos.coords.latitude
+        const lng = pos.coords.longitude
+        setLocation({ lat, lng })
+        const result = await checkGeofence(lat, lng)
+        setGeofence(result)
+        setLocationStatus(result.isValid ? 'valid' : 'invalid')
       },
-      () => setLocationStatus('invalid'),
+      () => setLocationStatus('unavailable'),
       { enableHighAccuracy: true }
     )
   }, [router])
@@ -69,6 +75,7 @@ export default function ScanPage() {
         scan_id: scanId,
         driver_id: driver.id,
         staff_id: user.id,
+        pickup_point_id: geofence?.nearestPointId ?? null,
         scanned_at: new Date().toISOString(),
         latitude: location?.lat,
         longitude: location?.lng,
@@ -112,9 +119,12 @@ export default function ScanPage() {
         <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg
           ${locationStatus === 'valid' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
           <MapPin size={14} />
-          {locationStatus === 'checking' && 'Mengecek lokasi...'}
-          {locationStatus === 'valid' && 'Lokasi valid — Area Bandara Soetta'}
-          {locationStatus === 'invalid' && 'GPS tidak terdeteksi — scan tetap bisa dilakukan'}
+          {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
+          {locationStatus === 'valid' && geofence &&
+            `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`}
+          {locationStatus === 'invalid' && geofence &&
+            `Di luar radius geo-fence — ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Scan tetap bisa dilakukan.`}
+          {locationStatus === 'unavailable' && 'GPS tidak terdeteksi — scan tetap bisa dilakukan'}
         </div>
 
         {/* Scanner Area */}

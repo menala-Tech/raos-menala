@@ -38,6 +38,10 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('autoHapusRiwayatLama')
     .timeBased().atHour(1).onMonthDay(2).create()
 
+  // Sync foto absensi ke Google Drive setiap 30 menit
+  ScriptApp.newTrigger('syncSelfiePhotosToGDrive')
+    .timeBased().everyMinutes(30).create()
+
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
 }

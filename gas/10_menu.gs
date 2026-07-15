@@ -25,6 +25,7 @@ function onOpen() {
       SpreadsheetApp.getUi().createMenu('⚙️ Sistem')
         .addItem('Setup Semua Trigger', 'setupAllTriggers')
         .addItem('Backup Manual ke Drive', 'backupHarian')
+        .addItem('Sync Foto Absensi ke Drive', 'syncSelfiePhotosToGDrive')
         .addItem('Test Koneksi Supabase', 'testSupabaseConnection')
         .addItem('Hapus Riwayat Lama', 'autoHapusRiwayatLama')
     )

@@ -67,8 +67,9 @@ npm run dev
 3. Copy semua file dari `gas/` ke Apps Script editor
 4. Set Script Properties:
    - `SUPABASE_URL` = `https://vlievtojpmrbsmzlqswl.supabase.co`
-   - `SUPABASE_SERVICE_KEY` = (dari Supabase Dashboard → Settings → API)
-   - `BACKUP_FOLDER_ID` = ID folder Google Drive untuk backup
+   - `SUPABASE_SERVICE_KEY` = (dari Supabase Dashboard → Settings → API — WAJIB service_role key, bukan anon, supaya GAS bisa baca foto semua staff dari Storage)
+   - `BACKUP_FOLDER_ID` = ID folder Google Drive untuk backup (https://drive.google.com/drive/folders/1i_gSb1iCq9gV2qvxbsCxDcndp_28jMUA)
+   - `ABSENSI_PHOTOS_ROOT_ID` = ID folder Google Drive foto absensi (opsional — default sudah di-hardcode ke `1Aq-tMtVm89krrt1WNSpEy9k_cxAlsTfh` di 01_config.gs, https://drive.google.com/drive/folders/1Aq-tMtVm89krrt1WNSpEy9k_cxAlsTfh)
 5. Jalankan `setupAllTriggers()` → semua cron otomatis aktif
 
 ### 4. Vercel Deployment

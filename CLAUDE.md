@@ -19,7 +19,7 @@ RAOS (Rifim Airport Operation System) adalah PWA untuk operasional Vendor Maxim 
 ```
 RAOS/
 ├── apps/pwa/          ← Next.js PWA (sumber utama frontend)
-├── gas/               ← 10 Google Apps Script modules
+├── gas/               ← 11 Google Apps Script modules
 ├── sql/               ← Schema, RLS, Seed data
 ├── .github/workflows/ ← CI/CD pipeline
 ├── vercel.json        ← Konfigurasi Vercel
@@ -46,8 +46,14 @@ T2 - Pickup Point 3/2026-07 Juli/
 T3 - Pickup Point 1/2026-07 Juli/
 T3 - Pickup Point 2/2026-07 Juli/
 ```
-Subfolder bulan berikutnya (`2026-08 Agustus`, dst) dibuat sesuai kebutuhan — belum ada
-otomasi GAS untuk generate folder bulan baru otomatis, ini next step kalau diperlukan.
+Subfolder bulan berikutnya (`2026-08 Agustus`, dst) dibuat OTOMATIS oleh GAS
+(`gas/11_drive_sync.gs` → `getOrCreateSubfolder()`) saat pertama kali dibutuhkan.
+
+**Sync otomatis aktif:** Foto selfie diupload dari PWA ke Supabase Storage (bucket `selfies`),
+lalu `gas/11_drive_sync.gs` (`syncSelfiePhotosToGDrive`, trigger tiap 30 menit) memindahkan
+salinannya ke folder Pickup Point/Bulan yang sesuai secara otomatis. Kolom
+`selfie_in_drive_synced`/`selfie_out_drive_synced` di `raos_attendance` menandai foto yang
+sudah tersync (hindari duplikat).
 
 ### 2. File Spreadsheet RAOS
 Folder: https://drive.google.com/drive/folders/1o9PTsBtN7eb8U4xLyWe3zq1nQXufm_oL

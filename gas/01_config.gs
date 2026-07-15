@@ -25,6 +25,10 @@ const CONFIG = {
 
   DRIVE: {
     BACKUP_FOLDER_ID: PropertiesService.getScriptProperties().getProperty('BACKUP_FOLDER_ID'),
+    // Folder induk foto absensi selfie — sudah berisi 8 subfolder Pickup Point
+    // (T1/T2/T3 - Pickup Point X), masing-masing dengan subfolder bulan.
+    ABSENSI_PHOTOS_ROOT_ID: PropertiesService.getScriptProperties().getProperty('ABSENSI_PHOTOS_ROOT_ID')
+      || '1Aq-tMtVm89krrt1WNSpEy9k_cxAlsTfh',
   },
 }
 

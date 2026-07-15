@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
-import { ArrowLeft, ScanLine, MapPin, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import BarcodeScanner from '@/components/BarcodeScanner'
+import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
 
@@ -17,6 +18,7 @@ export default function ScanPage() {
   const [lastScan, setLastScan] = useState<any>(null)
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid'>('checking')
+  const [inputMode, setInputMode] = useState<'camera' | 'manual'>('manual')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export default function ScanPage() {
     )
   }, [router])
 
-  async function handleScan(barcode: string) {
+  const handleScan = useCallback(async (barcode: string) => {
     if (!barcode.trim() || !user) return
     setScanState('scanning')
 
@@ -84,7 +86,7 @@ export default function ScanPage() {
     }
 
     if (inputRef.current) inputRef.current.value = ''
-  }
+  }, [user, location])
 
   function reset() {
     setScanState('idle')
@@ -118,23 +120,47 @@ export default function ScanPage() {
         {/* Scanner Area */}
         {scanState === 'idle' && (
           <div className="card">
-            <div className="bg-gray-900 rounded-xl h-52 flex flex-col items-center justify-center gap-3 mb-4">
-              <ScanLine size={48} className="text-primary animate-pulse" />
-              <p className="text-white/60 text-sm">Arahkan kamera ke barcode</p>
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => setInputMode('camera')}
+                className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg transition-colors
+                  ${inputMode === 'camera' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500'}`}
+              >
+                <Camera size={14} /> Kamera
+              </button>
+              <button
+                onClick={() => setInputMode('manual')}
+                className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg transition-colors
+                  ${inputMode === 'manual' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500'}`}
+              >
+                <Keyboard size={14} /> Manual
+              </button>
             </div>
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Atau ketik barcode manual..."
-              className="input"
-              autoFocus
-              onKeyDown={e => {
-                if (e.key === 'Enter') handleScan((e.target as HTMLInputElement).value)
-              }}
-            />
-            <p className="text-xs text-gray-400 text-center mt-2">
-              Tekan Enter setelah scan atau ketik manual
-            </p>
+
+            {inputMode === 'camera' ? (
+              <>
+                <BarcodeScanner active={inputMode === 'camera'} onDetected={handleScan} />
+                <p className="text-xs text-gray-400 text-center mt-2">
+                  Arahkan kamera ke barcode/QR di stiker kendaraan
+                </p>
+              </>
+            ) : (
+              <>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Ketik barcode / ID Maxim..."
+                  className="input"
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleScan((e.target as HTMLInputElement).value)
+                  }}
+                />
+                <p className="text-xs text-gray-400 text-center mt-2">
+                  Tekan Enter setelah mengetik barcode
+                </p>
+              </>
+            )}
           </div>
         )}
 

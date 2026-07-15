@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import { ArrowLeft, Camera, MapPin, CheckCircle2, Clock, UserCheck } from 'lucide-react'
 import Link from 'next/link'
+import SelfieCapture from '@/components/SelfieCapture'
 import type { UserProfile, Attendance } from '@/types'
 
 export default function AbsensiPage() {
@@ -17,6 +18,7 @@ export default function AbsensiPage() {
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState<'form' | 'camera' | 'success'>('form')
   const [type, setType] = useState<'in' | 'out'>('in')
+  const [selfieBlob, setSelfieBlob] = useState<Blob | null>(null)
 
   useEffect(() => {
     async function init() {
@@ -56,11 +58,23 @@ export default function AbsensiPage() {
     setStep('camera')
   }
 
+  async function uploadSelfie(blob: Blob): Promise<string | null> {
+    if (!user) return null
+    const path = `${user.id}/${type}-${Date.now()}.jpg`
+    const { error } = await supabase.storage.from('selfies').upload(path, blob, {
+      contentType: 'image/jpeg',
+      upsert: false,
+    })
+    if (error) return null
+    return path
+  }
+
   async function submitAbsensi() {
-    if (!user || !location) return
+    if (!user || !location || !selfieBlob) return
     setLoading(true)
     const dateStr = new Date().toISOString().split('T')[0]
     const now = new Date().toISOString()
+    const selfiePath = await uploadSelfie(selfieBlob)
 
     if (type === 'in') {
       const { data } = await supabase
@@ -72,6 +86,7 @@ export default function AbsensiPage() {
           check_in_at: now,
           check_in_lat: location.lat,
           check_in_lng: location.lng,
+          selfie_in_url: selfiePath,
           is_location_valid: locationValid,
           status: 'hadir',
         }, { onConflict: 'staff_id,date' })
@@ -85,6 +100,7 @@ export default function AbsensiPage() {
           check_out_at: now,
           check_out_lat: location.lat,
           check_out_lng: location.lng,
+          selfie_out_url: selfiePath,
         })
         .eq('staff_id', user.id)
         .eq('date', dateStr)
@@ -93,6 +109,7 @@ export default function AbsensiPage() {
       setToday(data)
     }
     setLoading(false)
+    setSelfieBlob(null)
     setStep('success')
   }
 
@@ -189,19 +206,24 @@ export default function AbsensiPage() {
 
         {step === 'camera' && (
           <div className="card space-y-4">
-            <div className="bg-gray-900 rounded-xl h-64 flex flex-col items-center justify-center gap-3">
-              <Camera size={48} className="text-primary" />
-              <p className="text-white/60 text-sm">Ambil foto selfie untuk verifikasi</p>
-            </div>
+            <p className="text-xs text-gray-500 text-center">
+              Ambil foto selfie sebagai bukti absensi {type === 'in' ? 'masuk' : 'pulang'}
+            </p>
+            <SelfieCapture onCapture={blob => setSelfieBlob(blob)} />
+            {selfieBlob && (
+              <button
+                className="btn-primary flex items-center justify-center gap-2"
+                onClick={submitAbsensi}
+                disabled={loading}
+              >
+                <Camera size={18} />
+                {loading ? 'Menyimpan...' : 'Konfirmasi Absen'}
+              </button>
+            )}
             <button
-              className="btn-primary flex items-center justify-center gap-2"
-              onClick={submitAbsensi}
-              disabled={loading}
+              className="btn-secondary"
+              onClick={() => { setStep('form'); setSelfieBlob(null) }}
             >
-              <Camera size={18} />
-              {loading ? 'Menyimpan...' : 'Ambil Foto & Absen'}
-            </button>
-            <button className="btn-secondary" onClick={() => setStep('form')}>
               Batal
             </button>
           </div>

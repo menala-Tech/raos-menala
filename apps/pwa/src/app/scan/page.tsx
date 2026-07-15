@@ -93,7 +93,7 @@ export default function ScanPage() {
     }
 
     if (inputRef.current) inputRef.current.value = ''
-  }, [user, location])
+  }, [user, location, geofence])
 
   function reset() {
     setScanState('idle')

@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState, useRef } from 'react'
+import { Suspense, useCallback, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
@@ -58,8 +58,21 @@ function ChatPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
+  const loadMessages = useCallback(async (roomId: string) => {
+    const { data } = await supabase
+      .from('chat_messages')
+      .select('*, user_profiles(full_name, role)')
+      .eq('room_id', roomId)
+      .order('created_at')
+      .limit(50)
+    setMessages(data ?? [])
+    setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
+  }, [])
+
   useEffect(() => {
     if (!activeRoom) return
+    // Koneksi ke sistem eksternal (Supabase Realtime) — pola resmi React docs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadMessages(activeRoom.id)
 
     const channel = supabase
@@ -76,18 +89,7 @@ function ChatPageInner() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [activeRoom])
-
-  async function loadMessages(roomId: string) {
-    const { data } = await supabase
-      .from('chat_messages')
-      .select('*, user_profiles(full_name, role)')
-      .eq('room_id', roomId)
-      .order('created_at')
-      .limit(50)
-    setMessages(data ?? [])
-    setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
-  }
+  }, [activeRoom, loadMessages])
 
   async function sendMessage() {
     if (!text.trim() || !activeRoom || !user) return

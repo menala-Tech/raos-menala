@@ -25,6 +25,7 @@ export default function StatusPage() {
 
   useEffect(() => {
     async function load() {
+      setLoading(true)
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/'); return }
 
@@ -58,7 +59,6 @@ export default function StatusPage() {
       })
       setLoading(false)
     }
-    setLoading(true)
     load()
   }, [router, range])
 

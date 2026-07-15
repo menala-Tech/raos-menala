@@ -53,7 +53,7 @@ export default function AbsensiPage() {
   }, [router])
 
   async function handleAbsensi(absenType: 'in' | 'out') {
-    if (!user || !location) return
+    if (!user) return
     setType(absenType)
     setStep('camera')
   }
@@ -70,7 +70,7 @@ export default function AbsensiPage() {
   }
 
   async function submitAbsensi() {
-    if (!user || !location || !selfieBlob) return
+    if (!user || !selfieBlob) return
     setLoading(true)
     const dateStr = new Date().toISOString().split('T')[0]
     const now = new Date().toISOString()
@@ -84,8 +84,8 @@ export default function AbsensiPage() {
           branch_id: user.branch_id,
           date: dateStr,
           check_in_at: now,
-          check_in_lat: location.lat,
-          check_in_lng: location.lng,
+          check_in_lat: location?.lat ?? null,
+          check_in_lng: location?.lng ?? null,
           selfie_in_url: selfiePath,
           is_location_valid: locationValid,
           status: 'hadir',
@@ -98,8 +98,8 @@ export default function AbsensiPage() {
         .from('attendance')
         .update({
           check_out_at: now,
-          check_out_lat: location.lat,
-          check_out_lng: location.lng,
+          check_out_lat: location?.lat ?? null,
+          check_out_lng: location?.lng ?? null,
           selfie_out_url: selfiePath,
         })
         .eq('staff_id', user.id)
@@ -143,9 +143,11 @@ export default function AbsensiPage() {
 
         {/* Location */}
         <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg
-          ${locationValid ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+          ${locationValid ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
           <MapPin size={14} />
-          {locationValid ? 'Lokasi valid — Area Bandara Soetta' : 'GPS tidak aktif — Aktifkan lokasi'}
+          {locationValid
+            ? 'Lokasi valid — Area Bandara Soetta'
+            : 'GPS tidak terdeteksi — absensi tetap bisa dilakukan (ditandai tanpa lokasi)'}
         </div>
 
         {/* Status Absensi */}
@@ -177,7 +179,6 @@ export default function AbsensiPage() {
               <button
                 className="btn-primary flex items-center justify-center gap-2 !bg-green-600"
                 onClick={() => handleAbsensi('in')}
-                disabled={!locationValid}
               >
                 <UserCheck size={18} />
                 ABSENSI MASUK
@@ -188,7 +189,6 @@ export default function AbsensiPage() {
               <button
                 className="btn-primary flex items-center justify-center gap-2"
                 onClick={() => handleAbsensi('out')}
-                disabled={!locationValid}
               >
                 <UserCheck size={18} />
                 ABSENSI PULANG
@@ -240,7 +240,7 @@ export default function AbsensiPage() {
               <p className="font-bold text-primary text-xl">
                 {now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
               </p>
-              <p>Lokasi: Terminal 1 — Valid ✓</p>
+              <p>Lokasi: {locationValid ? 'Terdeteksi — Valid ✓' : 'Tidak terdeteksi (mode tanpa GPS)'}</p>
             </div>
             <button className="btn-primary" onClick={() => setStep('form')}>
               Kembali

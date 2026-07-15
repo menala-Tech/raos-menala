@@ -110,11 +110,11 @@ export default function ScanPage() {
       <div className="px-4 py-4 space-y-4">
         {/* Location Status */}
         <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg
-          ${locationStatus === 'valid' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+          ${locationStatus === 'valid' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
           <MapPin size={14} />
           {locationStatus === 'checking' && 'Mengecek lokasi...'}
           {locationStatus === 'valid' && 'Lokasi valid — Area Bandara Soetta'}
-          {locationStatus === 'invalid' && 'GPS tidak terdeteksi — Aktifkan lokasi'}
+          {locationStatus === 'invalid' && 'GPS tidak terdeteksi — scan tetap bisa dilakukan'}
         </div>
 
         {/* Scanner Area */}

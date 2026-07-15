@@ -27,7 +27,7 @@ export default function AdminPage() {
     const [{ data: scans }, { data: staff }] = await Promise.all([
       supabase
         .from('scan_orders')
-        .select('*, drivers(id_maxim, nama_driver, cabang), user_profiles!scan_orders_staff_id_fkey(full_name, staff_id)')
+        .select('*, raos_drivers(driver_id, name, vehicle_plate), user_profiles!scan_orders_staff_id_fkey(full_name, staff_id)')
         .eq('status', 'pending')
         .order('scanned_at', { ascending: false })
         .limit(100),
@@ -131,10 +131,10 @@ export default function AdminPage() {
             <div className="flex items-start justify-between mb-2">
               <div>
                 <p className="font-semibold text-sm text-gray-800">
-                  {scan.drivers?.nama_driver ?? 'Driver?'}
+                  {scan.raos_drivers?.name ?? 'Driver?'}
                 </p>
                 <p className="text-xs text-gray-400">
-                  {scan.scan_id} • {scan.drivers?.id_maxim}
+                  {scan.scan_id} • {scan.raos_drivers?.driver_id}
                 </p>
                 <p className="text-xs text-gray-400">
                   Scanner: {scan.user_profiles?.full_name} •{' '}

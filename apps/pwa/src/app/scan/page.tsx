@@ -54,11 +54,11 @@ export default function ScanPage() {
     if (!barcode.trim() || !user) return
     setScanState('scanning')
 
-    // Cari driver via barcode ATAU id_maxim
+    // Cari driver via barcode ATAU driver_id (tabel raos_drivers milik RAOS sendiri)
     const { data: driver } = await supabase
-      .from('drivers')
-      .select('id, id_maxim, nama_driver, cabang, vehicle_plate, barcode')
-      .or(`barcode.eq.${barcode.trim()},id_maxim.eq.${barcode.trim()}`)
+      .from('raos_drivers')
+      .select('id, driver_id, name, vehicle_plate, vehicle_type, barcode')
+      .or(`barcode.eq.${barcode.trim()},driver_id.eq.${barcode.trim()}`)
       .eq('is_active', true)
       .single()
 
@@ -81,7 +81,7 @@ export default function ScanPage() {
         longitude: location?.lng,
         status: 'pending',
       })
-      .select('*, drivers(id, id_maxim, nama_driver, vehicle_plate, cabang)')
+      .select('*, raos_drivers(id, driver_id, name, vehicle_plate, vehicle_type)')
       .single()
 
     if (error) {
@@ -194,8 +194,8 @@ export default function ScanPage() {
               <div className="space-y-2 text-sm">
                 {[
                   ['ID Scan', lastScan.scan_id],
-                  ['Driver', lastScan.drivers?.nama_driver],
-                  ['Kendaraan', lastScan.drivers?.vehicle_plate ?? lastScan.drivers?.cabang],
+                  ['Driver', lastScan.raos_drivers?.name],
+                  ['Kendaraan', lastScan.raos_drivers?.vehicle_plate ?? lastScan.raos_drivers?.vehicle_type],
                   ['Waktu', new Date(lastScan.scanned_at).toLocaleTimeString('id')],
                   ['Status', 'PENDING'],
                 ].map(([k, v]) => (

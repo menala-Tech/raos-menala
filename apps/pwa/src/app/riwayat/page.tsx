@@ -31,7 +31,7 @@ export default function RiwayatPage() {
       const [{ data: scanData }, { data: attData }] = await Promise.all([
         supabase
           .from('scan_orders')
-          .select('*, drivers(*)')
+          .select('*, raos_drivers(*)')
           .eq('staff_id', session.user.id)
           .order('scanned_at', { ascending: false })
           .limit(100),
@@ -51,7 +51,7 @@ export default function RiwayatPage() {
 
   const filteredScans = scans.filter(s => {
     if (statusFilter !== 'semua' && s.status !== statusFilter) return false
-    if (search && !(s as any).drivers?.name?.toLowerCase().includes(search.toLowerCase()) &&
+    if (search && !(s as any).raos_drivers?.name?.toLowerCase().includes(search.toLowerCase()) &&
         !s.scan_id.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
@@ -134,7 +134,7 @@ export default function RiwayatPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-sm text-gray-800 truncate">
-                  {(scan as any).drivers?.name ?? 'Driver tidak diketahui'}
+                  {(scan as any).raos_drivers?.name ?? 'Driver tidak diketahui'}
                 </p>
                 <span className={clsx(
                   'text-[10px] font-semibold px-2 py-0.5 rounded-full',

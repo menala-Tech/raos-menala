@@ -7,7 +7,7 @@ import AppShell from '@/components/layout/AppShell'
 import {
   ScanLine, Clock, UserCheck, MessageCircle,
   Target, CheckCircle2, AlertCircle, Bell,
-  TrendingUp, ShieldCheck
+  TrendingUp, ShieldCheck, PieChart, Car, FileBarChart
 } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
@@ -63,8 +63,13 @@ export default function DashboardPage() {
     { href: '/riwayat',  icon: Clock,        label: 'Riwayat',        color: 'bg-orange-500' },
     { href: '/chat',     icon: MessageCircle,label: 'Chat\nRoom',     color: 'bg-purple-500' },
     { href: '/kpi',      icon: TrendingUp,   label: 'KPI\nSaya',      color: 'bg-pink-500' },
+    { href: '/status',   icon: PieChart,     label: 'Status\nValidasi', color: 'bg-teal-500' },
+    { href: '/drivers',  icon: Car,          label: 'Kendaraan\n& Driver', color: 'bg-indigo-500' },
     ...(isAdmin
-      ? [{ href: '/admin', icon: ShieldCheck, label: 'Panel\nAdmin', color: 'bg-secondary' }]
+      ? [
+          { href: '/admin', icon: ShieldCheck, label: 'Panel\nAdmin', color: 'bg-secondary' },
+          { href: '/laporan', icon: FileBarChart, label: 'Laporan &\nAnalitik', color: 'bg-cyan-600' },
+        ]
       : []),
   ]
 
@@ -82,7 +87,7 @@ export default function DashboardPage() {
               {user?.role} • {(user as any)?.branches?.name ?? ''}
             </p>
           </div>
-          <button className="relative mt-1">
+          <Link href="/notifications" className="relative mt-1">
             <Bell size={22} className="text-white/70" />
             {unreadNotif > 0 && (
               <span className="absolute -top-1 -right-1 bg-red-500 text-white
@@ -90,7 +95,7 @@ export default function DashboardPage() {
                 {unreadNotif}
               </span>
             )}
-          </button>
+          </Link>
         </div>
 
         {/* Stats */}

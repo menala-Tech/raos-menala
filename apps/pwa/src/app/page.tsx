@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 import { Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react'
 
@@ -35,17 +36,36 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-secondary to-[#16213E] flex flex-col">
-      {/* Header */}
-      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-16 pb-8">
-        <div className="w-20 h-20 bg-primary rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-          <span className="text-white font-black text-3xl">M</span>
+    <div className="min-h-screen bg-secondary flex flex-col">
+      {/* Hero — foto bandara + branding Maxim */}
+      <div className="relative h-48 w-full overflow-hidden flex-shrink-0">
+        <Image
+          src="/images/hero-airport.png"
+          alt="Bandara Soekarno-Hatta"
+          fill
+          priority
+          className="object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-secondary/40 via-secondary/70 to-secondary" />
+      </div>
+
+      {/* Header — logo & judul */}
+      <div className="flex flex-col items-center px-6 -mt-16 pb-8 relative z-10">
+        <div className="w-24 h-24 rounded-full bg-white shadow-lg flex items-center justify-center mb-4 overflow-hidden">
+          <Image
+            src="/images/logo-menala.png"
+            alt="Logo MENALA"
+            width={96}
+            height={96}
+            priority
+            className="object-cover w-full h-full"
+          />
         </div>
-        <h1 className="text-white text-xl font-bold tracking-wide text-center">
-          MENALA AIRPORT
+        <h1 className="text-primary text-2xl font-black tracking-wide text-center">
+          MENALA
         </h1>
-        <p className="text-white/60 text-sm text-center mt-1">
-          OPERATION SYSTEM
+        <p className="text-white text-sm font-semibold text-center mt-0.5 tracking-wide">
+          AIRPORT OPERATION SYSTEM
         </p>
         <p className="text-white/40 text-xs text-center mt-4">
           Silakan masuk untuk melanjutkan

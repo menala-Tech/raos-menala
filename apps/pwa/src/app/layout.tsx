@@ -31,7 +31,8 @@ export default function RootLayout({
   return (
     <html lang="id" className="h-full">
       <head>
-        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+        <link rel="apple-touch-icon" href="/images/logo-menala.png" />
+        <link rel="icon" href="/images/logo-menala.png" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className={`${inter.className} h-full`}>

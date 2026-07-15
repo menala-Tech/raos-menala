@@ -26,19 +26,34 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
         const scanner = new Html5Qrcode('barcode-scanner-region')
         scannerRef.current = scanner
 
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 150 } },
-          (decodedText: string) => {
-            // Debounce: hindari deteksi berulang kode yang sama dalam 3 detik
-            const now = Date.now()
-            const last = lastDetectedRef.current
-            if (last && last.code === decodedText && now - last.at < 3000) return
-            lastDetectedRef.current = { code: decodedText, at: now }
-            onDetected(decodedText)
-          },
-          () => { /* frame tanpa barcode — abaikan, ini dipanggil terus-menerus */ }
-        )
+        const onFrame = (decodedText: string) => {
+          // Debounce: hindari deteksi berulang kode yang sama dalam 3 detik
+          const now = Date.now()
+          const last = lastDetectedRef.current
+          if (last && last.code === decodedText && now - last.at < 3000) return
+          lastDetectedRef.current = { code: decodedText, at: now }
+          onDetected(decodedText)
+        }
+        const onFailure = () => { /* frame tanpa barcode — abaikan, ini dipanggil terus-menerus */ }
+        const config = { fps: 10, qrbox: { width: 250, height: 150 } }
+
+        // Wajibkan kamera belakang (exact) — cocok untuk scan barcode kendaraan.
+        // Fallback ke ideal/kamera manapun hanya jika device benar-benar tidak punya kamera belakang.
+        try {
+          await scanner.start({ facingMode: { exact: 'environment' } }, config, onFrame, onFailure)
+        } catch {
+          try {
+            // Fallback: pilih kamera berlabel "back"/"belakang" dari daftar device
+            const cameras = await Html5Qrcode.getCameras()
+            const backCam = cameras.find(c => /back|belakang|rear|environment/i.test(c.label))
+            await scanner.start(
+              backCam ? backCam.id : { facingMode: 'environment' },
+              config, onFrame, onFailure
+            )
+          } catch {
+            await scanner.start({ facingMode: 'environment' }, config, onFrame, onFailure)
+          }
+        }
       } catch (e: any) {
         if (!cancelled) {
           setError('Tidak bisa mengakses kamera. Periksa izin kamera di browser.')

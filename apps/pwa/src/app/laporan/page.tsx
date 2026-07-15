@@ -46,7 +46,7 @@ export default function LaporanPage() {
         .select('scanned_at, status, gmv')
         .gte('scanned_at', since.toISOString()),
       supabase
-        .from('attendance')
+        .from('raos_attendance')
         .select('date')
         .gte('date', since.toISOString().split('T')[0]),
     ])

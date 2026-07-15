@@ -36,7 +36,7 @@ export default function RiwayatPage() {
           .order('scanned_at', { ascending: false })
           .limit(100),
         supabase
-          .from('attendance')
+          .from('raos_attendance')
           .select('*')
           .eq('staff_id', session.user.id)
           .order('date', { ascending: false })

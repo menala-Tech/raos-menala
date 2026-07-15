@@ -24,7 +24,7 @@ function syncAbsensiToSupabase() {
         status:           record['STATUS'] === 'Valid' ? 'hadir' : 'terlambat',
         is_location_valid: record['LOKASI'] !== '',
       }
-      callSupabase('attendance?on_conflict=staff_id,date', 'POST', payload)
+      callSupabase('raos_attendance?on_conflict=staff_id,date', 'POST', payload)
       synced++
     } catch (e) {
       errors++

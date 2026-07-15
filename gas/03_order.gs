@@ -4,7 +4,7 @@
 
 function importOrderFromSupabase() {
   const data = callSupabase(
-    'scan_orders?select=*,drivers(*),user_profiles(full_name)&order=scanned_at.desc&limit=500'
+    'scan_orders?select=*,raos_drivers(*),user_profiles(full_name)&order=scanned_at.desc&limit=500'
   )
   if (!data || !data.length) {
     logSistem('import', 'importOrderFromSupabase', 'warning', 'Tidak ada data order baru')
@@ -22,8 +22,8 @@ function importOrderFromSupabase() {
       o.scan_id,
       formatDate(new Date(o.scanned_at)),
       new Date(o.scanned_at).toLocaleTimeString('id-ID'),
-      o.drivers?.driver_id ?? '',
-      o.drivers?.name ?? '',
+      o.raos_drivers?.driver_id ?? '',
+      o.raos_drivers?.name ?? '',
       '',  // cabang
       1,   // jumlah order
       o.gmv ?? 0,

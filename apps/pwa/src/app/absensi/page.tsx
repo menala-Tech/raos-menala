@@ -36,7 +36,7 @@ export default function AbsensiPage() {
 
       const dateStr = new Date().toISOString().split('T')[0]
       const { data: att } = await supabase
-        .from('attendance')
+        .from('raos_attendance')
         .select('*')
         .eq('staff_id', session.user.id)
         .eq('date', dateStr)
@@ -86,7 +86,7 @@ export default function AbsensiPage() {
 
     if (type === 'in') {
       const { data } = await supabase
-        .from('attendance')
+        .from('raos_attendance')
         .upsert({
           staff_id: user.id,
           branch_id: user.branch_id,
@@ -104,7 +104,7 @@ export default function AbsensiPage() {
       setToday(data)
     } else {
       const { data } = await supabase
-        .from('attendance')
+        .from('raos_attendance')
         .update({
           check_out_at: now,
           check_out_lat: location?.lat ?? null,

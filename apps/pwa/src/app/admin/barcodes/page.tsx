@@ -16,7 +16,7 @@ interface Driver {
   barcode: string
   vehicle_type: string
   vehicle_plate: string
-  branches: { code: string; name: string } | null
+  branches: { code: string; name: string }[] | null
 }
 
 function QRCard({ driver }: { driver: Driver }) {
@@ -41,7 +41,7 @@ function QRCard({ driver }: { driver: Driver }) {
           {driver.barcode || driver.driver_id}
         </p>
         <span className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-          {driver.branches?.name ?? '-'}
+          {driver.branches?.[0]?.name ?? '-'}
         </span>
       </div>
     </div>
@@ -89,7 +89,7 @@ export default function BarcodesPage() {
 
   useEffect(() => {
     let result = drivers
-    if (branch !== 'all') result = result.filter(d => d.branches?.code === branch)
+    if (branch !== 'all') result = result.filter(d => d.branches?.[0]?.code === branch)
     if (search) result = result.filter(d =>
       d.name.toLowerCase().includes(search.toLowerCase()) ||
       d.driver_id.toLowerCase().includes(search.toLowerCase())

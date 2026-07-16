@@ -11,7 +11,7 @@ function getDashboardData() {
   const shOrder   = getSheet(CONFIG.SHEETS.ORDER)
 
   const absRows = shAbsensi.getDataRange().getValues().slice(1)
-    .filter(r => formatDate(r[0]) === today)
+    .filter(r => formatDate(r[1]) === today)  // r[1]=TANGGAL
 
   const ordRows = shOrder.getDataRange().getValues().slice(1)
     .filter(r => formatDate(r[1]) === today)

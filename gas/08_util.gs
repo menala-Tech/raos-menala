@@ -19,24 +19,16 @@ function formatCurrency(amount) {
   }).format(amount)
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function logActivity(userId, action, detail) {
   try {
     const sh = getSheet(CONFIG.SHEETS.LOG_ACTIVITY)
-    sh.appendRow([
-      new Date(),
-      new Date().toLocaleTimeString('id-ID'),
-      userId,
-      action,
-      detail,
-      '',  // IP address (GAS tidak bisa ambil IP client)
-    ])
-    // juga kirim ke Supabase
-    callSupabase('activity_logs', 'POST', {
-      user_id: userId,
-      action,
-      detail,
-      created_at: new Date().toISOString(),
-    })
+    sh.appendRow([new Date(), new Date().toLocaleTimeString('id-ID'), userId, action, detail, ''])
+    // Hanya kirim user_id ke Supabase kalau formatnya UUID valid
+    const payload = { action, detail, created_at: new Date().toISOString() }
+    if (UUID_REGEX.test(userId)) payload.user_id = userId
+    callSupabase('activity_logs', 'POST', payload)
   } catch (e) {
     Logger.log(`logActivity error: ${e.message}`)
   }

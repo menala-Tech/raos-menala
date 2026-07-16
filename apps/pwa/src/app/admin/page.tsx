@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, CheckCircle2, XCircle, ShieldCheck,
-  Users, ScanLine, Loader2
+  Users, ScanLine, Loader2, QrCode
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
@@ -90,6 +90,17 @@ export default function AdminPage() {
             <p className="text-white/50 text-xs capitalize">{user?.role} • Validasi & Manajemen</p>
           </div>
         </div>
+      </div>
+
+      {/* Quick link */}
+      <div className="px-4 pt-3 pb-1 bg-white border-b border-gray-100">
+        <Link
+          href="/admin/barcodes"
+          className="flex items-center gap-2 text-sm text-primary font-medium py-2 px-3 bg-primary/5 rounded-lg"
+        >
+          <QrCode size={16} />
+          Generator QR Code Driver
+        </Link>
       </div>
 
       {/* Tabs */}

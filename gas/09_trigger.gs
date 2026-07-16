@@ -10,8 +10,8 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('importOrderFromSupabase')
     .timeBased().everyHours(1).create()
 
-  // Sinkron absensi ke Supabase setiap 30 menit
-  ScriptApp.newTrigger('syncAbsensiToSupabase')
+  // Import absensi dari Supabase ke spreadsheet setiap 30 menit
+  ScriptApp.newTrigger('importAbsensiFromSupabase')
     .timeBased().everyMinutes(30).create()
 
   // Kirim reminder absensi jam 07:00

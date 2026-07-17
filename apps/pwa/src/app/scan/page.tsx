@@ -6,7 +6,8 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { checkGeofence, type GeofenceResult } from '@/lib/geo'
-import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
+import MenalaLogo from '@/components/MenalaLogo'
+import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera, Navigation } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
 
@@ -104,14 +105,13 @@ export default function ScanPage() {
   return (
     <AppShell>
       {/* Header */}
-      <div className="bg-secondary text-white px-4 pt-10 pb-4 flex items-center gap-3">
-        <Link href="/dashboard">
-          <ArrowLeft size={22} />
-        </Link>
-        <div>
-          <h1 className="font-bold text-base">Scan Barcode</h1>
-          <p className="text-white/50 text-xs">Validasi Order Driver</p>
+      <div className="bg-secondary text-white px-4 pt-10 pb-5">
+        <div className="flex items-center gap-3 mb-3">
+          <Link href="/dashboard" className="text-white/70"><ArrowLeft size={22} /></Link>
+          <div className="flex-1"><MenalaLogo size={28} showText /></div>
         </div>
+        <h1 className="font-black text-xl">Scan Barcode</h1>
+        <p className="text-white/50 text-xs mt-0.5">Validasi Order Driver — Bandara Soekarno-Hatta</p>
       </div>
 
       <div className="px-4 py-4 space-y-4">

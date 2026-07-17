@@ -4,10 +4,15 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
-import { ArrowLeft, Camera, MapPin, CheckCircle2, Clock, UserCheck } from 'lucide-react'
+import MenalaLogo from '@/components/MenalaLogo'
+import {
+  ArrowLeft, Camera, MapPin, CheckCircle2, Clock, UserCheck,
+  Fingerprint, Navigation, AlertTriangle
+} from 'lucide-react'
 import Link from 'next/link'
 import SelfieCapture from '@/components/SelfieCapture'
 import { checkGeofence, type GeofenceResult } from '@/lib/geo'
+import { detectCurrentShift, formatShiftTime, isLate, type Shift } from '@/lib/shift'
 import type { UserProfile, Attendance } from '@/types'
 
 export default function AbsensiPage() {
@@ -22,31 +27,37 @@ export default function AbsensiPage() {
   const [step, setStep] = useState<'form' | 'camera' | 'success'>('form')
   const [type, setType] = useState<'in' | 'out'>('in')
   const [selfieBlob, setSelfieBlob] = useState<Blob | null>(null)
+  const [shift, setShift] = useState<Shift | null>(null)
+  const [recentAttendance, setRecentAttendance] = useState<Attendance[]>([])
 
   useEffect(() => {
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/'); return }
       const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('*, branches(*)')
-        .eq('id', session.user.id)
-        .single()
+        .from('user_profiles').select('*, branches(*)').eq('id', session.user.id).single()
       setUser(profile)
+
+      // Shift otomatis (spec Absensi.md: Pagi/Siang/Malam by jam sekarang)
+      detectCurrentShift().then(setShift)
 
       const dateStr = new Date().toISOString().split('T')[0]
       const { data: att } = await supabase
-        .from('raos_attendance')
-        .select('*')
-        .eq('staff_id', session.user.id)
-        .eq('date', dateStr)
-        .single()
+        .from('raos_attendance').select('*').eq('staff_id', session.user.id).eq('date', dateStr).single()
       setToday(att)
+
+      // Riwayat absensi 7 hari terakhir (spec: Riwayat Absensi harian)
+      const { data: recent } = await supabase
+        .from('raos_attendance').select('*')
+        .eq('staff_id', session.user.id)
+        .neq('date', dateStr)
+        .order('date', { ascending: false })
+        .limit(7)
+      setRecentAttendance(recent ?? [])
 
       navigator.geolocation.getCurrentPosition(
         async pos => {
-          const lat = pos.coords.latitude
-          const lng = pos.coords.longitude
+          const { latitude: lat, longitude: lng } = pos.coords
           setLocation({ lat, lng })
           const result = await checkGeofence(lat, lng)
           setGeofence(result)
@@ -69,10 +80,7 @@ export default function AbsensiPage() {
   async function uploadSelfie(blob: Blob): Promise<string | null> {
     if (!user) return null
     const path = `${user.id}/${type}-${Date.now()}.jpg`
-    const { error } = await supabase.storage.from('selfies').upload(path, blob, {
-      contentType: 'image/jpeg',
-      upsert: false,
-    })
+    const { error } = await supabase.storage.from('selfies').upload(path, blob, { contentType: 'image/jpeg' })
     if (error) return null
     return path
   }
@@ -85,36 +93,23 @@ export default function AbsensiPage() {
     const selfiePath = await uploadSelfie(selfieBlob)
 
     if (type === 'in') {
-      const { data } = await supabase
-        .from('raos_attendance')
-        .upsert({
-          staff_id: user.id,
-          branch_id: user.branch_id,
-          date: dateStr,
-          check_in_at: now,
-          check_in_lat: location?.lat ?? null,
-          check_in_lng: location?.lng ?? null,
-          pickup_point_id: geofence?.nearestPointId ?? null,
-          selfie_in_url: selfiePath,
-          is_location_valid: locationValid,
-          status: 'hadir',
-        }, { onConflict: 'staff_id,date' })
-        .select()
-        .single()
+      // Status otomatis: terlambat jika melewati start shift + toleransi (spec Absensi.md)
+      const status = shift && isLate(shift, new Date()) ? 'terlambat' : 'hadir'
+      const { data } = await supabase.from('raos_attendance').upsert({
+        staff_id: user.id, branch_id: user.branch_id, date: dateStr,
+        shift_id: shift?.id ?? null,
+        check_in_at: now,
+        check_in_lat: location?.lat ?? null, check_in_lng: location?.lng ?? null,
+        pickup_point_id: geofence?.nearestPointId ?? null,
+        selfie_in_url: selfiePath, is_location_valid: locationValid, status,
+      }, { onConflict: 'staff_id,date' }).select().single()
       setToday(data)
     } else {
-      const { data } = await supabase
-        .from('raos_attendance')
-        .update({
-          check_out_at: now,
-          check_out_lat: location?.lat ?? null,
-          check_out_lng: location?.lng ?? null,
-          selfie_out_url: selfiePath,
-        })
-        .eq('staff_id', user.id)
-        .eq('date', dateStr)
-        .select()
-        .single()
+      const { data } = await supabase.from('raos_attendance').update({
+        check_out_at: now,
+        check_out_lat: location?.lat ?? null, check_out_lng: location?.lng ?? null,
+        selfie_out_url: selfiePath,
+      }).eq('staff_id', user.id).eq('date', dateStr).select().single()
       setToday(data)
     }
     setLoading(false)
@@ -123,148 +118,285 @@ export default function AbsensiPage() {
   }
 
   const now = new Date()
-  const hasCheckedIn = !!today?.check_in_at
+  const hasCheckedIn  = !!today?.check_in_at
   const hasCheckedOut = !!today?.check_out_at
+  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const dateStr = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
   return (
     <AppShell>
-      <div className="bg-secondary text-white px-4 pt-10 pb-4 flex items-center gap-3">
-        <Link href="/dashboard"><ArrowLeft size={22} /></Link>
+      {/* HEADER */}
+      <div className="bg-secondary text-white px-4 pt-10 pb-5">
+        <div className="flex items-center gap-3 mb-3">
+          <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
+          <div className="flex-1">
+            <MenalaLogo size={28} showText />
+          </div>
+        </div>
         <div>
-          <h1 className="font-bold text-base">Absensi</h1>
-          <p className="text-white/50 text-xs">
-            {now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
+          <h1 className="font-black text-xl tracking-wide">Absensi Staff</h1>
+          <p className="text-white/50 text-xs mt-0.5">{dateStr}</p>
+        </div>
+
+        {/* Location badge */}
+        <div className={`mt-3 flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl
+          ${locationValid
+            ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+            : locationStatus === 'checking'
+              ? 'bg-white/10 text-white/60 border border-white/20'
+              : 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30'}`}
+        >
+          <Navigation size={13} className="flex-shrink-0" />
+          {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
+          {locationStatus === 'unavailable' && 'GPS tidak terdeteksi — absensi tetap bisa dilakukan'}
+          {locationStatus === 'done' && geofence && (
+            geofence.isValid
+              ? `✓ Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`
+              : `${geofence.nearestPointName} terdekat — ${geofence.distanceMeters}m (di luar radius)`
+          )}
         </div>
       </div>
 
       <div className="px-4 py-4 space-y-4">
-        {/* Shift Info */}
+        {/* Shift Card */}
         <div className="card flex items-center gap-3">
-          <div className="bg-primary/10 p-2.5 rounded-xl">
-            <Clock size={20} className="text-primary" />
+          <div className="bg-primary/10 p-3 rounded-xl">
+            <Clock size={22} className="text-primary" />
           </div>
-          <div>
-            <p className="text-xs text-gray-500">Shift Hari Ini</p>
-            <p className="font-semibold text-gray-800">Pagi — 07:00 s/d 15:00</p>
+          <div className="flex-1">
+            <p className="text-[11px] text-gray-500 font-medium">Shift Hari Ini (Otomatis)</p>
+            <p className="font-bold text-gray-800">
+              {shift ? `${shift.name} — ${formatShiftTime(shift)}` : 'Mendeteksi shift...'}
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {(user as any)?.branches?.name ?? 'Menala Airport'}
+              {shift && ` • Toleransi telat ${shift.tolerance_minutes} menit`}
+            </p>
           </div>
         </div>
 
-        {/* Location — validasi geo-fence sesuai radius per pickup point */}
-        <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg
-          ${locationValid ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
-          <MapPin size={14} />
-          {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
-          {locationStatus === 'unavailable' &&
-            'GPS tidak terdeteksi — absensi tetap bisa dilakukan (ditandai tanpa lokasi)'}
-          {locationStatus === 'done' && geofence && (
-            geofence.isValid
-              ? `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`
-              : `Di luar radius geo-fence — ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Absensi tetap bisa dilakukan.`
-          )}
-        </div>
-
-        {/* Status Absensi */}
+        {/* ===== STEP: FORM ===== */}
         {step === 'form' && (
-          <div className="space-y-3">
-            <div className="card">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Status Absensi</h3>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">Masuk</span>
-                  <span className={`text-xs font-semibold ${hasCheckedIn ? 'text-green-600' : 'text-gray-400'}`}>
-                    {today?.check_in_at
-                      ? new Date(today.check_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-                      : '— Belum absen'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">Pulang</span>
-                  <span className={`text-xs font-semibold ${hasCheckedOut ? 'text-green-600' : 'text-gray-400'}`}>
-                    {today?.check_out_at
-                      ? new Date(today.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-                      : '— Belum absen'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
+          <>
+            {/* Absensi MASUK card */}
             {!hasCheckedIn && (
-              <button
-                className="btn-primary flex items-center justify-center gap-2 !bg-green-600"
-                onClick={() => handleAbsensi('in')}
-              >
-                <UserCheck size={18} />
-                ABSENSI MASUK
-              </button>
+              <div className="card space-y-4">
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 font-medium">ABSENSI MASUK</p>
+                  <p className="text-3xl font-black text-secondary mt-1">{timeStr} WIB</p>
+                  <p className="text-xs text-gray-400 mt-1">{dateStr}</p>
+                </div>
+                {locationStatus === 'done' && geofence && (
+                  <div className={`text-center text-xs font-bold py-1.5 rounded-lg
+                    ${geofence.isValid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                    {geofence.isValid
+                      ? `✓ DALAM AREA — ${geofence.nearestPointName}`
+                      : `⚠ ${geofence.nearestPointName} — ${geofence.distanceMeters}m dari titik`}
+                  </div>
+                )}
+                <button
+                  className="btn-primary !bg-green-600 flex items-center justify-center gap-3"
+                  onClick={() => handleAbsensi('in')}
+                >
+                  <Fingerprint size={20} />
+                  ABSENSI MASUK
+                </button>
+                <p className="text-[10px] text-gray-400 text-center">
+                  Anda berada di area yang valid. Pastikan lokasi sesuai sebelum absen.
+                </p>
+              </div>
             )}
 
+            {/* Status setelah masuk */}
+            {hasCheckedIn && (
+              <div className="card">
+                <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                  <CheckCircle2 size={16} className="text-green-500" />
+                  Status Absensi Hari Ini
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-green-500" />
+                      <span className="text-xs text-gray-600 font-medium">Masuk</span>
+                    </div>
+                    <span className="text-sm font-black text-green-700">
+                      {new Date(today!.check_in_at!).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${hasCheckedOut ? 'bg-primary' : 'bg-gray-300'}`} />
+                      <span className="text-xs text-gray-600 font-medium">Pulang</span>
+                    </div>
+                    <span className={`text-sm font-bold ${hasCheckedOut ? 'text-primary' : 'text-gray-400'}`}>
+                      {today?.check_out_at
+                        ? `${new Date(today.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
+                        : '— Belum absen'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ABSENSI PULANG button */}
             {hasCheckedIn && !hasCheckedOut && (
-              <button
-                className="btn-primary flex items-center justify-center gap-2"
-                onClick={() => handleAbsensi('out')}
-              >
-                <UserCheck size={18} />
-                ABSENSI PULANG
-              </button>
+              <div className="card space-y-4">
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 font-medium">ABSENSI PULANG</p>
+                  <p className="text-3xl font-black text-secondary mt-1">{timeStr} WIB</p>
+                </div>
+                <button
+                  className="btn-primary flex items-center justify-center gap-3"
+                  onClick={() => handleAbsensi('out')}
+                >
+                  <Fingerprint size={20} />
+                  ABSENSI PULANG
+                </button>
+                <p className="text-[10px] text-gray-400 text-center">
+                  Anda berada di area yang valid. Pastikan lokasi sesuai sebelum absen.
+                </p>
+              </div>
             )}
 
             {hasCheckedIn && hasCheckedOut && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
-                <CheckCircle2 size={32} className="text-green-500 mx-auto mb-2" />
-                <p className="font-semibold text-green-700">Absensi Hari Ini Selesai</p>
+              <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-5 text-center space-y-2">
+                <CheckCircle2 size={48} className="text-green-500 mx-auto" />
+                <p className="font-black text-green-700 text-base">Absensi Hari Ini Selesai</p>
+                <p className="text-xs text-green-600">Data absensi tersimpan di server</p>
               </div>
             )}
-          </div>
+          </>
         )}
 
+        {/* ===== STEP: CAMERA ===== */}
         {step === 'camera' && (
           <div className="card space-y-4">
-            <p className="text-xs text-gray-500 text-center">
-              Ambil foto selfie sebagai bukti absensi {type === 'in' ? 'masuk' : 'pulang'}
-            </p>
+            <div className="text-center">
+              <Camera size={24} className="text-primary mx-auto mb-2" />
+              <p className="font-bold text-gray-800 text-sm">Foto Selfie</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Ambil foto selfie untuk verifikasi absensi {type === 'in' ? 'masuk' : 'pulang'}
+              </p>
+              <p className="text-[10px] text-gray-400 mt-0.5">Pastikan wajah terlihat jelas</p>
+            </div>
             <SelfieCapture onCapture={blob => setSelfieBlob(blob)} />
             {selfieBlob && (
               <button
                 className="btn-primary flex items-center justify-center gap-2"
-                onClick={submitAbsensi}
-                disabled={loading}
+                onClick={submitAbsensi} disabled={loading}
               >
-                <Camera size={18} />
-                {loading ? 'Menyimpan...' : 'Konfirmasi Absen'}
+                <UserCheck size={18} />
+                {loading ? 'Menyimpan...' : 'Konfirmasi Absensi'}
               </button>
             )}
-            <button
-              className="btn-secondary"
-              onClick={() => { setStep('form'); setSelfieBlob(null) }}
-            >
+            <button className="btn-secondary" onClick={() => { setStep('form'); setSelfieBlob(null) }}>
               Batal
             </button>
           </div>
         )}
 
+        {/* ===== STEP: SUCCESS ===== */}
         {step === 'success' && (
-          <div className="card text-center space-y-3">
-            <CheckCircle2 size={56} className="text-green-500 mx-auto" />
-            <h2 className="font-bold text-gray-800 text-lg">
-              Absensi {type === 'in' ? 'Masuk' : 'Pulang'} Berhasil!
-            </h2>
-            <div className="text-sm text-gray-600 space-y-1">
-              <p>{now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-              <p className="font-bold text-primary text-xl">
-                {now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-              </p>
-              <p>
-                Lokasi: {geofence
-                  ? `${geofence.nearestPointName} — ${locationValid ? 'Dalam radius ✓' : `${geofence.distanceMeters}m di luar radius`}`
-                  : 'Tidak terdeteksi (mode tanpa GPS)'}
-              </p>
+          <div className="card text-center space-y-4">
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2 size={48} className="text-green-500" />
+            </div>
+            <div>
+              <h2 className="font-black text-gray-800 text-lg">
+                Absensi {type === 'in' ? 'Masuk' : 'Pulang'} Berhasil!
+              </h2>
+              <p className="text-sm text-gray-500 font-medium mt-1">Berhasil Dicatat</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4 text-left space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-500">Tanggal</span>
+                <span className="font-semibold text-gray-800">
+                  {now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-500">Jam</span>
+                <span className="font-black text-primary text-base">
+                  {now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                </span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-500">Lokasi</span>
+                <span className="font-semibold text-gray-800">
+                  {geofence?.nearestPointName ?? 'Tidak terdeteksi'}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-500">Status Lokasi</span>
+                <span className={`font-semibold ${locationValid ? 'text-green-600' : 'text-yellow-600'}`}>
+                  {locationValid ? '✓ Dalam Area (Valid)' : 'Di Luar Radius'}
+                </span>
+              </div>
             </div>
             <button className="btn-primary" onClick={() => setStep('form')}>
-              Kembali
+              KEMBALI KE DASHBOARD
             </button>
           </div>
         )}
+
+        {/* Riwayat Absensi 7 hari terakhir (spec Absensi.md: Riwayat harian) */}
+        {step === 'form' && recentAttendance.length > 0 && (
+          <div className="card">
+            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+              <Clock size={16} className="text-primary" />
+              Riwayat Absensi
+            </h3>
+            <div className="space-y-3">
+              {recentAttendance.map(att => (
+                <div key={att.id} className="border-b border-gray-100 last:border-0 pb-2 last:pb-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-bold text-gray-700">
+                      {new Date(att.date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}
+                    </p>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full capitalize
+                      ${att.status === 'hadir' ? 'bg-green-100 text-green-700'
+                        : att.status === 'terlambat' ? 'bg-yellow-100 text-yellow-700'
+                        : 'bg-gray-100 text-gray-500'}`}>
+                      {att.status}
+                    </span>
+                  </div>
+                  <div className="flex gap-4">
+                    <span className="text-[11px] text-gray-500">
+                      <span className="text-green-600 font-semibold">Masuk:</span>{' '}
+                      {att.check_in_at
+                        ? new Date(att.check_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                        : '—'}
+                    </span>
+                    <span className="text-[11px] text-gray-500">
+                      <span className="text-primary font-semibold">Pulang:</span>{' '}
+                      {att.check_out_at
+                        ? new Date(att.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Footer info */}
+        <div className="grid grid-cols-3 gap-2 pt-2">
+          {[
+            { icon: Navigation, label: 'GPS Validation', sub: 'Pastikan di area valid' },
+            { icon: Camera, label: 'Foto Selfie', sub: 'Verifikasi wajah & waktu' },
+            { icon: CheckCircle2, label: 'Real-Time Sync', sub: 'Data langsung tersimpan' },
+          ].map(({ icon: Icon, label, sub }) => (
+            <div key={label} className="text-center">
+              <div className="bg-gray-100 rounded-xl p-2.5 inline-flex mb-1">
+                <Icon size={16} className="text-gray-500" />
+              </div>
+              <p className="text-[10px] font-bold text-gray-600">{label}</p>
+              <p className="text-[9px] text-gray-400">{sub}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </AppShell>
   )

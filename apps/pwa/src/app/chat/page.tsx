@@ -8,7 +8,33 @@ import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
 import { ArrowLeft, Send, MessageCircle, Users, Bell, Search } from 'lucide-react'
 import Link from 'next/link'
-import type { ChatRoom, ChatMessage, UserProfile } from '@/types'
+import type { ChatRoom, ChatRoomWithMeta, ChatMessage, UserProfile } from '@/types'
+
+type FilterTab = 'semua' | 'grup' | 'lokasi' | 'pribadi'
+
+// Kategori mana yang termasuk "Grup" (bukan lokasi, bukan private DM)
+const GRUP_CATEGORIES = ['umum', 'operasional', 'driver_support', 'proyek']
+
+function matchesFilter(room: ChatRoomWithMeta, tab: FilterTab): boolean {
+  if (tab === 'semua') return true
+  if (tab === 'lokasi') return room.category === 'lokasi'
+  if (tab === 'pribadi') return room.category === 'pribadi'
+  if (tab === 'grup') return GRUP_CATEGORIES.includes(room.category)
+  return true
+}
+
+function formatLastMessageTime(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+  const diffMs = now.getTime() - d.getTime()
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  if (days === 1) return 'Kemarin'
+  if (days < 7) return d.toLocaleDateString('id-ID', { weekday: 'short' })
+  return d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
 import clsx from 'clsx'
 
 const ROOM_COLORS: Record<string, { bg: string; text: string; label: string }> = {
@@ -36,12 +62,23 @@ function ChatPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [user, setUser] = useState<UserProfile | null>(null)
-  const [rooms, setRooms] = useState<ChatRoom[]>([])
+  const [rooms, setRooms] = useState<ChatRoomWithMeta[]>([])
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  const [filterTab, setFilterTab] = useState<FilterTab>('semua')
+  const [searchQuery, setSearchQuery] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const loadRooms = useCallback(async () => {
+    const { data, error } = await supabase.rpc('get_chat_rooms_for_user')
+    if (error) {
+      console.error('loadRooms error:', error.message)
+      return
+    }
+    setRooms((data ?? []) as ChatRoomWithMeta[])
+  }, [])
 
   useEffect(() => {
     async function init() {
@@ -51,19 +88,24 @@ function ChatPageInner() {
         .from('user_profiles').select('*, branches(*)').eq('id', session.user.id).single()
       setUser(profile)
 
-      const { data: roomData } = await supabase
-        .from('chat_rooms').select('*').eq('is_active', true).order('name')
-      setRooms(roomData ?? [])
+      await loadRooms()
 
       const targetCategory = searchParams.get('room')
       if (targetCategory) {
-        const match = roomData?.find(r => r.category === targetCategory)
-        if (match) setActiveRoom(match)
+        const { data: roomData } = await supabase
+          .from('chat_rooms').select('*').eq('category', targetCategory).eq('is_active', true).limit(1).single()
+        if (roomData) setActiveRoom(roomData)
       }
     }
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
+
+  // Refresh list room saat balik ke list view (activeRoom jadi null) — supaya
+  // unread count + last message ke-update setelah user keluar dari room chat
+  useEffect(() => {
+    if (activeRoom === null && user) loadRooms()
+  }, [activeRoom, user, loadRooms])
 
   const loadMessages = useCallback(async (roomId: string) => {
     const { data } = await supabase
@@ -77,6 +119,11 @@ function ChatPageInner() {
   useEffect(() => {
     if (!activeRoom) return
     loadMessages(activeRoom.id)
+    // Mark room sebagai read (upsert last_read_at = now) supaya unread_count = 0
+    // saat user balik ke list view. Fire-and-forget, tidak block UI.
+    supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id }).then(({ error }) => {
+      if (error) console.error('mark_chat_room_read error:', error.message)
+    })
     const channel = supabase
       .channel(`room:${activeRoom.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
@@ -85,6 +132,9 @@ function ChatPageInner() {
           // Dedup: kalau id-nya sudah ada (optimistic append di sendMessage), skip
           setMessages(prev => (prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]))
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+          // User sedang di room ini — mark read juga supaya pesan baru dari orang lain
+          // tidak jadi unread setelah keluar
+          supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -224,59 +274,88 @@ function ChatPageInner() {
           <input
             type="text"
             placeholder="Cari room atau pesan..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
             className="w-full bg-white/10 text-white placeholder-white/40 text-sm
                        pl-9 pr-3 py-2 rounded-xl border border-white/20 focus:outline-none"
-            readOnly
           />
         </div>
       </div>
 
       {/* Category filter */}
-      <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-2 overflow-x-auto">
-        {['Semua', 'Grup', 'Lokasi', 'Pribadi'].map(cat => (
-          <button key={cat}
-            className={clsx(
-              'flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold',
-              cat === 'Semua' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500'
-            )}>
-            {cat}
-          </button>
-        ))}
-      </div>
-
-      <div className="px-4 py-3 space-y-2">
-        {rooms.length === 0 && (
-          <div className="text-center py-10 text-gray-400">
-            <MessageCircle size={32} className="mx-auto mb-2 opacity-30" />
-            <p className="text-sm">Tidak ada room aktif</p>
-          </div>
-        )}
-        {rooms.map(room => {
-          const style = getRoomStyle(room.category)
+      <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-2 overflow-x-auto sticky top-[8.5rem] z-20">
+        {(['semua', 'grup', 'lokasi', 'pribadi'] as FilterTab[]).map(cat => {
+          const active = filterTab === cat
           return (
-            <button
-              key={room.id}
-              onClick={() => setActiveRoom(room)}
-              className="card w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
-            >
-              {/* Avatar */}
-              <div className={`w-11 h-11 rounded-full flex items-center justify-center font-black text-base flex-shrink-0 shadow-sm ${style.bg} ${style.text}`}>
-                {room.name.charAt(0)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <p className="font-bold text-sm text-gray-800 truncate">{room.name}</p>
-                  <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">
-                    {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-400 capitalize mt-0.5 truncate">
-                  {room.category} · {room.description ?? 'Room staff MENALA'}
-                </p>
-              </div>
+            <button key={cat}
+              onClick={() => setFilterTab(cat)}
+              className={clsx(
+                'flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold capitalize transition-colors',
+                active ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500'
+              )}>
+              {cat}
             </button>
           )
         })}
+      </div>
+
+      <div className="px-4 py-3 space-y-2">
+        {(() => {
+          const q = searchQuery.trim().toLowerCase()
+          const filtered = rooms
+            .filter(r => matchesFilter(r, filterTab))
+            .filter(r => !q || r.name.toLowerCase().includes(q) ||
+              (r.last_message_content ?? '').toLowerCase().includes(q))
+          if (filtered.length === 0) {
+            return (
+              <div className="text-center py-10 text-gray-400">
+                <MessageCircle size={32} className="mx-auto mb-2 opacity-30" />
+                <p className="text-sm">
+                  {rooms.length === 0 ? 'Tidak ada room aktif' : 'Tidak ada room yang cocok'}
+                </p>
+              </div>
+            )
+          }
+          return filtered.map(room => {
+            const style = getRoomStyle(room.category)
+            const preview = room.last_message_content
+              ? (room.last_message_sender ? `${room.last_message_sender}: ${room.last_message_content}` : room.last_message_content)
+              : (room.description ?? 'Belum ada pesan')
+            return (
+              <button
+                key={room.id}
+                onClick={() => setActiveRoom(room)}
+                className="card w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
+              >
+                {/* Avatar */}
+                <div className={`w-11 h-11 rounded-full flex items-center justify-center font-black text-base flex-shrink-0 shadow-sm ${style.bg} ${style.text}`}>
+                  {room.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={clsx('font-bold text-sm truncate', room.unread_count > 0 ? 'text-gray-900' : 'text-gray-800')}>
+                      {room.name}
+                    </p>
+                    <span className={clsx('text-[10px] flex-shrink-0', room.unread_count > 0 ? 'text-primary font-bold' : 'text-gray-400')}>
+                      {formatLastMessageTime(room.last_message_at)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                    <p className={clsx('text-xs truncate flex-1',
+                      room.unread_count > 0 ? 'text-gray-700 font-semibold' : 'text-gray-400')}>
+                      {preview}
+                    </p>
+                    {room.unread_count > 0 && (
+                      <span className="flex-shrink-0 bg-primary text-secondary text-[10px] font-bold min-w-[18px] h-[18px] px-1.5 rounded-full flex items-center justify-center">
+                        {room.unread_count > 99 ? '99+' : room.unread_count}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            )
+          })
+        })()}
 
         <div className="pt-4 text-center">
           <p className="text-[10px] text-gray-400">

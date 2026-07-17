@@ -85,6 +85,14 @@ export interface ChatRoom {
   is_active: boolean
 }
 
+/** Return type dari RPC get_chat_rooms_for_user() */
+export interface ChatRoomWithMeta extends ChatRoom {
+  last_message_content: string | null
+  last_message_at: string | null
+  last_message_sender: string | null
+  unread_count: number
+}
+
 export interface ChatMessage {
   id: string
   room_id: string

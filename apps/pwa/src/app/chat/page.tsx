@@ -81,7 +81,9 @@ function ChatPageInner() {
       .channel(`room:${activeRoom.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
         payload => {
-          setMessages(prev => [...prev, payload.new as ChatMessage])
+          const newMsg = payload.new as ChatMessage
+          // Dedup: kalau id-nya sudah ada (optimistic append di sendMessage), skip
+          setMessages(prev => (prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]))
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
         })
       .subscribe()
@@ -91,15 +93,23 @@ function ChatPageInner() {
   async function sendMessage() {
     if (!text.trim() || !activeRoom || !user) return
     setSending(true)
-    const { error } = await supabase.from('chat_messages').insert({
-      room_id: activeRoom.id, sender_id: user.id, type: 'text', content: text.trim(),
-    })
+    const content = text.trim()
+    setText('')
+    const { data, error } = await supabase.from('chat_messages').insert({
+      room_id: activeRoom.id, sender_id: user.id, type: 'text', content,
+    }).select('*, user_profiles(full_name, role)').single()
     setSending(false)
     if (error) {
       alert('Gagal kirim pesan:\n' + error.message)
+      setText(content) // kembalikan text supaya user bisa retry
       return
     }
-    setText('')
+    // Optimistic append: pastikan pesan langsung tampil tanpa nunggu round-trip realtime
+    // (kalau realtime tetap fire, dedup di handler)
+    if (data) {
+      setMessages(prev => (prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage]))
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
   }
 
   /* ===== ROOM CHAT VIEW ===== */
@@ -189,7 +199,7 @@ function ChatPageInner() {
   return (
     <AppShell>
       {/* Header */}
-      <div className="bg-secondary text-white px-4 pt-10 pb-5">
+      <div className="bg-secondary text-white px-4 pt-10 pb-5 sticky top-0 z-30">
         <div className="flex items-center gap-3 mb-3">
           <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
           <div className="flex-1">

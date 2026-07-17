@@ -108,7 +108,7 @@ export default function SettingsPage() {
     }
     return (
       <AppShell>
-        <div className="bg-secondary text-white px-4 pt-10 pb-4 flex items-center gap-3">
+        <div className="bg-secondary text-white px-4 pt-10 pb-4 flex items-center gap-3 sticky top-0 z-30">
           <button onClick={() => setSection(null)} className="text-white/70">
             <ChevronLeft size={24} />
           </button>
@@ -147,7 +147,7 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
-      <div className="bg-secondary text-white px-4 pt-10 pb-5">
+      <div className="bg-secondary text-white px-4 pt-10 pb-5 sticky top-0 z-30">
         <div className="flex items-center gap-3 mb-4">
           <Link href="/dashboard" className="text-white/70">
             <ChevronLeft size={24} />

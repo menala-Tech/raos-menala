@@ -31,7 +31,7 @@ export default function SelfieCapture({ onCapture }: Props) {
 
   useEffect(() => {
     // Koneksi ke sistem eksternal (kamera) — pola resmi React docs untuk effect.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     startCamera()
     return () => {
       streamRef.current?.getTracks().forEach(t => t.stop())

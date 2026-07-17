@@ -132,7 +132,7 @@ export default function RiwayatPage() {
   return (
     <AppShell>
       {/* HEADER */}
-      <div className="bg-secondary text-white px-4 pt-10 pb-4">
+      <div className="bg-secondary text-white px-4 pt-10 pb-4 sticky top-0 z-30">
         <div className="flex items-center gap-3 mb-3">
           <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
           <div className="flex-1"><MenalaLogo size={28} showText /></div>

@@ -84,7 +84,7 @@ export default function DashboardPage() {
   return (
     <AppShell>
       {/* ===== HEADER ===== */}
-      <div className="bg-secondary text-white px-4 pt-10 pb-5">
+      <div className="bg-secondary text-white px-4 pt-10 pb-5 sticky top-0 z-30">
         {/* Top row — logo + notif */}
         <div className="flex items-center justify-between mb-4">
           <MenalaLogo size={36} showText />

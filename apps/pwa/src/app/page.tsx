@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
-import MenalaLogo from '@/components/MenalaLogo'
+import MenalaLogo, { MenalaMark } from '@/components/MenalaLogo'
 import { Eye, EyeOff, Lock, Mail, ShieldCheck, Send, ArrowLeft, Loader2 } from 'lucide-react'
 
 type Mode = 'password' | 'magic-link' | 'forgot-password'
@@ -109,10 +109,8 @@ export default function LoginPage() {
         {/* Brand strip di atas hero */}
         <div className="absolute top-10 left-0 right-0 px-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-primary/60 shadow bg-white">
-              <Image src="/images/logo-menala.png" alt="MENALA" width={32} height={32} className="object-cover" priority />
-            </div>
-            <p className="text-primary font-black text-sm tracking-widest">MENALA</p>
+            <MenalaMark size={30} />
+            <p className="text-white font-black text-sm tracking-widest">MENALA</p>
           </div>
           <span className="text-white/50 text-[10px] font-medium tracking-widest">by maxim</span>
         </div>
@@ -120,19 +118,14 @@ export default function LoginPage() {
 
       {/* Logo & Title */}
       <div className="flex flex-col items-center px-6 -mt-14 pb-6 relative z-10">
-        <div className="w-28 h-28 rounded-full bg-white shadow-2xl flex items-center justify-center overflow-hidden
-                        ring-4 ring-primary/50 ring-offset-4 ring-offset-secondary">
-          <Image
-            src="/images/logo-menala.png"
-            alt="Logo MENALA"
-            width={112} height={112} priority
-            className="object-cover w-full h-full"
-          />
-        </div>
-        <h1 className="text-primary text-2xl font-black tracking-[0.2em] text-center mt-4 leading-none">
+        <MenalaMark size={110} className="drop-shadow-[0_6px_24px_rgba(245,197,24,0.4)]" />
+        <h1 className="text-white text-2xl font-black tracking-[0.2em] text-center mt-4 leading-none">
           MENALA
         </h1>
-        <p className="text-white/70 text-xs font-semibold text-center mt-1 tracking-widest uppercase">
+        <p className="text-white/60 text-[10px] font-semibold text-center mt-1.5 tracking-[0.14em] uppercase">
+          PT. Menala Internasional Gemilang
+        </p>
+        <p className="text-primary/90 text-xs font-bold text-center mt-1 tracking-widest uppercase">
           Airport Operation System
         </p>
         <p className="text-white/40 text-xs text-center mt-3">

@@ -1,0 +1,47 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#232346"/>
+      <stop offset="100%" stop-color="#141428"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="60" y1="0" x2="60" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFE775"/>
+      <stop offset="35%" stop-color="#F5C518"/>
+      <stop offset="75%" stop-color="#D99E0B"/>
+      <stop offset="100%" stop-color="#B67F06"/>
+    </linearGradient>
+    <linearGradient id="goldDeep" x1="60" y1="20" x2="60" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0BC12"/>
+      <stop offset="100%" stop-color="#9C6D05"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Monogram double-M (grid 120x104, sama dengan MenalaLogo.tsx) -->
+  <g transform="translate(152 172) scale(6)">
+    <g fill="#4A3500" opacity="0.5" transform="translate(0 2.2)">
+      <polygon points="18,42 60,2 102,42 102,58 60,18 18,58"/>
+      <polygon points="30,58 60,30 90,58 90,74 60,46 30,74"/>
+      <polygon points="44,62 60,77 76,62 76,80 60,95 44,80"/>
+      <rect x="18" y="62" width="12" height="40"/>
+      <rect x="90" y="62" width="12" height="40"/>
+      <rect x="34" y="78" width="10" height="24"/>
+      <rect x="76" y="78" width="10" height="24"/>
+    </g>
+    <polygon points="18,42 60,2 102,42 102,58 60,18 18,58" fill="url(#gold)"/>
+    <polygon points="30,58 60,30 90,58 90,74 60,46 30,74" fill="url(#gold)"/>
+    <polygon points="44,62 60,77 76,62 76,80 60,95 44,80" fill="url(#goldDeep)"/>
+    <rect x="18" y="62" width="12" height="40" fill="url(#goldDeep)"/>
+    <rect x="90" y="62" width="12" height="40" fill="url(#goldDeep)"/>
+    <rect x="34" y="78" width="10" height="24" fill="url(#goldDeep)"/>
+    <rect x="76" y="78" width="10" height="24" fill="url(#goldDeep)"/>
+    <polygon points="18,42 60,2 102,42 100,44 60,6 20,44" fill="#FFF3B0" opacity="0.7"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="512" y="880" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-weight="900" font-size="118" letter-spacing="20" fill="#FFFFFF">MENALA</text>
+  <text x="512" y="950" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-weight="600" font-size="34" letter-spacing="6" fill="#8B8BA7">PT. MENALA INTERNASIONAL GEMILANG</text>
+</svg>

@@ -114,7 +114,7 @@ export default function RiwayatPage() {
       cur.absensi++
       byDay.set(a.date, cur)
     }
-    const days = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
+    const days = Array.from(byDay.entries()).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
     const maxVal = Math.max(1, ...days.map(([, v]) => v.scan + v.absensi))
 
     return {

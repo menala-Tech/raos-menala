@@ -82,8 +82,9 @@ Backup Database/2026-07 Juli/      ← reserved untuk backup Supabase (belum dip
    `employee_contracts`, `attendance` (bukan `raos_attendance`), `leave_requests`,
    `leave_balances`, `payroll`, `users` (bukan `user_profiles`)
 8. **Tabel MILIK RAOS (aman dipakai/diextend):** `user_profiles`, `raos_drivers`,
-   `raos_attendance`, `scan_orders`, `branches`, `pickup_points`, `shifts`, `kpi_targets`,
-   `chat_rooms`, `chat_messages`, `activity_logs`, `system_logs`, `notifications`, `system_config`
+   `raos_attendance`, `raos_chat_room_reads`, `scan_orders`, `branches`, `pickup_points`,
+   `shifts`, `kpi_targets`, `chat_rooms`, `chat_messages`, `chat_room_members`,
+   `activity_logs`, `system_logs`, `notifications`, `system_config`
 
 ## Modul PWA
 | Route | Fungsi |
@@ -93,5 +94,79 @@ Backup Database/2026-07 Juli/      ← reserved untuk backup Supabase (belum dip
 | `/scan` | Scan barcode driver |
 | `/absensi` | Absensi masuk/pulang + GPS |
 | `/riwayat` | History scan & absensi |
-| `/chat` | Chat room staff (realtime) |
+| `/chat` | Chat room staff (realtime, last-msg preview, unread badge, filter tab, search) |
 | `/settings` | Pengaturan akun & app |
+| `/admin` | Panel admin (validasi scan + kelola staff) |
+| `/admin/barcodes` | Generator QR code driver |
+| `/kpi` | KPI staff |
+| `/laporan` | Laporan & analitik + export xlsx/PDF |
+| `/status` | Status validasi (donut chart) |
+| `/drivers` | Kendaraan & driver |
+| `/notifications` | Notifikasi list |
+| `/reset-password` | Set password baru dari magic link recovery |
+
+## Konvensi Frontend Penting (per sesi 7 — 17 Juli 2026)
+
+- **Header sticky wajib**: semua halaman utama pakai `sticky top-0 z-30` di div header
+  supaya header hitam tidak ikut scroll (dashboard, chat list, riwayat, absensi,
+  settings main + section). Room chat view sudah pakai `flex flex-col h-screen` +
+  `flex-shrink-0` di header — jangan diubah.
+- **BottomNav** (`components/layout/BottomNav.tsx`): 4 tab (Beranda, Riwayat | Chat, Profil)
+  + **center FAB Scan** elevated (`-top-8 w-16 h-16 ring-white`). Jangan ganti balik ke
+  5-tab flat — sudah di-approve user.
+- **`MenalaLogo` component** (`components/MenalaLogo.tsx`): reusable logo dengan 2 variant
+  (`header` = kecil di navbar, `splash` = besar di login). Baca dari
+  `public/images/logo-menala.png`. Kalau logo diganti, cukup replace file itu +
+  `node scripts/generate-icons.js` regenerate icons PWA multi-size.
+- **Optimistic append + realtime dedup** (chat pattern): saat insert, langsung
+  append ke local state; realtime handler dedup by `id`. Contoh di `chat/page.tsx
+  sendMessage()`.
+- **RPC pattern untuk query kompleks**: kalau perlu join >2 tabel + agregasi,
+  bikin RPC di Postgres (contoh `get_chat_rooms_for_user`), pakai `supabase.rpc(...)`
+  dari client. Lebih efisien dari fetch berjenjang.
+- **ESLint rule `react-hooks/set-state-in-effect` di-OFF** di project-level
+  (`eslint.config.mjs`) — rule Next 16 baru terlalu agresif untuk pola fetch-data.
+  Jangan reaktifkan tanpa refactor semua efek fetch-data ke pattern lain.
+
+## Realtime Supabase — WAJIB publish tabel dulu
+
+Publication `supabase_realtime` **awalnya kosong**. Tabel yang subscribe pakai
+`.on('postgres_changes', ...)` di client harus di-`ALTER PUBLICATION supabase_realtime
+ADD TABLE public.<nama>` dulu, atau event tidak akan pernah fire.
+
+Sudah di-enable:
+- `chat_messages` (migration `raos_014`)
+
+Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
+
+## RPC Functions RAOS (SECURITY INVOKER, authenticated only)
+
+- `get_chat_rooms_for_user()` → rooms + last_message + unread_count untuk `auth.uid()`
+- `mark_chat_room_read(p_room_id UUID)` → upsert last_read_at
+- `email_is_registered_staff(email TEXT)` → validasi email sebelum magic link
+- `get_my_role()`, `get_my_branch()` → helper untuk RLS
+
+**Reminder security:** ketiga helper `SECURITY DEFINER` (`email_is_registered_staff`,
+`get_my_role`, `get_my_branch`) sekarang punya `SET search_path` yg masih mutable
+per advisor (see next section). Perlu diperketat `SET search_path = public` di
+migration berikutnya.
+
+## Debt / Pending Tinggi (per sesi 7 — 17 Juli 2026)
+
+1. **Hardening Supabase security** (5 menit, aman):
+   - `SET search_path = public` di `get_my_role`, `get_my_branch`, `email_is_registered_staff`
+   - `REVOKE EXECUTE ON FUNCTION get_my_role, get_my_branch FROM anon` (biarkan
+     `email_is_registered_staff` bisa anon — dipakai sebelum login untuk magic link)
+   - Aktifkan Leaked Password Protection di Auth Settings (manual, 1 klik)
+2. **Fitur Chat Room Staff — Fase 2-7** (lihat `PROMPT_AI_CHAT_ROOM_STAFF_MENALA.md`):
+   - Fase 2: kirim foto/file (bikin bucket `chat_attachments` + tabel `chat_message_attachments`)
+   - Fase 3: layar Info Room + Pengaturan Room
+   - Fase 4: reaksi emoji + pin message
+   - Fase 5: auto-hapus pesan (retention per room via pg_cron)
+   - Fase 6: kirim lokasi
+   - Fase 7: polling
+3. **KPI produksi**: `kpi_targets` masih kosong. Perlu insert target + hitung dari GAS.
+4. **logActivity()**: 0 baris di `activity_logs` — logging belum aktif meski helper GAS ada.
+5. **CRUD staff** di `/admin`: sekarang cuma view + validasi scan, belum bisa
+   create/edit/deactivate staff.
+6. **Push Notification (FCM)** & **Offline mode** (SW upgrade): belum ada infra.

@@ -41,23 +41,23 @@ export default function BottomNav() {
           )
         })}
 
-        {/* Center FAB — Scan */}
+        {/* Center FAB — Scan (elevated di atas nav bar) */}
         <div className="flex-1 flex flex-col items-center justify-end pb-1 relative">
           <Link
             href="/scan"
             className={clsx(
-              'absolute -top-5 w-14 h-14 rounded-full flex items-center justify-center',
-              'shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-transform active:scale-95',
+              'absolute -top-8 w-16 h-16 rounded-full flex items-center justify-center',
+              'shadow-[0_6px_24px_rgba(0,0,0,0.35)] transition-transform active:scale-95',
               scanActive
                 ? 'bg-primary ring-4 ring-primary/30'
-                : 'bg-secondary ring-4 ring-secondary/20'
+                : 'bg-secondary ring-4 ring-white'
             )}
           >
-            <ScanLine size={26} className="text-white" strokeWidth={2} />
+            <ScanLine size={30} className="text-white" strokeWidth={2.2} />
           </Link>
           <span className={clsx(
-            'text-[10px] font-medium mt-1',
-            scanActive ? 'text-primary' : 'text-gray-400'
+            'text-[10px] font-medium mt-8',
+            scanActive ? 'text-primary' : 'text-gray-500'
           )}>
             Scan
           </span>

@@ -91,11 +91,15 @@ function ChatPageInner() {
   async function sendMessage() {
     if (!text.trim() || !activeRoom || !user) return
     setSending(true)
-    await supabase.from('chat_messages').insert({
+    const { error } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'text', content: text.trim(),
     })
-    setText('')
     setSending(false)
+    if (error) {
+      alert('Gagal kirim pesan:\n' + error.message)
+      return
+    }
+    setText('')
   }
 
   /* ===== ROOM CHAT VIEW ===== */

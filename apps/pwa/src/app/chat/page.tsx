@@ -6,13 +6,15 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
-import { ArrowLeft, Send, MessageCircle, Users, Bell, Search } from 'lucide-react'
+import {
+  ArrowLeft, Send, MessageCircle, Users, Bell, Search,
+  Paperclip, FileText, X, Loader2, Image as ImageIcon, Download,
+} from 'lucide-react'
 import Link from 'next/link'
 import type { ChatRoom, ChatRoomWithMeta, ChatMessage, UserProfile } from '@/types'
 
 type FilterTab = 'semua' | 'grup' | 'lokasi' | 'pribadi'
 
-// Kategori mana yang termasuk "Grup" (bukan lokasi, bukan private DM)
 const GRUP_CATEGORIES = ['umum', 'operasional', 'driver_support', 'proyek']
 
 function matchesFilter(room: ChatRoomWithMeta, tab: FilterTab): boolean {
@@ -35,6 +37,13 @@ function formatLastMessageTime(iso: string | null): string {
   if (days < 7) return d.toLocaleDateString('id-ID', { weekday: 'short' })
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
 import clsx from 'clsx'
 
 const ROOM_COLORS: Record<string, { bg: string; text: string; label: string }> = {
@@ -71,12 +80,16 @@ function ChatPageInner() {
   const [searchQuery, setSearchQuery] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // --- Attachment state ---
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+
   const loadRooms = useCallback(async () => {
     const { data, error } = await supabase.rpc('get_chat_rooms_for_user')
-    if (error) {
-      console.error('loadRooms error:', error.message)
-      return
-    }
+    if (error) { console.error('loadRooms error:', error.message); return }
     setRooms((data ?? []) as ChatRoomWithMeta[])
   }, [])
 
@@ -87,9 +100,7 @@ function ChatPageInner() {
       const { data: profile } = await supabase
         .from('user_profiles').select('*, branches(*)').eq('id', session.user.id).single()
       setUser(profile)
-
       await loadRooms()
-
       const targetCategory = searchParams.get('room')
       if (targetCategory) {
         const { data: roomData } = await supabase
@@ -101,8 +112,6 @@ function ChatPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
-  // Refresh list room saat balik ke list view (activeRoom jadi null) — supaya
-  // unread count + last message ke-update setelah user keluar dari room chat
   useEffect(() => {
     if (activeRoom === null && user) loadRooms()
   }, [activeRoom, user, loadRooms])
@@ -119,8 +128,6 @@ function ChatPageInner() {
   useEffect(() => {
     if (!activeRoom) return
     loadMessages(activeRoom.id)
-    // Mark room sebagai read (upsert last_read_at = now) supaya unread_count = 0
-    // saat user balik ke list view. Fire-and-forget, tidak block UI.
     supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id }).then(({ error }) => {
       if (error) console.error('mark_chat_room_read error:', error.message)
     })
@@ -129,17 +136,15 @@ function ChatPageInner() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
         payload => {
           const newMsg = payload.new as ChatMessage
-          // Dedup: kalau id-nya sudah ada (optimistic append di sendMessage), skip
           setMessages(prev => (prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg]))
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-          // User sedang di room ini — mark read juga supaya pesan baru dari orang lain
-          // tidak jadi unread setelah keluar
           supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [activeRoom, loadMessages])
 
+  // --- Text message ---
   async function sendMessage() {
     if (!text.trim() || !activeRoom || !user) return
     setSending(true)
@@ -149,17 +154,92 @@ function ChatPageInner() {
       room_id: activeRoom.id, sender_id: user.id, type: 'text', content,
     }).select('*, user_profiles(full_name, role)').single()
     setSending(false)
-    if (error) {
-      alert('Gagal kirim pesan:\n' + error.message)
-      setText(content) // kembalikan text supaya user bisa retry
-      return
-    }
-    // Optimistic append: pastikan pesan langsung tampil tanpa nunggu round-trip realtime
-    // (kalau realtime tetap fire, dedup di handler)
+    if (error) { alert('Gagal kirim pesan:\n' + error.message); setText(content); return }
     if (data) {
       setMessages(prev => (prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage]))
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }
+  }
+
+  // --- File selection ---
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPendingFile(file)
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file)
+      setPendingPreview(url)
+    } else {
+      setPendingPreview(null)
+    }
+  }
+
+  function clearPendingFile() {
+    if (pendingPreview) URL.revokeObjectURL(pendingPreview)
+    setPendingFile(null)
+    setPendingPreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // --- Send attachment ---
+  async function sendWithAttachment() {
+    if (!pendingFile || !activeRoom || !user) return
+    setUploading(true)
+
+    const safeName = pendingFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `${user.id}/${activeRoom.id}/${Date.now()}-${safeName}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('chat_attachments')
+      .upload(storagePath, pendingFile, { upsert: false })
+
+    if (uploadError) {
+      alert('Gagal upload file:\n' + uploadError.message)
+      setUploading(false)
+      return
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('chat_attachments')
+      .getPublicUrl(storagePath)
+
+    const msgType = pendingFile.type.startsWith('image/') ? 'image' : 'file'
+
+    const { data: msg, error: msgError } = await supabase
+      .from('chat_messages')
+      .insert({
+        room_id: activeRoom.id,
+        sender_id: user.id,
+        type: msgType,
+        content: pendingFile.name,
+        media_url: publicUrl,
+      })
+      .select('*, user_profiles(full_name, role)')
+      .single()
+
+    if (msgError) {
+      alert('Gagal kirim pesan:\n' + msgError.message)
+      setUploading(false)
+      return
+    }
+
+    if (msg) {
+      await supabase.from('chat_message_attachments').insert({
+        message_id: msg.id,
+        room_id: activeRoom.id,
+        uploader_id: user.id,
+        file_name: pendingFile.name,
+        file_size: pendingFile.size,
+        mime_type: pendingFile.type,
+        storage_path: storagePath,
+        url: publicUrl,
+      })
+      setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg as ChatMessage])
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
+
+    clearPendingFile()
+    setUploading(false)
   }
 
   /* ===== ROOM CHAT VIEW ===== */
@@ -168,12 +248,43 @@ function ChatPageInner() {
     return (
       <SwipeBackWrapper onBack={() => setActiveRoom(null)}>
         <div className="flex flex-col h-screen max-w-md mx-auto">
+
+          {/* Lightbox */}
+          {lightboxUrl && (
+            <div
+              className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center"
+              onClick={() => setLightboxUrl(null)}
+            >
+              <button className="absolute top-5 right-5 text-white/70 hover:text-white z-10">
+                <X size={28} />
+              </button>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={lightboxUrl}
+                alt="Preview"
+                className="max-w-[92vw] max-h-[85vh] object-contain rounded-xl shadow-2xl"
+                onClick={e => e.stopPropagation()}
+              />
+              <a
+                href={lightboxUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                download
+                onClick={e => e.stopPropagation()}
+                className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2
+                           bg-white/10 hover:bg-white/20 text-white text-xs font-semibold
+                           px-5 py-2.5 rounded-full backdrop-blur-sm transition-colors"
+              >
+                <Download size={14} /> Unduh Gambar
+              </a>
+            </div>
+          )}
+
           {/* Header */}
           <div className="bg-secondary text-white px-4 pt-10 pb-3 flex items-center gap-3 flex-shrink-0">
             <button onClick={() => setActiveRoom(null)} className="text-white/70">
               <ArrowLeft size={22} />
             </button>
-            {/* Room avatar */}
             <div className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}>
               {style.label}
             </div>
@@ -198,7 +309,7 @@ function ChatPageInner() {
               const senderRole = (msg as any).user_profiles?.role ?? ''
               return (
                 <div key={msg.id} className={clsx('flex', isMe ? 'justify-end' : 'justify-start')}>
-                  <div className={clsx('max-w-[78%] space-y-1')}>
+                  <div className="max-w-[78%] space-y-1">
                     {!isMe && (
                       <p className="text-[10px] font-bold text-primary ml-1 capitalize">
                         {senderName} · {senderRole}
@@ -210,7 +321,47 @@ function ChatPageInner() {
                         ? 'bg-secondary text-white rounded-br-sm'
                         : 'bg-white text-gray-800 shadow-sm rounded-bl-sm'
                     )}>
-                      <p className="leading-relaxed">{msg.content}</p>
+                      {/* IMAGE */}
+                      {msg.type === 'image' && msg.media_url && (
+                        <button
+                          onClick={() => setLightboxUrl(msg.media_url!)}
+                          className="block mb-1.5 rounded-xl overflow-hidden"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={msg.media_url}
+                            alt={msg.content || 'Gambar'}
+                            className="max-w-[200px] w-full object-cover rounded-xl"
+                          />
+                        </button>
+                      )}
+
+                      {/* FILE */}
+                      {msg.type === 'file' && msg.media_url && (
+                        <a
+                          href={msg.media_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download
+                          className={clsx(
+                            'flex items-center gap-2.5 rounded-xl px-3 py-2 mb-1.5 transition-colors',
+                            isMe ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-100 hover:bg-gray-200'
+                          )}
+                        >
+                          <FileText size={20} className={clsx('flex-shrink-0', isMe ? 'text-primary' : 'text-blue-500')} />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold truncate max-w-[140px]">{msg.content || 'File'}</p>
+                            <p className={clsx('text-[10px]', isMe ? 'text-white/50' : 'text-gray-400')}>Ketuk untuk unduh</p>
+                          </div>
+                          <Download size={14} className={isMe ? 'text-white/50' : 'text-gray-400'} />
+                        </a>
+                      )}
+
+                      {/* TEXT (or caption for image/file) */}
+                      {msg.type === 'text' && (
+                        <p className="leading-relaxed">{msg.content}</p>
+                      )}
+
                       <p className={clsx('text-[9px] mt-1', isMe ? 'text-white/50' : 'text-gray-300')}>
                         {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                       </p>
@@ -222,22 +373,77 @@ function ChatPageInner() {
             <div ref={bottomRef} />
           </div>
 
+          {/* Attachment preview bar */}
+          {pendingFile && (
+            <div className="bg-gray-50 border-t border-gray-200 px-3 py-2 flex-shrink-0">
+              {pendingPreview ? (
+                <div className="relative w-20 h-20">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={pendingPreview} alt="preview" className="w-full h-full object-cover rounded-xl shadow" />
+                  <button
+                    onClick={clearPendingFile}
+                    className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center shadow"
+                  >
+                    <X size={11} strokeWidth={3} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 shadow-sm max-w-xs">
+                  <FileText size={18} className="text-blue-500 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-700 truncate">{pendingFile.name}</p>
+                    <p className="text-[10px] text-gray-400">{formatFileSize(pendingFile.size)}</p>
+                  </div>
+                  <button onClick={clearPendingFile} className="text-gray-400 ml-1">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Input bar */}
           <div className="bg-white border-t border-gray-100 px-3 py-2.5 flex items-center gap-2 flex-shrink-0">
+            {/* Attachment button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
+              title="Kirim foto / file"
+            >
+              <Paperclip size={20} />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+
             <input
               type="text"
-              placeholder="Ketik pesan..."
+              placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan...'}
               value={text}
               onChange={e => setText(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              onKeyDown={e => {
+                if (e.key !== 'Enter') return
+                if (pendingFile) sendWithAttachment()
+                else sendMessage()
+              }}
               className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
+              disabled={uploading}
             />
+
             <button
-              onClick={sendMessage}
-              disabled={!text.trim() || sending}
-              className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity"
+              onClick={pendingFile ? sendWithAttachment : sendMessage}
+              disabled={(!text.trim() && !pendingFile) || sending || uploading}
+              className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0"
             >
-              <Send size={18} strokeWidth={2.5} />
+              {uploading
+                ? <Loader2 size={18} className="animate-spin" />
+                : <Send size={18} strokeWidth={2.5} />
+              }
             </button>
           </div>
         </div>
@@ -318,8 +524,12 @@ function ChatPageInner() {
           }
           return filtered.map(room => {
             const style = getRoomStyle(room.category)
+            const lastMsgIsMedia = room.last_message_content &&
+              (room.last_message_content === room.last_message_content)
             const preview = room.last_message_content
-              ? (room.last_message_sender ? `${room.last_message_sender}: ${room.last_message_content}` : room.last_message_content)
+              ? (room.last_message_sender
+                  ? `${room.last_message_sender}: ${room.last_message_content}`
+                  : room.last_message_content)
               : (room.description ?? 'Belum ada pesan')
             return (
               <button
@@ -327,7 +537,6 @@ function ChatPageInner() {
                 onClick={() => setActiveRoom(room)}
                 className="card w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
               >
-                {/* Avatar */}
                 <div className={`w-11 h-11 rounded-full flex items-center justify-center font-black text-base flex-shrink-0 shadow-sm ${style.bg} ${style.text}`}>
                   {room.name.charAt(0)}
                 </div>

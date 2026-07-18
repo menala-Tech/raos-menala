@@ -1,6 +1,15 @@
 # CLAUDE.md — RAOS Project
 *Panduan Claude Code untuk proyek RAOS*
 
+## Lokasi Lokal (setelah relokasi 2026-07-18)
+```
+C:\Projects\menala\
+├── RAOS\          ← git repo ini (working dir: RAOS\apps\pwa)
+├── .claude\       ← Claude Code project config (launch.json, settings.local.json)
+├── docs\          ← dokumen referensi & prompt AI
+└── assets\        ← brand assets (logo, mockup, screenshot)
+```
+
 ## Konteks Proyek
 RAOS (Rifim Airport Operation System) adalah PWA untuk operasional Vendor Maxim di Bandara Soekarno-Hatta.
 

@@ -1,7 +1,7 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
 *Diupdate: 2026-07-18 (sesi 8)*
 
-## SESI 10 — Chat Fase 4 + 5 (18 Juli 2026)
+## SESI 10 — Chat Fase 4–7 + Relokasi Workspace (18 Juli 2026)
 
 - [x] **Chat Fase 4** — Reaksi emoji + pin message (`chat/page.tsx` full rewrite)
   - Long-press 450ms (+ context menu desktop) → action sheet
@@ -43,11 +43,20 @@
 
 ### ✅ SEMUA 7 FASE CHAT SELESAI
 
+- [x] **Relokasi workspace** ke `C:\Projects\menala\`
+  - Folder `RAOS\` (git repo), `docs\`, `assets\`, `.claude\`
+  - STATUS.md dipindah ke dalam RAOS (ikut git)
+  - CLAUDE.md diupdate dengan path baru
+  - Memory Claude ter-migrate ke project path baru
+  - Commit `1de50f9` + `1b948c9` (fix CI lint) → push main ✓
+  - CI GitHub Actions: Lint ✅ TypeScript ✅ Vercel deploy ✅
+
 ### Pending sesi berikutnya:
-- [ ] Hardening Supabase security (SET search_path + REVOKE anon)
-- [ ] Ganti password admin (masih Menala2026!)
-- [ ] Push ke GitHub → auto-deploy Vercel
-- [ ] Isi driver RAOS asli, test scan barcode, laporan harian
+- [ ] Hardening Supabase security (SET search_path + REVOKE anon di 3 function)
+- [ ] Ganti password admin (masih `Menala2026!` — email: rifiminternationalgemilang@gmail.com)
+- [ ] Isi driver RAOS asli + test scan barcode + laporan harian
+- [ ] Offline mode (Service Worker upgrade) + push notification (FCM)
+- [ ] CRUD staff di /admin (saat ini view + validasi scan saja)
 
 ---
 

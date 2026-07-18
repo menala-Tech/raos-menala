@@ -197,6 +197,20 @@ function ChatPageInner() {
     setPinnedMsg(data ?? null)
   }
 
+  async function loadPolls(roomId: string) {
+    const { data: pollData } = await supabase
+      .from('chat_polls').select('*').eq('room_id', roomId)
+    const { data: voteData } = await supabase
+      .from('chat_poll_votes').select('*').in('poll_id', pollData?.map(p => p.id) ?? [])
+    if (!pollData) return
+    const map: Record<string, { poll: ChatPoll; votes: ChatPollVote[] }> = {}
+    pollData.forEach(p => {
+      const votes = (voteData ?? []).filter(v => v.poll_id === p.id)
+      map[p.message_id] = { poll: p as ChatPoll, votes }
+    })
+    setPolls(map)
+  }
+
   useEffect(() => {
     if (!activeRoom) return
     setReactions({})
@@ -285,7 +299,6 @@ function ChatPageInner() {
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoom, loadMessages])
 
   // ── Messages ──────────────────────────────────────────────────────────────
@@ -377,20 +390,6 @@ function ChatPageInner() {
   }
 
   // ── Polling (Fase 7) ─────────────────────────────────────────────────────
-
-  async function loadPolls(roomId: string) {
-    const { data: pollData } = await supabase
-      .from('chat_polls').select('*').eq('room_id', roomId)
-    const { data: voteData } = await supabase
-      .from('chat_poll_votes').select('*').eq('poll_id', pollData?.map ? pollData.map(p => p.id) : [])
-    if (!pollData) return
-    const map: Record<string, { poll: ChatPoll; votes: ChatPollVote[] }> = {}
-    pollData.forEach(p => {
-      const votes = (voteData ?? []).filter(v => v.poll_id === p.id)
-      map[p.message_id] = { poll: p as ChatPoll, votes }
-    })
-    setPolls(map)
-  }
 
   async function createPoll() {
     if (!activeRoom || !user) return

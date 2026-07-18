@@ -100,8 +100,46 @@ export interface ChatMessage {
   type: string
   content?: string
   media_url?: string
+  is_pinned?: boolean
+  pinned_at?: string
+  pinned_by?: string
   created_at: string
   user_profiles?: UserProfile
+}
+
+export interface ChatPollOption {
+  id: string
+  text: string
+}
+
+export interface ChatPoll {
+  id: string
+  room_id: string
+  message_id: string
+  creator_id: string
+  question: string
+  options: ChatPollOption[]
+  is_multiple_choice: boolean
+  is_closed: boolean
+  closed_at?: string
+  created_at: string
+}
+
+export interface ChatPollVote {
+  id: string
+  poll_id: string
+  voter_id: string
+  option_id: string
+  created_at: string
+}
+
+export interface ChatMessageReaction {
+  id: string
+  message_id: string
+  room_id: string
+  user_id: string
+  emoji: string
+  created_at: string
 }
 
 export interface Notification {

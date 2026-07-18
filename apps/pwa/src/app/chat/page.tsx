@@ -10,42 +10,39 @@ import {
   ArrowLeft, Send, MessageCircle, Users, Bell, BellOff, Search,
   Paperclip, FileText, X, Loader2, Download,
   Info, Settings, ChevronRight, LogOut, Pin, PinOff,
+  Copy, SmilePlus, MapPin, Navigation,
+  BarChart2, CheckSquare, Square, Plus, Trash2, Lock,
 } from 'lucide-react'
 import Link from 'next/link'
-import type { ChatRoom, ChatRoomWithMeta, ChatMessage, UserProfile } from '@/types'
+import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatPollOption, UserProfile } from '@/types'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
+const PIN_ROLES = ['admin', 'koordinator', 'direksi']
 
 type FilterTab = 'semua' | 'grup' | 'lokasi' | 'pribadi'
 type RoomSheet = 'none' | 'info' | 'settings'
 
-interface RoomPrefs {
-  notif: boolean
-  pinned: boolean
-}
+interface RoomPrefs { notif: boolean; pinned: boolean }
 const DEFAULT_ROOM_PREFS: RoomPrefs = { notif: true, pinned: false }
 
-// ─── Room prefs helpers (localStorage) ────────────────────────────────────────
+interface ActionMenu { msgId: string; isMe: boolean; content?: string }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getRoomPrefs(roomId: string): RoomPrefs {
   try {
-    const raw = typeof window !== 'undefined'
-      ? localStorage.getItem(`raos_room_prefs_${roomId}`)
-      : null
-    if (!raw) return DEFAULT_ROOM_PREFS
-    return { ...DEFAULT_ROOM_PREFS, ...JSON.parse(raw) }
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(`raos_room_prefs_${roomId}`) : null
+    return raw ? { ...DEFAULT_ROOM_PREFS, ...JSON.parse(raw) } : DEFAULT_ROOM_PREFS
   } catch { return DEFAULT_ROOM_PREFS }
 }
-
 function saveRoomPrefs(roomId: string, patch: Partial<RoomPrefs>) {
-  const current = getRoomPrefs(roomId)
-  localStorage.setItem(`raos_room_prefs_${roomId}`, JSON.stringify({ ...current, ...patch }))
+  localStorage.setItem(`raos_room_prefs_${roomId}`, JSON.stringify({ ...getRoomPrefs(roomId), ...patch }))
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
-
 const GRUP_CATEGORIES = ['umum', 'operasional', 'driver_support', 'proyek']
-const NON_DEFAULT_CATEGORIES = ['pribadi', 'proyek'] // bisa leave
+const NON_DEFAULT_CATEGORIES = ['pribadi', 'proyek']
 
 function matchesFilter(room: ChatRoomWithMeta, tab: FilterTab): boolean {
   if (tab === 'semua') return true
@@ -55,14 +52,13 @@ function matchesFilter(room: ChatRoomWithMeta, tab: FilterTab): boolean {
   return true
 }
 
-function formatLastMessageTime(iso: string | null): string {
+function formatTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   const now = new Date()
   const sameDay = d.toDateString() === now.toDateString()
   if (sameDay) return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-  const diffMs = now.getTime() - d.getTime()
-  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  const days = Math.floor((now.getTime() - d.getTime()) / 86400000)
   if (days === 1) return 'Kemarin'
   if (days < 7) return d.toLocaleDateString('id-ID', { weekday: 'short' })
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: '2-digit' })
@@ -77,73 +73,77 @@ function formatFileSize(bytes: number): string {
 import clsx from 'clsx'
 
 const ROOM_COLORS: Record<string, { bg: string; text: string; label: string; lightBg: string }> = {
-  umum:        { bg: 'bg-green-600',  text: 'text-white', label: 'U', lightBg: 'bg-green-100'  },
-  lokasi:      { bg: 'bg-primary',    text: 'text-secondary', label: 'L', lightBg: 'bg-yellow-100' },
-  operasional: { bg: 'bg-blue-600',   text: 'text-white', label: 'O', lightBg: 'bg-blue-100'   },
-  driver:      { bg: 'bg-orange-500', text: 'text-white', label: 'D', lightBg: 'bg-orange-100' },
-  proyek:      { bg: 'bg-purple-600', text: 'text-white', label: 'P', lightBg: 'bg-purple-100' },
+  umum:        { bg: 'bg-green-600',  text: 'text-white',    label: 'U', lightBg: 'bg-green-100'  },
+  lokasi:      { bg: 'bg-primary',    text: 'text-secondary',label: 'L', lightBg: 'bg-yellow-100' },
+  operasional: { bg: 'bg-blue-600',   text: 'text-white',    label: 'O', lightBg: 'bg-blue-100'   },
+  driver:      { bg: 'bg-orange-500', text: 'text-white',    label: 'D', lightBg: 'bg-orange-100' },
+  proyek:      { bg: 'bg-purple-600', text: 'text-white',    label: 'P', lightBg: 'bg-purple-100' },
 }
-
 function getRoomStyle(category: string) {
   const key = Object.keys(ROOM_COLORS).find(k => category.toLowerCase().includes(k)) ?? 'umum'
   return ROOM_COLORS[key]
 }
 
-// ─── Category label ────────────────────────────────────────────────────────────
-
 const CATEGORY_LABELS: Record<string, string> = {
-  umum:           'Umum',
-  operasional:    'Operasional',
-  driver_support: 'Dukungan Driver',
-  lokasi:         'Lokasi',
-  pribadi:        'Pribadi',
-  proyek:         'Proyek',
+  umum: 'Umum', operasional: 'Operasional', driver_support: 'Dukungan Driver',
+  lokasi: 'Lokasi', pribadi: 'Pribadi', proyek: 'Proyek',
 }
 
-// ─── Entry point ──────────────────────────────────────────────────────────────
+// ─── Entry ────────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  return (
-    <Suspense fallback={null}>
-      <ChatPageInner />
-    </Suspense>
-  )
+  return <Suspense fallback={null}><ChatPageInner /></Suspense>
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 function ChatPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [user, setUser] = useState<UserProfile | null>(null)
-  const [rooms, setRooms] = useState<ChatRoomWithMeta[]>([])
+  const [user, setUser]         = useState<UserProfile | null>(null)
+  const [rooms, setRooms]       = useState<ChatRoomWithMeta[]>([])
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [text, setText] = useState('')
-  const [sending, setSending] = useState(false)
+  const [text, setText]         = useState('')
+  const [sending, setSending]   = useState(false)
   const [filterTab, setFilterTab] = useState<FilterTab>('semua')
   const [searchQuery, setSearchQuery] = useState('')
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const bottomRef   = useRef<HTMLDivElement>(null)
+  const msgRefs     = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // Fase 2 — attachment
+  // Fase 2 – attachment
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [pendingFile, setPendingFile]       = useState<File | null>(null)
   const [pendingPreview, setPendingPreview] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+  const [uploading, setUploading]           = useState(false)
+  const [lightboxUrl, setLightboxUrl]       = useState<string | null>(null)
+  const [sendingLocation, setSendingLocation] = useState(false)
 
-  // Fase 3 — info & settings sheets
-  const [roomSheet, setRoomSheet] = useState<RoomSheet>('none')
+  // Fase 7 – polling
+  const [polls, setPolls]               = useState<Record<string, { poll: ChatPoll; votes: ChatPollVote[] }>>({})
+  const [pollSheet, setPollSheet]       = useState(false)
+  const [pollQuestion, setPollQuestion] = useState('')
+  const [pollOptions, setPollOptions]   = useState(['', ''])
+  const [pollMultiple, setPollMultiple] = useState(false)
+  const [pollSending, setPollSending]   = useState(false)
+
+  // Fase 3 – sheets
+  const [roomSheet, setRoomSheet]     = useState<RoomSheet>('none')
   const [roomMembers, setRoomMembers] = useState<any[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
-  const [roomPrefs, setRoomPrefs] = useState<RoomPrefs>(DEFAULT_ROOM_PREFS)
+  const [roomPrefs, setRoomPrefs]     = useState<RoomPrefs>(DEFAULT_ROOM_PREFS)
 
-  // ── Data loaders ─────────────────────────────────────────────────────────────
+  // Fase 4 – reactions + pin
+  const [reactions, setReactions]       = useState<Record<string, ChatMessageReaction[]>>({})
+  const [pinnedMsg, setPinnedMsg]       = useState<ChatMessage | null>(null)
+  const [actionMenu, setActionMenu]     = useState<ActionMenu | null>(null)
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Data loaders ──────────────────────────────────────────────────────────
 
   const loadRooms = useCallback(async () => {
     const { data, error } = await supabase.rpc('get_chat_rooms_for_user')
-    if (error) { console.error('loadRooms error:', error.message); return }
-    setRooms((data ?? []) as ChatRoomWithMeta[])
+    if (!error) setRooms((data ?? []) as ChatRoomWithMeta[])
   }, [])
 
   useEffect(() => {
@@ -165,9 +165,7 @@ function ChatPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
-  useEffect(() => {
-    if (activeRoom === null && user) loadRooms()
-  }, [activeRoom, user, loadRooms])
+  useEffect(() => { if (activeRoom === null && user) loadRooms() }, [activeRoom, user, loadRooms])
 
   const loadMessages = useCallback(async (roomId: string) => {
     const { data } = await supabase
@@ -178,95 +176,161 @@ function ChatPageInner() {
     setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
   }, [])
 
+  async function loadReactions(roomId: string) {
+    const { data } = await supabase
+      .from('chat_message_reactions').select('*').eq('room_id', roomId)
+    if (!data) return
+    const grouped: Record<string, ChatMessageReaction[]> = {}
+    data.forEach(r => {
+      if (!grouped[r.message_id]) grouped[r.message_id] = []
+      grouped[r.message_id].push(r)
+    })
+    setReactions(grouped)
+  }
+
+  async function loadPinnedMessage(roomId: string) {
+    const { data } = await supabase
+      .from('chat_messages')
+      .select('*, user_profiles(full_name)')
+      .eq('room_id', roomId).eq('is_pinned', true)
+      .order('pinned_at', { ascending: false }).limit(1).maybeSingle()
+    setPinnedMsg(data ?? null)
+  }
+
   useEffect(() => {
     if (!activeRoom) return
-    loadMessages(activeRoom.id)
+    setReactions({})
+    setPinnedMsg(null)
     setRoomPrefs(getRoomPrefs(activeRoom.id))
+    loadMessages(activeRoom.id)
+    loadReactions(activeRoom.id)
+    loadPinnedMessage(activeRoom.id)
+    loadPolls(activeRoom.id)
     supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
+
     const channel = supabase
       .channel(`room:${activeRoom.id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
         payload => {
-          const newMsg = payload.new as ChatMessage
-          setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
+          const msg = payload.new as ChatMessage
+          setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
           supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
         })
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
+        payload => {
+          const updated = payload.new as ChatMessage
+          setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m))
+          // Update pinned banner
+          if (updated.is_pinned) setPinnedMsg(updated)
+          else setPinnedMsg(prev => prev?.id === updated.id ? null : prev)
+        })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_message_reactions', filter: `room_id=eq.${activeRoom.id}` },
+        payload => {
+          const r = payload.new as ChatMessageReaction
+          setReactions(prev => ({
+            ...prev,
+            [r.message_id]: [...(prev[r.message_id] ?? []).filter(x => x.id !== r.id), r],
+          }))
+        })
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'chat_message_reactions', filter: `room_id=eq.${activeRoom.id}` },
+        payload => {
+          const r = payload.old as ChatMessageReaction
+          setReactions(prev => ({
+            ...prev,
+            [r.message_id]: (prev[r.message_id] ?? []).filter(x => x.id !== r.id),
+          }))
+        })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_poll_votes', filter: `poll_id=in.(select id from chat_polls where room_id=${activeRoom.id})` },
+        payload => {
+          const v = payload.new as ChatPollVote
+          setPolls(prev => {
+            const entry = Object.values(prev).find(e => e.poll.id === v.poll_id)
+            if (!entry) return prev
+            const msgId = entry.poll.message_id
+            return {
+              ...prev,
+              [msgId]: { ...entry, votes: [...entry.votes.filter(x => x.id !== v.id), v] },
+            }
+          })
+        })
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'chat_poll_votes' },
+        payload => {
+          const v = payload.old as ChatPollVote
+          setPolls(prev => {
+            const entry = Object.values(prev).find(e => e.poll.id === v.poll_id)
+            if (!entry) return prev
+            const msgId = entry.poll.message_id
+            return {
+              ...prev,
+              [msgId]: { ...entry, votes: entry.votes.filter(x => x.id !== v.id) },
+            }
+          })
+        })
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chat_polls', filter: `room_id=eq.${activeRoom.id}` },
+        payload => {
+          const updated = payload.new as ChatPoll
+          setPolls(prev => {
+            const msgId = updated.message_id
+            if (!prev[msgId]) return prev
+            return { ...prev, [msgId]: { ...prev[msgId], poll: updated } }
+          })
+        })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoom, loadMessages])
 
-  // Load room members saat Info sheet dibuka
-  async function openInfoSheet() {
-    if (!activeRoom) return
-    setRoomSheet('info')
-    setMembersLoading(true)
-    const { data } = await supabase
-      .from('chat_room_members')
-      .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
-      .eq('room_id', activeRoom.id)
-      .limit(30)
-    setRoomMembers(data ?? [])
-    setMembersLoading(false)
-  }
-
-  // ── Text message ─────────────────────────────────────────────────────────────
+  // ── Messages ──────────────────────────────────────────────────────────────
 
   async function sendMessage() {
     if (!text.trim() || !activeRoom || !user) return
     setSending(true)
-    const content = text.trim()
-    setText('')
+    const content = text.trim(); setText('')
     const { data, error } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'text', content,
     }).select('*, user_profiles(full_name, role)').single()
     setSending(false)
-    if (error) { alert('Gagal kirim pesan:\n' + error.message); setText(content); return }
+    if (error) { alert('Gagal kirim: ' + error.message); setText(content); return }
     if (data) {
       setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }
   }
 
-  // ── Attachment (Fase 2) ───────────────────────────────────────────────────────
+  // ── Attachment (Fase 2) ───────────────────────────────────────────────────
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0]; if (!file) return
     setPendingFile(file)
-    if (file.type.startsWith('image/')) {
-      setPendingPreview(URL.createObjectURL(file))
-    } else {
-      setPendingPreview(null)
-    }
+    setPendingPreview(file.type.startsWith('image/') ? URL.createObjectURL(file) : null)
   }
-
   function clearPendingFile() {
     if (pendingPreview) URL.revokeObjectURL(pendingPreview)
-    setPendingFile(null)
-    setPendingPreview(null)
+    setPendingFile(null); setPendingPreview(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
-
   async function sendWithAttachment() {
     if (!pendingFile || !activeRoom || !user) return
     setUploading(true)
     const safeName = pendingFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const storagePath = `${user.id}/${activeRoom.id}/${Date.now()}-${safeName}`
-    const { error: uploadError } = await supabase.storage
-      .from('chat_attachments').upload(storagePath, pendingFile, { upsert: false })
-    if (uploadError) {
-      alert('Gagal upload:\n' + uploadError.message)
-      setUploading(false)
-      return
-    }
+    const { error: upErr } = await supabase.storage.from('chat_attachments').upload(storagePath, pendingFile, { upsert: false })
+    if (upErr) { alert('Gagal upload: ' + upErr.message); setUploading(false); return }
     const { data: { publicUrl } } = supabase.storage.from('chat_attachments').getPublicUrl(storagePath)
     const msgType = pendingFile.type.startsWith('image/') ? 'image' : 'file'
-    const { data: msg, error: msgError } = await supabase.from('chat_messages').insert({
+    const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: msgType,
       content: pendingFile.name, media_url: publicUrl,
     }).select('*, user_profiles(full_name, role)').single()
-    if (!msgError && msg) {
+    if (!msgErr && msg) {
       await supabase.from('chat_message_attachments').insert({
         message_id: msg.id, room_id: activeRoom.id, uploader_id: user.id,
         file_name: pendingFile.name, file_size: pendingFile.size,
@@ -275,45 +339,269 @@ function ChatPageInner() {
       setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg as ChatMessage])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }
-    clearPendingFile()
-    setUploading(false)
+    clearPendingFile(); setUploading(false)
   }
 
-  // ── Room prefs helpers (Fase 3) ───────────────────────────────────────────────
+  // ── Kirim Lokasi (Fase 6) ────────────────────────────────────────────────
+
+  async function sendLocation() {
+    if (!activeRoom || !user) return
+    if (!navigator.geolocation) {
+      alert('Browser ini tidak mendukung GPS.')
+      return
+    }
+    setSendingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        const { latitude: lat, longitude: lng, accuracy } = pos.coords
+        const content = JSON.stringify({ lat, lng, accuracy: Math.round(accuracy) })
+        const { data, error } = await supabase.from('chat_messages').insert({
+          room_id: activeRoom.id, sender_id: user.id, type: 'location', content,
+        }).select('*, user_profiles(full_name, role)').single()
+        setSendingLocation(false)
+        if (error) { alert('Gagal kirim lokasi: ' + error.message); return }
+        if (data) {
+          setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])
+          setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+        }
+      },
+      err => {
+        setSendingLocation(false)
+        const msg = err.code === 1 ? 'Izin lokasi ditolak. Aktifkan GPS di pengaturan browser.'
+          : err.code === 2 ? 'Posisi tidak tersedia. Pastikan GPS aktif.'
+          : 'GPS timeout. Coba lagi.'
+        alert(msg)
+      },
+      { timeout: 10000, maximumAge: 30000, enableHighAccuracy: true }
+    )
+  }
+
+  // ── Polling (Fase 7) ─────────────────────────────────────────────────────
+
+  async function loadPolls(roomId: string) {
+    const { data: pollData } = await supabase
+      .from('chat_polls').select('*').eq('room_id', roomId)
+    const { data: voteData } = await supabase
+      .from('chat_poll_votes').select('*').eq('poll_id', pollData?.map ? pollData.map(p => p.id) : [])
+    if (!pollData) return
+    const map: Record<string, { poll: ChatPoll; votes: ChatPollVote[] }> = {}
+    pollData.forEach(p => {
+      const votes = (voteData ?? []).filter(v => v.poll_id === p.id)
+      map[p.message_id] = { poll: p as ChatPoll, votes }
+    })
+    setPolls(map)
+  }
+
+  async function createPoll() {
+    if (!activeRoom || !user) return
+    const q = pollQuestion.trim()
+    const opts = pollOptions.map(o => o.trim()).filter(Boolean)
+    if (!q || opts.length < 2) return
+    setPollSending(true)
+    const options: ChatPollOption[] = opts.map(text => ({
+      id: crypto.randomUUID(),
+      text,
+    }))
+    // Insert pesan dulu
+    const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
+      room_id: activeRoom.id, sender_id: user.id, type: 'poll', content: q,
+    }).select('*, user_profiles(full_name, role)').single()
+    if (msgErr || !msg) { alert('Gagal buat polling'); setPollSending(false); return }
+    // Insert poll
+    const { data: poll, error: pollErr } = await supabase.from('chat_polls').insert({
+      room_id: activeRoom.id, message_id: msg.id, creator_id: user.id,
+      question: q, options, is_multiple_choice: pollMultiple,
+    }).select().single()
+    if (pollErr || !poll) { alert('Gagal simpan polling'); setPollSending(false); return }
+    setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg as ChatMessage])
+    setPolls(prev => ({ ...prev, [msg.id]: { poll: poll as ChatPoll, votes: [] } }))
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    // Reset form
+    setPollQuestion(''); setPollOptions(['', '']); setPollMultiple(false)
+    setPollSheet(false); setPollSending(false)
+  }
+
+  async function votePoll(poll: ChatPoll, optionId: string) {
+    if (!user) return
+    const myVotes = polls[poll.message_id]?.votes.filter(v => v.voter_id === user.id) ?? []
+    const alreadyVoted = myVotes.find(v => v.option_id === optionId)
+    if (alreadyVoted) {
+      // Cabut vote
+      await supabase.from('chat_poll_votes').delete().eq('id', alreadyVoted.id)
+      setPolls(prev => ({
+        ...prev,
+        [poll.message_id]: {
+          ...prev[poll.message_id],
+          votes: prev[poll.message_id].votes.filter(v => v.id !== alreadyVoted.id),
+        },
+      }))
+    } else {
+      if (!poll.is_multiple_choice) {
+        // Single choice: hapus vote sebelumnya
+        const prev_vote = myVotes[0]
+        if (prev_vote) {
+          await supabase.from('chat_poll_votes').delete().eq('id', prev_vote.id)
+          setPolls(prev => ({
+            ...prev,
+            [poll.message_id]: {
+              ...prev[poll.message_id],
+              votes: prev[poll.message_id].votes.filter(v => v.id !== prev_vote.id),
+            },
+          }))
+        }
+      }
+      const { data } = await supabase.from('chat_poll_votes').insert({
+        poll_id: poll.id, voter_id: user.id, option_id: optionId,
+      }).select().single()
+      if (data) {
+        setPolls(prev => ({
+          ...prev,
+          [poll.message_id]: {
+            ...prev[poll.message_id],
+            votes: [...(prev[poll.message_id]?.votes ?? []), data as ChatPollVote],
+          },
+        }))
+      }
+    }
+  }
+
+  async function closePoll(poll: ChatPoll) {
+    await supabase.from('chat_polls')
+      .update({ is_closed: true, closed_at: new Date().toISOString() })
+      .eq('id', poll.id)
+    setPolls(prev => ({
+      ...prev,
+      [poll.message_id]: {
+        ...prev[poll.message_id],
+        poll: { ...poll, is_closed: true },
+      },
+    }))
+  }
+
+  // ── Room prefs (Fase 3) ───────────────────────────────────────────────────
 
   function toggleNotif() {
     if (!activeRoom) return
     const next = { ...roomPrefs, notif: !roomPrefs.notif }
-    setRoomPrefs(next)
-    saveRoomPrefs(activeRoom.id, next)
+    setRoomPrefs(next); saveRoomPrefs(activeRoom.id, next)
   }
-
   function togglePinned() {
     if (!activeRoom) return
     const next = { ...roomPrefs, pinned: !roomPrefs.pinned }
-    setRoomPrefs(next)
-    saveRoomPrefs(activeRoom.id, next)
+    setRoomPrefs(next); saveRoomPrefs(activeRoom.id, next)
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  async function openInfoSheet() {
+    if (!activeRoom) return
+    setRoomSheet('info'); setMembersLoading(true)
+    const { data } = await supabase.from('chat_room_members')
+      .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
+      .eq('room_id', activeRoom.id).limit(30)
+    setRoomMembers(data ?? []); setMembersLoading(false)
+  }
 
+  // ── Reactions (Fase 4) ────────────────────────────────────────────────────
+
+  async function toggleReaction(messageId: string, emoji: string) {
+    if (!user || !activeRoom) return
+    const msgReactions = reactions[messageId] ?? []
+    const existing = msgReactions.find(r => r.user_id === user.id && r.emoji === emoji)
+    if (existing) {
+      await supabase.from('chat_message_reactions').delete().eq('id', existing.id)
+      setReactions(prev => ({
+        ...prev,
+        [messageId]: (prev[messageId] ?? []).filter(r => r.id !== existing.id),
+      }))
+    } else {
+      const { data } = await supabase.from('chat_message_reactions')
+        .insert({ message_id: messageId, room_id: activeRoom.id, user_id: user.id, emoji })
+        .select().single()
+      if (data) {
+        setReactions(prev => ({
+          ...prev,
+          [messageId]: [...(prev[messageId] ?? []).filter(r => !(r.user_id === user.id && r.emoji === emoji)), data],
+        }))
+      }
+    }
+    setActionMenu(null)
+  }
+
+  // ── Pin message (Fase 4) ──────────────────────────────────────────────────
+
+  async function pinMessage(messageId: string) {
+    if (!user) return
+    const { error } = await supabase.from('chat_messages')
+      .update({ is_pinned: true, pinned_at: new Date().toISOString(), pinned_by: user.id })
+      .eq('id', messageId)
+    if (!error) {
+      const msg = messages.find(m => m.id === messageId)
+      if (msg) setPinnedMsg({ ...msg, is_pinned: true })
+      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_pinned: true } : m))
+    }
+    setActionMenu(null)
+  }
+
+  async function unpinMessage() {
+    if (!pinnedMsg) return
+    await supabase.from('chat_messages')
+      .update({ is_pinned: false, pinned_at: null, pinned_by: null })
+      .eq('id', pinnedMsg.id)
+    setMessages(prev => prev.map(m => m.id === pinnedMsg.id ? { ...m, is_pinned: false } : m))
+    setPinnedMsg(null)
+  }
+
+  // ── Long press ────────────────────────────────────────────────────────────
+
+  function startLongPress(msgId: string, isMe: boolean, content?: string) {
+    longPressTimer.current = setTimeout(() => {
+      setActionMenu({ msgId, isMe, content })
+    }, 450)
+  }
+  function cancelLongPress() {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
+  }
+
+  // ── Copy ──────────────────────────────────────────────────────────────────
+
+  function copyText(text?: string) {
+    if (!text) return
+    navigator.clipboard.writeText(text).catch(() => {})
+    setActionMenu(null)
+  }
+
+  // ── Reaction display helpers ──────────────────────────────────────────────
+
+  function groupedReactions(msgId: string): { emoji: string; count: number; mine: boolean }[] {
+    const list = reactions[msgId] ?? []
+    const map: Record<string, { count: number; mine: boolean }> = {}
+    list.forEach(r => {
+      if (!map[r.emoji]) map[r.emoji] = { count: 0, mine: false }
+      map[r.emoji].count++
+      if (r.user_id === user?.id) map[r.emoji].mine = true
+    })
+    return Object.entries(map).map(([emoji, v]) => ({ emoji, ...v }))
+  }
+
+  const canPin = PIN_ROLES.includes(user?.role ?? '')
+
+  // ─────────────────────────────────────────────────────────────────────────
   /* ===== ROOM CHAT VIEW ===== */
+  // ─────────────────────────────────────────────────────────────────────────
+
   if (activeRoom) {
-    const style = getRoomStyle(activeRoom.category)
-    const canLeave = NON_DEFAULT_CATEGORIES.includes(activeRoom.category)
+    const style    = getRoomStyle(activeRoom.category)
     const catLabel = CATEGORY_LABELS[activeRoom.category] ?? activeRoom.category
+    const canLeave = NON_DEFAULT_CATEGORIES.includes(activeRoom.category)
 
     return (
       <SwipeBackWrapper onBack={() => setActiveRoom(null)}>
         <div className="flex flex-col h-screen max-w-md mx-auto">
 
-          {/* ─── Lightbox ────────────────────────────────────────────────── */}
+          {/* ── Lightbox ──────────────────────────────────────────────────── */}
           {lightboxUrl && (
             <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center"
               onClick={() => setLightboxUrl(null)}>
-              <button className="absolute top-5 right-5 text-white/70 hover:text-white z-10">
-                <X size={28} />
-              </button>
+              <button className="absolute top-5 right-5 text-white/70"><X size={28} /></button>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={lightboxUrl} alt="Preview"
                 className="max-w-[92vw] max-h-[85vh] object-contain rounded-xl shadow-2xl"
@@ -328,49 +616,195 @@ function ChatPageInner() {
             </div>
           )}
 
-          {/* ─── Info Room Sheet ─────────────────────────────────────────── */}
+          {/* ── Poll Sheet ───────────────────────────────────────────────── */}
+          {pollSheet && (
+            <div className="fixed inset-0 z-40 flex flex-col justify-end"
+              onClick={() => { if (!pollSending) setPollSheet(false) }}>
+              <div className="bg-white rounded-t-3xl shadow-2xl max-h-[85vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-1">
+                  <div className="w-10 h-1 bg-gray-200 rounded-full" />
+                </div>
+                <div className="px-5 pb-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <BarChart2 size={18} className="text-secondary" />
+                      <p className="font-bold text-gray-800 text-base">Buat Polling</p>
+                    </div>
+                    <button onClick={() => setPollSheet(false)} disabled={pollSending}>
+                      <X size={20} className="text-gray-400" />
+                    </button>
+                  </div>
+
+                  {/* Pertanyaan */}
+                  <div className="mb-4">
+                    <label className="text-xs font-semibold text-gray-500 mb-1.5 block">Pertanyaan</label>
+                    <input
+                      type="text" maxLength={200}
+                      placeholder="Tulis pertanyaan polling..."
+                      value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-secondary"
+                    />
+                  </div>
+
+                  {/* Opsi */}
+                  <div className="mb-3">
+                    <label className="text-xs font-semibold text-gray-500 mb-1.5 block">
+                      Pilihan ({pollOptions.length}/4)
+                    </label>
+                    <div className="space-y-2">
+                      {pollOptions.map((opt, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <input
+                            type="text" maxLength={100}
+                            placeholder={`Pilihan ${i + 1}`}
+                            value={opt} onChange={e => {
+                              const next = [...pollOptions]
+                              next[i] = e.target.value
+                              setPollOptions(next)
+                            }}
+                            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-secondary"
+                          />
+                          {pollOptions.length > 2 && (
+                            <button onClick={() => setPollOptions(pollOptions.filter((_, j) => j !== i))}
+                              className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0">
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {pollOptions.length < 4 && (
+                      <button onClick={() => setPollOptions([...pollOptions, ''])}
+                        className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-secondary">
+                        <Plus size={13} /> Tambah pilihan
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Toggle multi pilihan */}
+                  <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 mb-5">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-700">Boleh pilih banyak</p>
+                      <p className="text-[10px] text-gray-400">Peserta bisa memilih lebih dari satu opsi</p>
+                    </div>
+                    <button onClick={() => setPollMultiple(!pollMultiple)}
+                      className={clsx('relative w-11 h-6 rounded-full transition-colors flex-shrink-0', pollMultiple ? 'bg-secondary' : 'bg-gray-200')}>
+                      <span className={clsx('absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform', pollMultiple ? 'translate-x-5' : 'translate-x-0.5')} />
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={createPoll}
+                    disabled={pollSending || !pollQuestion.trim() || pollOptions.filter(o => o.trim()).length < 2}
+                    className="w-full bg-secondary text-white font-bold py-3 rounded-2xl disabled:opacity-40 transition-opacity flex items-center justify-center gap-2">
+                    {pollSending
+                      ? <><Loader2 size={16} className="animate-spin" /> Membuat...</>
+                      : <><BarChart2 size={16} /> Buat Polling</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Action menu (long press) ───────────────────────────────────── */}
+          {actionMenu && (
+            <div className="fixed inset-0 z-40 flex flex-col justify-end"
+              onClick={() => setActionMenu(null)}>
+              <div className="bg-white rounded-t-3xl shadow-2xl pb-8"
+                onClick={e => e.stopPropagation()}>
+                {/* Drag handle */}
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="w-10 h-1 bg-gray-200 rounded-full" />
+                </div>
+
+                {/* Quick emoji row */}
+                <div className="px-4 py-2">
+                  <p className="text-[10px] text-gray-400 font-semibold mb-2 text-center">Reaksi Cepat</p>
+                  <div className="flex justify-center gap-2">
+                    {QUICK_EMOJIS.map(emoji => {
+                      const list = reactions[actionMenu.msgId] ?? []
+                      const mine = list.some(r => r.user_id === user?.id && r.emoji === emoji)
+                      return (
+                        <button key={emoji}
+                          onClick={() => toggleReaction(actionMenu.msgId, emoji)}
+                          className={clsx(
+                            'w-11 h-11 rounded-2xl text-2xl flex items-center justify-center transition-transform active:scale-95',
+                            mine ? 'bg-primary/20 ring-2 ring-primary/40' : 'bg-gray-100 hover:bg-gray-200'
+                          )}>
+                          {emoji}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-100 mx-4 my-2" />
+
+                {/* Actions */}
+                <div className="px-4 space-y-1">
+                  {/* Pin — hanya admin/koordinator/direksi */}
+                  {canPin && (
+                    <button
+                      onClick={() => pinMessage(actionMenu.msgId)}
+                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
+                    >
+                      <Pin size={18} className="text-secondary" />
+                      <span className="text-sm font-semibold text-gray-700">Sematkan Pesan</span>
+                    </button>
+                  )}
+
+                  {/* Copy teks */}
+                  {actionMenu.content && (
+                    <button
+                      onClick={() => copyText(actionMenu.content)}
+                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
+                    >
+                      <Copy size={18} className="text-gray-500" />
+                      <span className="text-sm font-semibold text-gray-700">Salin Teks</span>
+                    </button>
+                  )}
+
+                  <button onClick={() => setActionMenu(null)}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left">
+                    <X size={18} className="text-gray-400" />
+                    <span className="text-sm font-medium text-gray-400">Batal</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Info / Settings Sheet (Fase 3) ────────────────────────────── */}
           {roomSheet !== 'none' && (
             <div className="fixed inset-0 z-40 flex flex-col justify-end"
               onClick={() => setRoomSheet('none')}>
               <div className="bg-white rounded-t-3xl shadow-2xl max-h-[80vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}>
-
-                {/* Drag handle */}
                 <div className="flex justify-center pt-3 pb-1">
                   <div className="w-10 h-1 bg-gray-200 rounded-full" />
                 </div>
 
-                {/* ── INFO SHEET ──────────────────────────────────────────── */}
+                {/* INFO */}
                 {roomSheet === 'info' && (
                   <div className="px-5 pb-8">
-                    {/* Header baris */}
                     <div className="flex items-center justify-between mb-5">
                       <p className="font-bold text-gray-800 text-base">Info Room</p>
-                      <button onClick={() => setRoomSheet('none')} className="text-gray-400">
-                        <X size={20} />
-                      </button>
+                      <button onClick={() => setRoomSheet('none')}><X size={20} className="text-gray-400" /></button>
                     </div>
-
-                    {/* Avatar + nama */}
                     <div className="flex flex-col items-center mb-6">
                       <div className={`w-20 h-20 rounded-full flex items-center justify-center font-black text-3xl shadow-md mb-3 ${style.bg} ${style.text}`}>
                         {activeRoom.name.charAt(0)}
                       </div>
                       <p className="font-black text-gray-900 text-lg text-center">{activeRoom.name}</p>
-                      <span className={`mt-1.5 px-3 py-0.5 rounded-full text-xs font-semibold ${style.lightBg} ${style.bg.replace('bg-', 'text-')}`}>
-                        {catLabel}
-                      </span>
+                      <span className={`mt-1.5 px-3 py-0.5 rounded-full text-xs font-semibold ${style.lightBg}`}>{catLabel}</span>
                     </div>
-
-                    {/* Deskripsi */}
                     {activeRoom.description && (
                       <div className="bg-gray-50 rounded-2xl px-4 py-3 mb-4">
                         <p className="text-xs font-semibold text-gray-500 mb-1">Deskripsi</p>
                         <p className="text-sm text-gray-700 leading-relaxed">{activeRoom.description}</p>
                       </div>
                     )}
-
-                    {/* Info cards */}
                     <div className="grid grid-cols-2 gap-3 mb-4">
                       <div className="bg-gray-50 rounded-2xl px-4 py-3 text-center">
                         <p className="text-[10px] text-gray-400 font-semibold mb-0.5">STATUS</p>
@@ -382,42 +816,31 @@ function ChatPageInner() {
                           ? <Loader2 size={14} className="animate-spin mx-auto text-gray-400" />
                           : <p className="text-sm font-bold text-gray-700">
                               {roomMembers.length > 0 ? roomMembers.length + ' staff' : 'Semua Staff'}
-                            </p>
-                        }
+                            </p>}
                       </div>
                     </div>
-
-                    {/* Daftar anggota singkat (maks 5) */}
                     {roomMembers.length > 0 && (
-                      <div className="mb-4">
-                        <p className="text-xs font-semibold text-gray-500 mb-2">Anggota</p>
-                        <div className="space-y-2">
-                          {roomMembers.slice(0, 5).map((m: any) => {
-                            const profile = m.user_profiles
-                            return (
-                              <div key={m.user_id} className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-secondary text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                  {(profile?.full_name ?? '?').charAt(0)}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-semibold text-gray-800 truncate">{profile?.full_name ?? 'Staff'}</p>
-                                  <p className="text-[10px] text-gray-400 capitalize">{profile?.role ?? ''}</p>
-                                </div>
+                      <div className="mb-4 space-y-2">
+                        <p className="text-xs font-semibold text-gray-500">Anggota</p>
+                        {roomMembers.slice(0, 5).map((m: any) => {
+                          const p = m.user_profiles
+                          return (
+                            <div key={m.user_id} className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-secondary text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                {(p?.full_name ?? '?').charAt(0)}
                               </div>
-                            )
-                          })}
-                          {roomMembers.length > 5 && (
-                            <p className="text-xs text-gray-400 text-center pt-1">+{roomMembers.length - 5} lainnya</p>
-                          )}
-                        </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-800 truncate">{p?.full_name ?? 'Staff'}</p>
+                                <p className="text-[10px] text-gray-400 capitalize">{p?.role ?? ''}</p>
+                              </div>
+                            </div>
+                          )
+                        })}
+                        {roomMembers.length > 5 && <p className="text-xs text-gray-400 text-center">+{roomMembers.length - 5} lainnya</p>}
                       </div>
                     )}
-
-                    {/* Navigasi ke Pengaturan Room */}
-                    <button
-                      onClick={() => setRoomSheet('settings')}
-                      className="w-full flex items-center gap-3 bg-gray-50 hover:bg-gray-100 rounded-2xl px-4 py-3.5 transition-colors"
-                    >
+                    <button onClick={() => setRoomSheet('settings')}
+                      className="w-full flex items-center gap-3 bg-gray-50 hover:bg-gray-100 rounded-2xl px-4 py-3.5 transition-colors">
                       <Settings size={18} className="text-gray-500" />
                       <span className="flex-1 text-sm font-semibold text-gray-700 text-left">Pengaturan Room</span>
                       <ChevronRight size={16} className="text-gray-400" />
@@ -425,21 +848,14 @@ function ChatPageInner() {
                   </div>
                 )}
 
-                {/* ── SETTINGS SHEET ───────────────────────────────────────── */}
+                {/* SETTINGS */}
                 {roomSheet === 'settings' && (
                   <div className="px-5 pb-8">
-                    {/* Header */}
                     <div className="flex items-center gap-3 mb-5">
-                      <button onClick={() => setRoomSheet('info')} className="text-gray-500">
-                        <ArrowLeft size={20} />
-                      </button>
+                      <button onClick={() => setRoomSheet('info')}><ArrowLeft size={20} className="text-gray-500" /></button>
                       <p className="font-bold text-gray-800 text-base flex-1">Pengaturan Room</p>
-                      <button onClick={() => setRoomSheet('none')} className="text-gray-400">
-                        <X size={20} />
-                      </button>
+                      <button onClick={() => setRoomSheet('none')}><X size={20} className="text-gray-400" /></button>
                     </div>
-
-                    {/* Room identity mini */}
                     <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mb-5">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}>
                         {activeRoom.name.charAt(0)}
@@ -449,78 +865,33 @@ function ChatPageInner() {
                         <p className="text-[10px] text-gray-400 capitalize">{catLabel}</p>
                       </div>
                     </div>
-
-                    {/* Toggle settings */}
                     <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden mb-4">
-
-                      {/* Notifikasi */}
-                      <div className="flex items-center gap-3 px-4 py-4 border-b border-gray-50">
-                        {roomPrefs.notif
-                          ? <Bell size={18} className="text-primary flex-shrink-0" />
-                          : <BellOff size={18} className="text-gray-400 flex-shrink-0" />
-                        }
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-gray-800">Notifikasi</p>
-                          <p className="text-[10px] text-gray-400">
-                            {roomPrefs.notif ? 'Aktif — kamu menerima notifikasi dari room ini' : 'Nonaktif — pesan tetap masuk, tanpa notifikasi'}
-                          </p>
+                      {[
+                        { key: 'notif', icon: roomPrefs.notif ? Bell : BellOff, label: 'Notifikasi', sub: roomPrefs.notif ? 'Aktif' : 'Nonaktif — tanpa notifikasi', val: roomPrefs.notif, fn: toggleNotif },
+                        { key: 'pin',   icon: roomPrefs.pinned ? Pin : PinOff,  label: 'Sematkan Room', sub: roomPrefs.pinned ? 'Disematkan di daftar' : 'Tidak disematkan', val: roomPrefs.pinned, fn: togglePinned },
+                      ].map((item, i) => (
+                        <div key={item.key} className={clsx('flex items-center gap-3 px-4 py-4', i === 0 && 'border-b border-gray-50')}>
+                          <item.icon size={18} className={item.val ? 'text-primary flex-shrink-0' : 'text-gray-400 flex-shrink-0'} />
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-gray-800">{item.label}</p>
+                            <p className="text-[10px] text-gray-400">{item.sub}</p>
+                          </div>
+                          <button onClick={item.fn}
+                            className={clsx('relative w-11 h-6 rounded-full transition-colors flex-shrink-0', item.val ? 'bg-primary' : 'bg-gray-200')}>
+                            <span className={clsx('absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform', item.val ? 'translate-x-5' : 'translate-x-0.5')} />
+                          </button>
                         </div>
-                        <button
-                          onClick={toggleNotif}
-                          className={clsx(
-                            'relative w-11 h-6 rounded-full transition-colors flex-shrink-0',
-                            roomPrefs.notif ? 'bg-primary' : 'bg-gray-200'
-                          )}
-                        >
-                          <span className={clsx(
-                            'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
-                            roomPrefs.notif ? 'translate-x-5.5' : 'translate-x-0.5'
-                          )} />
-                        </button>
-                      </div>
-
-                      {/* Pin room */}
-                      <div className="flex items-center gap-3 px-4 py-4">
-                        {roomPrefs.pinned
-                          ? <Pin size={18} className="text-primary flex-shrink-0" />
-                          : <PinOff size={18} className="text-gray-400 flex-shrink-0" />
-                        }
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-gray-800">Sematkan Room</p>
-                          <p className="text-[10px] text-gray-400">
-                            {roomPrefs.pinned ? 'Disematkan — room muncul di atas daftar' : 'Tidak disematkan'}
-                          </p>
-                        </div>
-                        <button
-                          onClick={togglePinned}
-                          className={clsx(
-                            'relative w-11 h-6 rounded-full transition-colors flex-shrink-0',
-                            roomPrefs.pinned ? 'bg-primary' : 'bg-gray-200'
-                          )}
-                        >
-                          <span className={clsx(
-                            'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform',
-                            roomPrefs.pinned ? 'translate-x-5.5' : 'translate-x-0.5'
-                          )} />
-                        </button>
-                      </div>
+                      ))}
                     </div>
-
-                    {/* Auto delete info */}
                     {activeRoom.auto_delete_days && (
                       <div className="bg-yellow-50 border border-yellow-100 rounded-2xl px-4 py-3 mb-4">
                         <p className="text-xs font-semibold text-yellow-700">Retensi Pesan</p>
-                        <p className="text-xs text-yellow-600 mt-0.5">
-                          Pesan di room ini otomatis dihapus setelah {activeRoom.auto_delete_days} hari
-                        </p>
+                        <p className="text-xs text-yellow-600 mt-0.5">Pesan otomatis dihapus setelah {activeRoom.auto_delete_days} hari</p>
                       </div>
                     )}
-
-                    {/* Tinggalkan room */}
                     {canLeave && (
                       <button className="w-full flex items-center justify-center gap-2 text-red-500 border border-red-100 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
-                        <LogOut size={16} />
-                        <span className="text-sm font-semibold">Tinggalkan Room</span>
+                        <LogOut size={16} /><span className="text-sm font-semibold">Tinggalkan Room</span>
                       </button>
                     )}
                   </div>
@@ -529,41 +900,46 @@ function ChatPageInner() {
             </div>
           )}
 
-          {/* ─── Header ──────────────────────────────────────────────────── */}
+          {/* ── Header ────────────────────────────────────────────────────── */}
           <div className="bg-secondary text-white px-4 pt-10 pb-3 flex items-center gap-3 flex-shrink-0">
-            <button onClick={() => setActiveRoom(null)} className="text-white/70">
-              <ArrowLeft size={22} />
-            </button>
-            {/* Avatar — tap untuk Info Room */}
-            <button
-              onClick={openInfoSheet}
-              className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}
-            >
+            <button onClick={() => setActiveRoom(null)} className="text-white/70"><ArrowLeft size={22} /></button>
+            <button onClick={openInfoSheet}
+              className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}>
               {style.label}
             </button>
-            {/* Nama — tap untuk Info Room */}
             <button onClick={openInfoSheet} className="flex-1 min-w-0 text-left">
               <p className="font-bold text-sm truncate">{activeRoom.name}</p>
               <p className="text-white/40 text-xs capitalize">{catLabel}</p>
             </button>
-            {/* Ikon aksi */}
-            <button
-              onClick={openInfoSheet}
-              className="text-white/50 hover:text-white/80 transition-colors"
-              title="Info Room"
-            >
+            <button onClick={openInfoSheet} className="text-white/50 hover:text-white/80 transition-colors" title="Info Room">
               <Info size={18} />
             </button>
-            <button
-              onClick={() => { setRoomSheet('settings'); setMembersLoading(false) }}
+            <button onClick={() => { setRoomSheet('settings'); setMembersLoading(false) }}
               className={clsx('transition-colors', roomPrefs.notif ? 'text-white/50 hover:text-white/80' : 'text-white/30')}
-              title="Pengaturan Room"
-            >
+              title="Pengaturan Room">
               {roomPrefs.notif ? <Bell size={18} /> : <BellOff size={16} />}
             </button>
           </div>
 
-          {/* ─── Messages ────────────────────────────────────────────────── */}
+          {/* ── Pinned message banner ─────────────────────────────────────── */}
+          {pinnedMsg && (
+            <div className="bg-primary/10 border-b border-primary/20 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+              <Pin size={12} className="text-primary flex-shrink-0" />
+              <button
+                onClick={() => msgRefs.current[pinnedMsg.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                className="flex-1 min-w-0 text-left">
+                <p className="text-[10px] font-bold text-primary">Pesan Disematkan</p>
+                <p className="text-xs text-gray-600 truncate">{pinnedMsg.content || (pinnedMsg.type === 'image' ? '📷 Gambar' : '📎 File')}</p>
+              </button>
+              {canPin && (
+                <button onClick={unpinMessage} className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── Messages ──────────────────────────────────────────────────── */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50">
             {messages.length === 0 && (
               <div className="text-center py-10 text-gray-400">
@@ -572,56 +948,225 @@ function ChatPageInner() {
               </div>
             )}
             {messages.map(msg => {
-              const isMe = msg.sender_id === user?.id
+              const isMe       = msg.sender_id === user?.id
               const senderName = (msg as any).user_profiles?.full_name ?? 'Unknown'
               const senderRole = (msg as any).user_profiles?.role ?? ''
+              const rxGroups   = groupedReactions(msg.id)
+
               return (
-                <div key={msg.id} className={clsx('flex', isMe ? 'justify-end' : 'justify-start')}>
-                  <div className="max-w-[78%] space-y-1">
-                    {!isMe && (
-                      <p className="text-[10px] font-bold text-primary ml-1 capitalize">
-                        {senderName} · {senderRole}
-                      </p>
+                <div key={msg.id}
+                  ref={el => { msgRefs.current[msg.id] = el }}
+                  className={clsx('flex flex-col', isMe ? 'items-end' : 'items-start')}>
+
+                  {/* Sender label */}
+                  {!isMe && (
+                    <p className="text-[10px] font-bold text-primary ml-1 mb-0.5 capitalize">
+                      {senderName} · {senderRole}
+                    </p>
+                  )}
+
+                  {/* Bubble */}
+                  <div
+                    onTouchStart={() => startLongPress(msg.id, isMe, msg.content)}
+                    onTouchEnd={cancelLongPress}
+                    onTouchMove={cancelLongPress}
+                    onContextMenu={e => { e.preventDefault(); setActionMenu({ msgId: msg.id, isMe, content: msg.content }) }}
+                    className={clsx(
+                      'max-w-[78%] px-3 py-2 rounded-2xl text-sm cursor-pointer select-none',
+                      isMe ? 'bg-secondary text-white rounded-br-sm' : 'bg-white text-gray-800 shadow-sm rounded-bl-sm',
+                      msg.is_pinned && 'ring-1 ring-primary/40'
                     )}
-                    <div className={clsx(
-                      'px-3 py-2 rounded-2xl text-sm',
-                      isMe ? 'bg-secondary text-white rounded-br-sm' : 'bg-white text-gray-800 shadow-sm rounded-bl-sm'
-                    )}>
-                      {msg.type === 'image' && msg.media_url && (
-                        <button onClick={() => setLightboxUrl(msg.media_url!)}
-                          className="block mb-1.5 rounded-xl overflow-hidden">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={msg.media_url} alt={msg.content || 'Gambar'}
-                            className="max-w-[200px] w-full object-cover rounded-xl" />
-                        </button>
-                      )}
-                      {msg.type === 'file' && msg.media_url && (
-                        <a href={msg.media_url} target="_blank" rel="noopener noreferrer" download
+                  >
+                    {msg.is_pinned && (
+                      <div className="flex items-center gap-1 mb-1 opacity-60">
+                        <Pin size={9} className={isMe ? 'text-primary' : 'text-primary'} />
+                        <span className="text-[9px] font-semibold text-primary">Disematkan</span>
+                      </div>
+                    )}
+
+                    {/* IMAGE */}
+                    {msg.type === 'image' && msg.media_url && (
+                      <button onClick={() => setLightboxUrl(msg.media_url!)} className="block mb-1.5 rounded-xl overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={msg.media_url} alt={msg.content || 'Gambar'} className="max-w-[200px] w-full object-cover rounded-xl" />
+                      </button>
+                    )}
+
+                    {/* FILE */}
+                    {msg.type === 'file' && msg.media_url && (
+                      <a href={msg.media_url} target="_blank" rel="noopener noreferrer" download
+                        className={clsx('flex items-center gap-2.5 rounded-xl px-3 py-2 mb-1.5 transition-colors',
+                          isMe ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-100 hover:bg-gray-200')}>
+                        <FileText size={20} className={clsx('flex-shrink-0', isMe ? 'text-primary' : 'text-blue-500')} />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold truncate max-w-[140px]">{msg.content || 'File'}</p>
+                          <p className={clsx('text-[10px]', isMe ? 'text-white/50' : 'text-gray-400')}>Ketuk untuk unduh</p>
+                        </div>
+                        <Download size={14} className={isMe ? 'text-white/50' : 'text-gray-400'} />
+                      </a>
+                    )}
+
+                    {/* LOCATION */}
+                    {msg.type === 'location' && (() => {
+                      let loc = { lat: 0, lng: 0, accuracy: 0 }
+                      try { loc = JSON.parse(msg.content ?? '{}') } catch {}
+                      const mapsUrl = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`
+                      return (
+                        <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
                           className={clsx(
-                            'flex items-center gap-2.5 rounded-xl px-3 py-2 mb-1.5 transition-colors',
-                            isMe ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-100 hover:bg-gray-200'
+                            'flex items-start gap-2.5 rounded-xl px-3 py-2.5 mb-1 transition-colors no-underline',
+                            isMe ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-50 hover:bg-gray-100'
                           )}>
-                          <FileText size={20} className={clsx('flex-shrink-0', isMe ? 'text-primary' : 'text-blue-500')} />
+                          <MapPin size={18} className={clsx('mt-0.5 flex-shrink-0', isMe ? 'text-primary' : 'text-red-500')} />
                           <div className="min-w-0">
-                            <p className="text-xs font-semibold truncate max-w-[140px]">{msg.content || 'File'}</p>
-                            <p className={clsx('text-[10px]', isMe ? 'text-white/50' : 'text-gray-400')}>Ketuk untuk unduh</p>
+                            <p className={clsx('text-xs font-bold', isMe ? 'text-white' : 'text-gray-800')}>
+                              📍 Lokasi Saat Ini
+                            </p>
+                            <p className={clsx('text-[10px] mt-0.5', isMe ? 'text-white/60' : 'text-gray-500')}>
+                              {loc.lat.toFixed(6)}, {loc.lng.toFixed(6)}
+                            </p>
+                            {loc.accuracy > 0 && (
+                              <p className={clsx('text-[9px] mt-0.5', isMe ? 'text-white/40' : 'text-gray-400')}>
+                                Akurasi ±{loc.accuracy} m
+                              </p>
+                            )}
+                            <p className={clsx('text-[9px] mt-1 font-semibold', isMe ? 'text-primary' : 'text-blue-500')}>
+                              Ketuk untuk buka Maps →
+                            </p>
                           </div>
-                          <Download size={14} className={isMe ? 'text-white/50' : 'text-gray-400'} />
                         </a>
-                      )}
-                      {msg.type === 'text' && <p className="leading-relaxed">{msg.content}</p>}
-                      <p className={clsx('text-[9px] mt-1', isMe ? 'text-white/50' : 'text-gray-300')}>
-                        {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
+                      )
+                    })()}
+
+                    {/* POLL */}
+                    {msg.type === 'poll' && (() => {
+                      const entry = polls[msg.id]
+                      if (!entry) return (
+                        <div className="flex items-center gap-2 py-1 opacity-60">
+                          <BarChart2 size={14} /><span className="text-xs">Polling</span>
+                        </div>
+                      )
+                      const { poll, votes } = entry
+                      const totalVotes = votes.length
+                      const myVotes    = votes.filter(v => v.voter_id === user?.id).map(v => v.option_id)
+                      const canClose   = !poll.is_closed && (poll.creator_id === user?.id || canPin)
+                      return (
+                        <div className={clsx(
+                          'rounded-xl overflow-hidden mb-1 min-w-[200px]',
+                          isMe ? 'bg-white/10' : 'bg-gray-50 border border-gray-100'
+                        )}>
+                          <div className="px-3 pt-2.5 pb-1">
+                            <div className="flex items-start gap-1.5 mb-2">
+                              <BarChart2 size={13} className={clsx('mt-0.5 flex-shrink-0', isMe ? 'text-primary' : 'text-secondary')} />
+                              <p className={clsx('text-xs font-bold leading-tight', isMe ? 'text-white' : 'text-gray-800')}>
+                                {poll.question}
+                              </p>
+                            </div>
+                            {poll.options.map(opt => {
+                              const count   = votes.filter(v => v.option_id === opt.id).length
+                              const pct     = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0
+                              const voted   = myVotes.includes(opt.id)
+                              return (
+                                <button key={opt.id} disabled={poll.is_closed}
+                                  onClick={() => !poll.is_closed && votePoll(poll, opt.id)}
+                                  className={clsx(
+                                    'w-full text-left mb-1.5 rounded-lg overflow-hidden transition-opacity',
+                                    poll.is_closed ? 'cursor-default' : 'active:opacity-70'
+                                  )}>
+                                  <div className={clsx(
+                                    'relative px-2.5 py-1.5',
+                                    isMe
+                                      ? (voted ? 'bg-primary/30' : 'bg-white/10')
+                                      : (voted ? 'bg-secondary/10' : 'bg-gray-100')
+                                  )}>
+                                    {/* progress bar */}
+                                    <div
+                                      className={clsx(
+                                        'absolute inset-0 origin-left transition-all duration-500',
+                                        isMe ? 'bg-primary/20' : 'bg-secondary/10'
+                                      )}
+                                      style={{ transform: `scaleX(${pct / 100})` }}
+                                    />
+                                    <div className="relative flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        {voted
+                                          ? <CheckSquare size={12} className={isMe ? 'text-primary flex-shrink-0' : 'text-secondary flex-shrink-0'} />
+                                          : <Square size={12} className={clsx('flex-shrink-0', isMe ? 'text-white/40' : 'text-gray-400')} />}
+                                        <span className={clsx('text-[11px] font-semibold truncate', isMe ? 'text-white' : 'text-gray-700')}>
+                                          {opt.text}
+                                        </span>
+                                      </div>
+                                      <span className={clsx('text-[10px] font-bold flex-shrink-0', isMe ? 'text-primary' : 'text-secondary')}>
+                                        {pct}%
+                                      </span>
+                                    </div>
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <div className={clsx(
+                            'px-3 py-1.5 flex items-center justify-between',
+                            isMe ? 'bg-white/5' : 'bg-gray-100/80'
+                          )}>
+                            <span className={clsx('text-[9px]', isMe ? 'text-white/40' : 'text-gray-400')}>
+                              {totalVotes} suara · {poll.is_multiple_choice ? 'multi pilihan' : '1 pilihan'}
+                            </span>
+                            {poll.is_closed
+                              ? <span className="flex items-center gap-0.5 text-[9px] text-red-400 font-semibold">
+                                  <Lock size={8} /> Ditutup
+                                </span>
+                              : canClose && (
+                                  <button onClick={() => closePoll(poll)}
+                                    className={clsx('text-[9px] font-semibold', isMe ? 'text-primary' : 'text-secondary')}>
+                                    Tutup Polling
+                                  </button>
+                                )}
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* TEXT */}
+                    {msg.type === 'text' && <p className="leading-relaxed">{msg.content}</p>}
+
+                    <p className={clsx('text-[9px] mt-1', isMe ? 'text-white/50' : 'text-gray-300')}>
+                      {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
                   </div>
+
+                  {/* Reaction bubbles */}
+                  {rxGroups.length > 0 && (
+                    <div className={clsx('flex flex-wrap gap-1 mt-1', isMe ? 'justify-end' : 'justify-start')}>
+                      {rxGroups.map(({ emoji, count, mine }) => (
+                        <button
+                          key={emoji}
+                          onClick={() => toggleReaction(msg.id, emoji)}
+                          className={clsx(
+                            'flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-colors',
+                            mine
+                              ? 'bg-primary/20 text-secondary ring-1 ring-primary/40'
+                              : 'bg-white shadow-sm text-gray-600 hover:bg-gray-100'
+                          )}>
+                          <span>{emoji}</span>
+                          {count > 1 && <span>{count}</span>}
+                        </button>
+                      ))}
+                      {/* Tambah reaksi */}
+                      <button
+                        onClick={() => setActionMenu({ msgId: msg.id, isMe, content: msg.content })}
+                        className="flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
+                        <SmilePlus size={12} className="text-gray-400" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })}
             <div ref={bottomRef} />
           </div>
 
-          {/* ─── Attachment preview ───────────────────────────────────────── */}
+          {/* ── Attachment preview ────────────────────────────────────────── */}
           {pendingFile && (
             <div className="bg-gray-50 border-t border-gray-200 px-3 py-2 flex-shrink-0">
               {pendingPreview ? (
@@ -640,18 +1185,30 @@ function ChatPageInner() {
                     <p className="text-xs font-semibold text-gray-700 truncate">{pendingFile.name}</p>
                     <p className="text-[10px] text-gray-400">{formatFileSize(pendingFile.size)}</p>
                   </div>
-                  <button onClick={clearPendingFile} className="text-gray-400 ml-1"><X size={14} /></button>
+                  <button onClick={clearPendingFile}><X size={14} className="text-gray-400" /></button>
                 </div>
               )}
             </div>
           )}
 
-          {/* ─── Input bar ───────────────────────────────────────────────── */}
+          {/* ── Input bar ─────────────────────────────────────────────────── */}
           <div className="bg-white border-t border-gray-100 px-3 py-2.5 flex items-center gap-2 flex-shrink-0">
-            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading || sendingLocation}
               className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
               title="Kirim foto / file">
               <Paperclip size={20} />
+            </button>
+            <button onClick={sendLocation} disabled={uploading || sendingLocation || pollSending}
+              className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-40 flex-shrink-0"
+              title="Kirim lokasi">
+              {sendingLocation
+                ? <Loader2 size={18} className="animate-spin text-red-400" />
+                : <MapPin size={20} />}
+            </button>
+            <button onClick={() => setPollSheet(true)} disabled={uploading || sendingLocation || pollSending}
+              className="text-gray-400 hover:text-secondary transition-colors disabled:opacity-40 flex-shrink-0"
+              title="Buat polling">
+              <BarChart2 size={20} />
             </button>
             <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
               className="hidden" onChange={handleFileSelect} />
@@ -662,13 +1219,12 @@ function ChatPageInner() {
               onChange={e => setText(e.target.value)}
               onKeyDown={e => { if (e.key !== 'Enter') return; pendingFile ? sendWithAttachment() : sendMessage() }}
               className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
-              disabled={uploading}
+              disabled={uploading || sendingLocation || pollSending}
             />
             <button
               onClick={pendingFile ? sendWithAttachment : sendMessage}
               disabled={(!text.trim() && !pendingFile) || sending || uploading}
-              className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0"
-            >
+              className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0">
               {uploading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} strokeWidth={2.5} />}
             </button>
           </div>
@@ -690,26 +1246,21 @@ function ChatPageInner() {
             <h1 className="font-black text-xl">Chat Room Staff</h1>
             <p className="text-white/50 text-xs mt-0.5">Komunikasi cepat, koordinasi akurat</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-2 mt-1">
-            <Users size={18} className="text-white/60" />
-          </div>
+          <div className="bg-white/10 rounded-xl p-2 mt-1"><Users size={18} className="text-white/60" /></div>
         </div>
         <div className="relative mt-3">
           <Search className="absolute left-3 top-2.5 text-white/40" size={16} />
           <input type="text" placeholder="Cari room atau pesan..." value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-white/10 text-white placeholder-white/40 text-sm
-                       pl-9 pr-3 py-2 rounded-xl border border-white/20 focus:outline-none" />
+            className="w-full bg-white/10 text-white placeholder-white/40 text-sm pl-9 pr-3 py-2 rounded-xl border border-white/20 focus:outline-none" />
         </div>
       </div>
 
       <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-2 overflow-x-auto sticky top-[8.5rem] z-20">
         {(['semua', 'grup', 'lokasi', 'pribadi'] as FilterTab[]).map(cat => (
           <button key={cat} onClick={() => setFilterTab(cat)}
-            className={clsx(
-              'flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold capitalize transition-colors',
-              filterTab === cat ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500'
-            )}>
+            className={clsx('flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold capitalize transition-colors',
+              filterTab === cat ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500')}>
             {cat}
           </button>
         ))}
@@ -720,8 +1271,7 @@ function ChatPageInner() {
           const q = searchQuery.trim().toLowerCase()
           const filtered = rooms
             .filter(r => matchesFilter(r, filterTab))
-            .filter(r => !q || r.name.toLowerCase().includes(q) ||
-              (r.last_message_content ?? '').toLowerCase().includes(q))
+            .filter(r => !q || r.name.toLowerCase().includes(q) || (r.last_message_content ?? '').toLowerCase().includes(q))
           if (filtered.length === 0) {
             return (
               <div className="text-center py-10 text-gray-400">
@@ -752,7 +1302,7 @@ function ChatPageInner() {
                       </p>
                     </div>
                     <span className={clsx('text-[10px] flex-shrink-0', room.unread_count > 0 ? 'text-primary font-bold' : 'text-gray-400')}>
-                      {formatLastMessageTime(room.last_message_at)}
+                      {formatTime(room.last_message_at)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-0.5">
@@ -771,9 +1321,7 @@ function ChatPageInner() {
           })
         })()}
         <div className="pt-4 text-center">
-          <p className="text-[10px] text-gray-400">
-            Hanya peserta yang diundang dapat bergabung • Data terenkripsi end-to-end
-          </p>
+          <p className="text-[10px] text-gray-400">Hanya peserta yang diundang dapat bergabung • Data terenkripsi end-to-end</p>
         </div>
       </div>
     </AppShell>

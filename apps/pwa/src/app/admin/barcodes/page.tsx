@@ -13,35 +13,51 @@ interface Driver {
   id: string
   driver_id: string
   name: string
-  barcode: string
-  vehicle_type: string
-  vehicle_plate: string
-  branches: { code: string; name: string }[] | null
+  barcode: string | null
+  vehicle_type: string | null
+  vehicle_plate: string | null
+  // Supabase-js return single object untuk FK unique (branch_id → branches.id),
+  // tapi kadang array kalau relasi ambigu. Support keduanya biar defensif.
+  branches: { code: string; name: string } | { code: string; name: string }[] | null
+}
+
+function getBranchName(b: Driver['branches']): string {
+  if (!b) return '—'
+  if (Array.isArray(b)) return b[0]?.name ?? '—'
+  return b.name ?? '—'
 }
 
 function QRCard({ driver }: { driver: Driver }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [failed, setFailed] = useState(false)
+  const codeValue = driver.barcode || driver.driver_id
 
   useEffect(() => {
     if (!canvasRef.current) return
-    QRCode.toCanvas(canvasRef.current, driver.barcode || driver.driver_id, {
+    QRCode.toCanvas(canvasRef.current, codeValue, {
       width: 160,
       margin: 1,
       color: { dark: '#000000', light: '#ffffff' },
-    })
-  }, [driver.barcode, driver.driver_id])
+    }).catch(() => setFailed(true))
+  }, [codeValue])
 
   return (
     <div className="qr-card flex flex-col items-center bg-white border border-gray-200 rounded-xl p-3 gap-2 shadow-sm">
-      <canvas ref={canvasRef} className="rounded" />
+      {failed ? (
+        <div className="w-40 h-40 bg-red-50 border border-red-200 rounded flex items-center justify-center text-red-500 text-xs text-center px-3">
+          Gagal render QR
+        </div>
+      ) : (
+        <canvas ref={canvasRef} className="rounded" />
+      )}
       <div className="text-center">
         <p className="font-bold text-sm text-gray-800 leading-tight">{driver.name}</p>
         <p className="text-[10px] text-gray-400 mt-0.5">{driver.driver_id}</p>
         <p className="text-[10px] font-mono bg-gray-100 px-2 py-0.5 rounded mt-1 text-gray-600">
-          {driver.barcode || driver.driver_id}
+          {codeValue}
         </p>
         <span className="inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-          {driver.branches?.[0]?.name ?? '-'}
+          {getBranchName(driver.branches)}
         </span>
       </div>
     </div>
@@ -89,7 +105,11 @@ export default function BarcodesPage() {
 
   useEffect(() => {
     let result = drivers
-    if (branch !== 'all') result = result.filter(d => d.branches?.[0]?.code === branch)
+    if (branch !== 'all') result = result.filter(d => {
+      const b = d.branches
+      const code = Array.isArray(b) ? b[0]?.code : b?.code
+      return code === branch
+    })
     if (search) result = result.filter(d =>
       d.name.toLowerCase().includes(search.toLowerCase()) ||
       d.driver_id.toLowerCase().includes(search.toLowerCase())

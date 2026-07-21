@@ -170,7 +170,7 @@ function ChatPageInner() {
   const loadMessages = useCallback(async (roomId: string) => {
     const { data } = await supabase
       .from('chat_messages')
-      .select('*, user_profiles(full_name, role)')
+      .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)')
       .eq('room_id', roomId).order('created_at').limit(50)
     setMessages(data ?? [])
     setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
@@ -191,7 +191,7 @@ function ChatPageInner() {
   async function loadPinnedMessage(roomId: string) {
     const { data } = await supabase
       .from('chat_messages')
-      .select('*, user_profiles(full_name)')
+      .select('*, user_profiles!chat_messages_sender_id_fkey(full_name)')
       .eq('room_id', roomId).eq('is_pinned', true)
       .order('pinned_at', { ascending: false }).limit(1).maybeSingle()
     setPinnedMsg(data ?? null)
@@ -309,7 +309,7 @@ function ChatPageInner() {
     const content = text.trim(); setText('')
     const { data, error } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'text', content,
-    }).select('*, user_profiles(full_name, role)').single()
+    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     setSending(false)
     if (error) { alert('Gagal kirim: ' + error.message); setText(content); return }
     if (data) {
@@ -342,7 +342,7 @@ function ChatPageInner() {
     const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: msgType,
       content: pendingFile.name, media_url: publicUrl,
-    }).select('*, user_profiles(full_name, role)').single()
+    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     if (!msgErr && msg) {
       await supabase.from('chat_message_attachments').insert({
         message_id: msg.id, room_id: activeRoom.id, uploader_id: user.id,
@@ -370,7 +370,7 @@ function ChatPageInner() {
         const content = JSON.stringify({ lat, lng, accuracy: Math.round(accuracy) })
         const { data, error } = await supabase.from('chat_messages').insert({
           room_id: activeRoom.id, sender_id: user.id, type: 'location', content,
-        }).select('*, user_profiles(full_name, role)').single()
+        }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
         setSendingLocation(false)
         if (error) { alert('Gagal kirim lokasi: ' + error.message); return }
         if (data) {
@@ -404,7 +404,7 @@ function ChatPageInner() {
     // Insert pesan dulu
     const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'poll', content: q,
-    }).select('*, user_profiles(full_name, role)').single()
+    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     if (msgErr || !msg) { alert('Gagal buat polling'); setPollSending(false); return }
     // Insert poll
     const { data: poll, error: pollErr } = await supabase.from('chat_polls').insert({

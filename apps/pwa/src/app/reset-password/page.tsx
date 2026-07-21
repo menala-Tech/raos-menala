@@ -30,12 +30,12 @@ export default function ResetPasswordPage() {
     e.preventDefault()
     setError('')
 
-    if (password.length < 6) {
-      setError('Kata sandi minimal 6 karakter.')
+    if (!/^\d{6,}$/.test(password)) {
+      setError('PIN minimal 6 digit angka.')
       return
     }
     if (password !== confirm) {
-      setError('Konfirmasi kata sandi tidak cocok.')
+      setError('Konfirmasi PIN tidak cocok.')
       return
     }
 
@@ -44,7 +44,7 @@ export default function ResetPasswordPage() {
     setLoading(false)
 
     if (error) {
-      setError('Gagal mengubah kata sandi. Link mungkin sudah kedaluwarsa.')
+      setError('Gagal mengubah PIN. Link mungkin sudah kedaluwarsa.')
       return
     }
     setSuccess(true)
@@ -56,7 +56,7 @@ export default function ResetPasswordPage() {
       <div className="min-h-screen bg-secondary flex flex-col items-center justify-center px-6 text-center">
         <Loader2 className="text-primary animate-spin mb-4" size={32} />
         <p className="text-white/60 text-sm">
-          Memverifikasi link reset kata sandi...
+          Memverifikasi link reset PIN...
         </p>
       </div>
     )
@@ -75,15 +75,16 @@ export default function ResetPasswordPage() {
   return (
     <div className="min-h-screen bg-secondary flex flex-col justify-center px-6">
       <div className="bg-white rounded-2xl p-6 shadow-2xl">
-        <h1 className="font-bold text-lg text-gray-800 mb-1">Atur Ulang Kata Sandi</h1>
-        <p className="text-xs text-gray-500 mb-5">Masukkan kata sandi baru Anda.</p>
+        <h1 className="font-bold text-lg text-gray-800 mb-1">Atur Ulang PIN</h1>
+        <p className="text-xs text-gray-500 mb-5">Masukkan PIN baru Anda.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
             <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />
             <input
               type={showPass ? 'text' : 'password'}
-              placeholder="Kata Sandi Baru"
+              inputMode="numeric" pattern="[0-9]*"
+              placeholder="PIN Baru"
               value={password}
               onChange={e => setPassword(e.target.value)}
               className="input pl-10 pr-10"
@@ -102,7 +103,8 @@ export default function ResetPasswordPage() {
             <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />
             <input
               type={showPass ? 'text' : 'password'}
-              placeholder="Konfirmasi Kata Sandi"
+              inputMode="numeric" pattern="[0-9]*"
+              placeholder="Konfirmasi PIN"
               value={confirm}
               onChange={e => setConfirm(e.target.value)}
               className="input pl-10"
@@ -115,7 +117,7 @@ export default function ResetPasswordPage() {
           )}
 
           <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Menyimpan...' : 'Simpan Kata Sandi Baru'}
+            {loading ? 'Menyimpan...' : 'Simpan PIN Baru'}
           </button>
         </form>
       </div>

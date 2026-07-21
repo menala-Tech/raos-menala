@@ -47,6 +47,12 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncDriverAirportFromSSOT')
     .timeBased().everyHours(6).create()
 
+  // Sync staff Soeta dari SSOT MASTER DATA STAFF setiap 1 jam — perubahan
+  // roster/PIN staff perlu propagate cepat (staff bisa berubah shift/PIN
+  // di HRIS dan langsung login tanpa nunggu lama)
+  ScriptApp.newTrigger('syncStaffFromSSOT')
+    .timeBased().everyHours(1).create()
+
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
 }

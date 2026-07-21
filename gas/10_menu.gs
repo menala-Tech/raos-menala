@@ -18,6 +18,10 @@ function onOpen() {
         .addItem('🔄 Sync Driver Airport Soeta (SSOT)', 'syncDriverAirportFromSSOT')
     )
     .addSubMenu(
+      SpreadsheetApp.getUi().createMenu('👥 Staff')
+        .addItem('🔄 Sync Staff Soeta (SSOT MASTER DATA STAFF)', 'syncStaffFromSSOT')
+    )
+    .addSubMenu(
       SpreadsheetApp.getUi().createMenu('📊 KPI & Laporan')
         .addItem('Update KPI Semua Staff (Bulan Ini)', 'updateAllKpiThisMonth')
         .addItem('Kirim Laporan Harian ke Admin', 'kirimLaporanHarianAdmin')

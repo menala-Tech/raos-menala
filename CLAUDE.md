@@ -95,23 +95,56 @@ Backup Database/2026-07 Juli/      ← reserved untuk backup Supabase (belum dip
    `shifts`, `kpi_targets`, `chat_rooms`, `chat_messages`, `chat_room_members`,
    `activity_logs`, `system_logs`, `notifications`, `system_config`
 
-## CRUD Staff & Service Role Key — sesi 13, 22 Juli 2026
+## Sync Staff (SSoT) — sesi 14, 22 Juli 2026
 
-- `app/api/admin/staff/route.ts` (POST) buat akun staff baru — satu-satunya
-  tempat di RAOS yang pakai `SUPABASE_SERVICE_ROLE_KEY` (via `lib/supabaseAdmin.ts`,
-  SERVER-ONLY, jangan pernah import dari file `'use client'`)
-- Endpoint ini WAJIB verifikasi Bearer token caller + cek role admin/direksi
-  di awal — service role bypass semua RLS, jangan pernah expose endpoint ini
-  tanpa guard itu
-- Edit/aktifkan-nonaktifkan staff yang sudah ada TIDAK butuh service role —
-  cukup policy `user_profiles_update_admin` (migration `raos_021`), dipanggil
-  langsung dari client seperti tabel lain
-- Trigger `prevent_self_privilege_escalation()` di `user_profiles`: siapapun
-  (termasuk admin) tidak bisa ubah `role`/`is_active` baris miliknya sendiri
-  kecuali dia sudah admin/direksi — cegah staff biasa self-promote jadi admin
-- `SUPABASE_SERVICE_ROLE_KEY` HARUS diset manual di `.env.local` (lokal) +
-  Vercel env vars (production) — tidak pernah commit nilainya, tidak bisa
-  diambil otomatis lewat MCP/tool manapun (dibatasi sengaja demi keamanan)
+RAOS **wajib** ambil daftar staff dari SSOT global, bukan CRUD sendiri di PWA
+(pelanggaran sesi 13 sudah di-rollback):
+- SSOT: spreadsheet "DATABASE STAFF"
+  (`1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw`), tab **"MASTER DATA STAFF"**,
+  lihat `C:\Projects\menala\SSOT_DATA_SOURCES.md`
+- Filter RAOS: kolom D `ID CABANG = "ID Rifim Airport Soeta"` — cabang lain
+  bukan urusan RAOS
+- Arah sync: **satu arah** Google Sheets → Supabase, via `gas/13_staff_sync.gs`
+  (`syncStaffFromSSOT()`), trigger otomatis tiap 1 jam + menu manual
+  🛠️ RAOS System → 👥 Staff → 🔄 Sync Staff Soeta (SSOT)
+- Kolom `user_profiles.source` (migration `raos_022`) membedakan asal data:
+  - `ssot_master_staff` — auto-sync, kolom `staff_id`/`full_name`/`role`/`phone`
+    di-refresh tiap sync + PIN → password Supabase Auth, TIDAK BOLEH diedit
+    manual dari PWA (trigger `prevent_ssot_staff_column_edit` memblokir)
+  - `manual` — akun admin awal (`rifiminternationalgemilang@gmail.com`) yang
+    tidak ada di sheet, sync tidak pernah menyentuh baris ini
+- Kolom milik RAOS sendiri (`branch_id` = Terminal T1/T2/T3, `avatar_url`)
+  TIDAK ada di sheet SSOT — sync tidak pernah mengisinya, admin set via
+  `/admin` setelah staff muncul dari sync
+- Mapping jabatan → role RAOS: STAFF KONTER/PICKUP POINT → `staff`,
+  KOORDINATOR → `koordinator`, ADMIN → `admin`. `direksi` belum ada di sheet
+  — perlu ditambah kolom Jabatan di HRIS
+- **PIN (kolom H sheet)** dipakai sebagai password login Supabase Auth
+  (staff login pakai email + PIN). Aturan sync:
+  - PIN valid (≥6 digit angka): di-set jadi password auth user, di-refresh
+    setiap sync (kalau admin ganti PIN di sheet, propagate max 1 jam)
+  - PIN kosong / <6 digit / bukan angka: sync skip password + log warning,
+    staff harus pakai "Lupa PIN" di halaman login untuk set sendiri
+- Staff `ssot_master_staff` yang hilang dari sheet SSOT di-nonaktifkan
+  (`is_active=false`), bukan di-delete — supaya histori scan_orders/attendance
+  (FK ke `user_profiles.id`) aman
+- `MASTER_STAFF_SHEET_ID` bisa di-override via Script Properties kalau ID
+  spreadsheet SSOT berubah; default hardcode ke ID di atas
+
+### Yang BUKAN sync SSoT — kolom RAOS-only
+
+- Trigger `prevent_self_privilege_escalation()` di `user_profiles` (sesi 13,
+  migration `raos_021`) TETAP AKTIF: siapapun (termasuk admin) tidak bisa
+  ubah `role`/`is_active` baris miliknya sendiri kecuali dia sudah
+  admin/direksi — cegah staff biasa self-promote jadi admin
+- Policy `user_profiles_update_admin` (sesi 13, migration `raos_021`) TETAP
+  DIPAKAI oleh `/admin` untuk edit `branch_id`/`is_active` staff dari client,
+  tanpa service role key
+- **`SUPABASE_SERVICE_ROLE_KEY` di PWA sudah TIDAK dipakai** setelah rollback
+  sesi 14. Hapus dari `.env.local` dan Vercel env vars kalau sudah sempat
+  di-set sesi 13. Service role key sekarang hanya dipakai GAS
+  (`SUPABASE_SERVICE_KEY` di Script Properties, sudah lama ada) untuk buat
+  auth user via `/auth/v1/admin/users`
 
 ## Sync Driver Airport (SSOT) — sesi 12, 22 Juli 2026
 

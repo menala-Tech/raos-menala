@@ -1,7 +1,83 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-22 (sesi 13)*
+*Diupdate: 2026-07-22 (sesi 14)*
 
-## SESI 13 — CRUD Staff Lengkap di /admin (22 Juli 2026)
+## SESI 14 — Sync Staff dari SSOT + Rollback CRUD Staff sesi 13 (22 Juli 2026)
+
+- [x] **Pelanggaran SSoT sesi 13 di-rollback**: tombol "Tambah Staff" +
+  `POST /api/admin/staff` + `lib/supabaseAdmin.ts` dihapus. Sesi 13 keliru
+  membuat sumber staff RAOS sendiri di Supabase (via service role) — melanggar
+  aturan SSoT global "MASTER DATA STAFF sheet adalah SATU-SATUNYA sumber staff
+  untuk seluruh sistem RIFIM". `SUPABASE_SERVICE_ROLE_KEY` tidak lagi perlu
+  diset di PWA, dipindah ke GAS (di sana memang harus service role untuk buat
+  auth user).
+- [x] Struktur SSOT MASTER DATA STAFF (verified via Google Sheets MCP):
+  8 kolom (Email, Nama, Gaji, ID CABANG, ID Staff, Jabatan, No WA, Pin).
+  Total 30 baris staff RIFIM lintas cabang; **RAOS filter ID CABANG =
+  "ID Rifim Airport Soeta" → 1 baris saat ini: Hendro (S001)**.
+- [x] Migration `raos_022_staff_ssot_sync_columns`:
+  - Kolom `source` (`manual` | `ssot_master_staff`) + `ssot_synced_at` di
+    `user_profiles` (analog dengan `raos_drivers.source` di sesi 12)
+  - Trigger `prevent_ssot_staff_column_edit()` — full_name/role/phone/staff_id
+    baris `ssot_master_staff` tidak boleh diedit dari PWA (harus di sheet).
+    Kolom `branch_id` (T1/T2/T3) & `is_active` TETAP boleh diedit admin —
+    itu keputusan operasional RAOS, tidak ada di sheet SSOT
+  - Trigger bypass untuk `auth.role() = 'service_role'` (GAS sync)
+- [x] Migration `raos_022b_auth_user_id_by_email_rpc`:
+  - RPC helper `get_auth_user_id_by_email(email)` — SECURITY DEFINER, hanya
+    boleh dipanggil service_role (dipakai GAS sync untuk lookup auth.users)
+- [x] `gas/13_staff_sync.gs` — `syncStaffFromSSOT()`:
+  - Baca MASTER DATA STAFF, filter Soeta only
+  - Mapping jabatan → role: STAFF KONTER/PICKUP POINT → `staff`, KOORDINATOR
+    → `koordinator`, ADMIN → `admin` (direksi belum ada di sheet — perlu
+    ditambah di HRIS)
+  - PIN dari sheet (kolom H) → password Supabase Auth (via GoTrue admin API)
+    - PIN kosong / <6 digit / bukan angka → skip password + log warning,
+      staff pakai "Lupa PIN" untuk set sendiri
+  - Kolom `branch_id` tidak disentuh sync — admin set T1/T2/T3 via `/admin`
+  - Staff `ssot_master_staff` yang hilang dari sheet → `is_active=false`
+    (soft-delist, jaga FK `user_profiles.id` untuk scan_orders/attendance/dll)
+  - Baris `source=manual` (mis. admin awal
+    `rifiminternationalgemilang@gmail.com` yang tidak ada di sheet) TIDAK
+    PERNAH ditimpa sync
+  - Trigger tiap 1 jam ditambahkan ke `setupAllTriggers()`
+  - Menu manual: 🛠️ RAOS System → 👥 Staff → 🔄 Sync Staff Soeta (SSOT)
+- [x] `/admin` tab Staff:
+  - Banner info SSoT di atas list ("edit di sheet, bukan di sini")
+  - Ikon 🔒 kecil di sebelah nama staff hasil sync
+  - Modal Edit Staff jadi SSoT-aware: kalau `source=ssot_master_staff`,
+    field nama/role/phone di-disable + banner peringatan; hanya Terminal
+    (branch_id) yang boleh diubah. Baris manual (admin awal) tetap
+    editable penuh
+- [x] Halaman login (`page.tsx`) + reset password: label "Kata Sandi" →
+  "PIN", input `inputMode="numeric" pattern="[0-9]*"`, validasi PIN min
+  6 digit ANGKA
+- [x] Build pass (16 halaman prerender, route `/api/admin/staff` sudah hilang)
+
+### ⚠️ BLOCKER — perlu Anda lakukan manual sebelum sync jalan:
+- [ ] Set Script Property `MASTER_STAFF_SHEET_ID` di GAS =
+  `1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw` (opsional — ada default
+  hardcode kalau tidak diset)
+- [ ] Deploy GAS terbaru: `clasp push` dari `gas/` folder (13 file sekarang)
+- [ ] Jalankan sekali manual dari menu spreadsheet: 🛠️ RAOS System →
+  👥 Staff → 🔄 Sync Staff Soeta (SSOT). Verifikasi 1 staff (Hendro/S001)
+  muncul di Supabase `user_profiles` dengan `source=ssot_master_staff`
+- [ ] Jalankan ulang `setupAllTriggers()` — trigger sync staff 1-jam baru
+  ditambahkan (tanpa ini trigger otomatis belum aktif)
+- [ ] Set `branch_id` (T1/T2/T3) untuk Hendro via `/admin` — sync tidak
+  set otomatis karena bukan info SSoT
+- [ ] Hapus `SUPABASE_SERVICE_ROLE_KEY` dari Vercel env vars kalau sudah
+  di-set sesi 13 (tidak dipakai lagi di PWA)
+
+### Pending sesi berikutnya:
+- [ ] End-to-end test login pakai email + PIN Hendro setelah sync jalan
+- [ ] Tambah kolom "Jabatan DIREKSI" di HRIS supaya mapping role direksi
+  bisa dilakukan
+- [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings (manual)
+- [ ] Offline mode (Service Worker) + push notification (FCM)
+
+---
+
+## SESI 13 — CRUD Staff Lengkap di /admin (22 Juli 2026) — [DIROLLBACK sesi 14]
 
 - [x] Migration `raos_021_staff_crud_admin_policy`:
   - Policy `user_profiles_update_admin` — admin/direksi sekarang bisa UPDATE

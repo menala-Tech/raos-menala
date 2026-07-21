@@ -27,6 +27,8 @@ export interface UserProfile {
   phone?: string
   avatar_url?: string
   is_active: boolean
+  source?: 'manual' | 'ssot_master_staff'
+  ssot_synced_at?: string
   branches?: Branch
 }
 

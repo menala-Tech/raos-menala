@@ -33,7 +33,7 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) { setError('Email atau kata sandi salah.'); setLoading(false); return }
+    if (error) { setError('Email atau PIN salah.'); setLoading(false); return }
     router.push('/dashboard')
   }
 
@@ -75,7 +75,7 @@ export default function LoginPage() {
         ? 'Server email belum dikonfigurasi. Hubungi Admin sistem.'
         : 'Gagal mengirim link reset. Periksa email dan coba lagi.')
     } else {
-      setInfo(`Link atur ulang kata sandi telah dikirim ke ${email}.`)
+      setInfo(`Link atur ulang PIN telah dikirim ke ${email}.`)
     }
     setLoading(false)
   }
@@ -130,8 +130,8 @@ export default function LoginPage() {
         </p>
         <p className="text-white/40 text-xs text-center mt-3">
           {mode === 'password'      && 'Silakan masuk untuk melanjutkan'}
-          {mode === 'magic-link'    && 'Masuk cepat tanpa kata sandi'}
-          {mode === 'forgot-password' && 'Atur ulang kata sandi Anda'}
+          {mode === 'magic-link'    && 'Masuk cepat tanpa PIN'}
+          {mode === 'forgot-password' && 'Atur ulang PIN Anda'}
         </p>
       </div>
 
@@ -159,9 +159,13 @@ export default function LoginPage() {
               </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />
-                <input type={showPass ? 'text' : 'password'} placeholder="Kata Sandi" value={password}
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  inputMode="numeric" pattern="[0-9]*"
+                  placeholder="PIN" value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="input pl-10 pr-10" autoComplete="current-password" required />
+                  className="input pl-10 pr-10" autoComplete="current-password" required
+                />
                 <button type="button" onClick={() => setShowPass(!showPass)}
                   className="absolute right-3 top-3.5 text-gray-400">
                   {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -174,7 +178,7 @@ export default function LoginPage() {
                 </label>
                 <button type="button" onClick={() => switchMode('forgot-password')}
                   className="text-primary font-semibold text-xs">
-                  Lupa Kata Sandi?
+                  Lupa PIN?
                 </button>
               </div>
 
@@ -195,7 +199,7 @@ export default function LoginPage() {
             <button onClick={() => switchMode('magic-link')}
               className="btn-secondary flex items-center justify-center gap-2">
               <Send size={16} />
-              Link Email (Tanpa Kata Sandi)
+              Link Email (Tanpa PIN)
             </button>
 
             <p className="text-center text-gray-400 text-xs mt-4">
@@ -210,7 +214,7 @@ export default function LoginPage() {
           <form onSubmit={handleMagicLink} className="space-y-4">
             <p className="text-sm font-bold text-gray-800 mb-1">Masuk dengan Link Email</p>
             <p className="text-xs text-gray-500">
-              Masukkan email staff yang terdaftar. Kami akan kirim link pribadi — klik untuk langsung masuk tanpa kata sandi.
+              Masukkan email staff yang terdaftar. Kami akan kirim link pribadi — klik untuk langsung masuk tanpa PIN.
             </p>
             <div className="relative">
               <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
@@ -230,9 +234,10 @@ export default function LoginPage() {
         {/* FORGOT PASSWORD MODE */}
         {mode === 'forgot-password' && (
           <form onSubmit={handleForgotPassword} className="space-y-4">
-            <p className="text-sm font-bold text-gray-800 mb-1">Lupa Kata Sandi?</p>
+            <p className="text-sm font-bold text-gray-800 mb-1">Lupa PIN?</p>
             <p className="text-xs text-gray-500">
-              Masukkan email akun Anda. Kami akan kirim link untuk mengatur ulang kata sandi.
+              Masukkan email akun Anda. Kami akan kirim link untuk mengatur ulang PIN.
+              Catatan: kalau PIN Anda diatur di HRIS, sebaiknya minta admin update di sheet supaya sinkron.
             </p>
             <div className="relative">
               <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />

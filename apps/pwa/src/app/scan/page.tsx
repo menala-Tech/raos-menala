@@ -160,19 +160,18 @@ export default function ScanPage() {
         )}
 
         {/* FAB toggle — bulat di pojok kanan bawah, di atas BottomNav (bottom ~104px).
-            Klik untuk pindah antara mode Kamera ↔ Manual, hanya saat scanState=idle. */}
-        {scanState === 'idle' && (
-          <button
-            onClick={() => setInputMode(m => m === 'camera' ? 'manual' : 'camera')}
-            aria-label={inputMode === 'camera' ? 'Ganti ke input manual' : 'Ganti ke kamera'}
-            className="fixed right-4 z-20 w-14 h-14 rounded-full bg-secondary text-white
-                       shadow-lg shadow-black/30 flex items-center justify-center
-                       active:scale-95 transition-transform border-2 border-white"
-            style={{ bottom: 'calc(104px + env(safe-area-inset-bottom))' }}
-          >
-            {inputMode === 'camera' ? <Keyboard size={22} /> : <Camera size={22} />}
-          </button>
-        )}
+            Selalu tampil (bahkan saat sedang proses/sudah ada hasil) supaya user
+            bisa switch mode kapan saja tanpa harus reset dulu. */}
+        <button
+          onClick={() => { setInputMode(m => m === 'camera' ? 'manual' : 'camera'); if (scanState !== 'idle') reset() }}
+          aria-label={inputMode === 'camera' ? 'Ganti ke input manual' : 'Ganti ke kamera'}
+          className="fixed right-4 z-20 w-14 h-14 rounded-full bg-secondary text-white
+                     shadow-lg shadow-black/30 flex items-center justify-center
+                     active:scale-95 transition-transform border-2 border-white"
+          style={{ bottom: 'calc(104px + env(safe-area-inset-bottom))' }}
+        >
+          {inputMode === 'camera' ? <Keyboard size={22} /> : <Camera size={22} />}
+        </button>
 
         {scanState === 'scanning' && (
           <div className="card flex flex-col items-center py-8 gap-3">

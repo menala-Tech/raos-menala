@@ -13,9 +13,13 @@ function onOpen() {
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('🚗 Driver')
-        .addItem('Isi Data Mock Driver', 'initMockDriverData')
-        .addItem('Import Driver ke Supabase', 'importDriverFromSheet')
         .addItem('🔄 Sync Driver Airport Soeta (SSOT)', 'syncDriverAirportFromSSOT')
+        // initMockDriverData & importDriverFromSheet dihapus dari menu sejak sesi
+        // 14 — dua fungsi itu era pre-SSOT (pakai sheet DATABASE DRIVER lokal),
+        // sekarang driver Soeta harus dari sync SSOT. Fungsinya masih ada di
+        // 03_order.gs kalau perlu dipanggil manual dari script editor untuk
+        // debug, tapi tidak boleh dijalankan operasional (buat baris source=
+        // manual yang bisa duplikat dengan hasil sync SSOT).
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('👥 Staff')

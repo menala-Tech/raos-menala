@@ -28,6 +28,14 @@ Sesi paling panjang sampai sekarang. Rangkuman komit yang landed:
 
 ### ⚠️ Pending konkret untuk sesi 15
 
+- [ ] **KPI pipeline REFACTOR BESAR** (belum pernah jalan). Ditemukan sesi 14
+  audit: `updateAllKpiThisMonth` loop `staff_id` TEXT dari sheet lokal
+  DATABASE STAFF, tapi `kpi_targets.staff_id` FK UUID → user_profiles.id.
+  Insert selalu gagal. `hitungKpiStaff` juga baca sheet TARGET STAFF (belum
+  diisi) dan match staff pakai NAMA string dari ABSENSI sheet (fragile).
+  Butuh: (a) sheet TARGET STAFF diisi, (b) refactor pipe pakai user_profiles
+  Supabase + UUID id, (c) rekap absensi diambil dari raos_attendance
+  (Supabase), bukan sheet ABSENSI lokal.
 - [ ] **Hard-block scan/absensi di luar radius** (staff & koordinator) — Anda minta di sesi 14. Interpretasi persis "50m di luar radius" masih pilih A/B/C (lihat catatan di bawah, sesi 14 detail).
 - [ ] User isi PIN Hendro di sheet (kosong saat ini) atau dia pakai "Lupa PIN" untuk set sendiri.
 - [ ] Set `branch_id` (T1/T2/T3) Hendro via `/admin` — sync tidak isi otomatis.

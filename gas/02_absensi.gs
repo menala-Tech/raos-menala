@@ -100,21 +100,32 @@ function rekapAbulanan(bulan, tahun) {
 }
 
 function kirimReminderAbsensi() {
-  const sh = getSheet(CONFIG.SHEETS.DB_STAFF)
-  const staff = sh.getDataRange().getValues().slice(1)
-  const today = formatDate(new Date())
+  // Sumber staff = Supabase user_profiles (sync dari SSOT MASTER DATA STAFF via
+  // gas/13_staff_sync.gs). Sheet lokal DATABASE STAFF sudah tidak dipakai
+  // sebagai sumber sejak sesi 14 — SSoT rule global (semua PWA RIFIM ambil
+  // staff dari 1 spreadsheet SSOT, lihat SSOT_DATA_SOURCES.md).
+  const staff = callSupabase(
+    'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
+  ) || []
+  if (staff.length === 0) return
 
-  const shAbsensi = getSheet(CONFIG.SHEETS.ABSENSI)
-  const absensiRows = shAbsensi.getDataRange().getValues().slice(1)
-  const sudahAbsen = new Set(
-    absensiRows
-      .filter(r => formatDate(r[1]) === today && r[4] !== '')  // r[1]=TANGGAL, r[4]=JAM MASUK
-      .map(r => r[3])                                           // r[3]=ID STAFF
-  )
+  const today = new Date().toISOString().split('T')[0]
+  const absensiHariIni = callSupabase(
+    `raos_attendance?date=eq.${today}&check_in_at=not.is.null&select=staff_id`
+  ) || []
+  const sudahAbsen = new Set(absensiHariIni.map(a => a.staff_id))
 
-  staff.forEach(([id, nama, , , hp]) => {
-    if (!sudahAbsen.has(id)) {
-      sendWhatsApp(hp, `⏰ *PENGINGAT ABSENSI*\nHai ${nama}, kamu belum absen masuk hari ini.\nSegera lakukan absensi melalui aplikasi RAOS.`)
-    }
+  let terkirim = 0
+  staff.forEach(s => {
+    if (sudahAbsen.has(s.id)) return
+    if (!s.phone) return
+    sendWhatsApp(
+      s.phone,
+      `⏰ *PENGINGAT ABSENSI*\nHai ${s.full_name}, kamu belum absen masuk hari ini.\nSegera lakukan absensi melalui aplikasi RAOS.`
+    )
+    terkirim++
   })
+
+  logSistem('cron', 'kirimReminderAbsensi', 'success',
+    `Reminder dikirim ke ${terkirim} dari ${staff.length} staff aktif (${staff.length - terkirim} sudah absen atau tanpa no HP)`)
 }

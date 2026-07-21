@@ -117,15 +117,13 @@ export default function LoginPage() {
       </div>
 
       {/* Logo & Title */}
-      <div className="flex flex-col items-center px-6 -mt-14 pb-6 relative z-10">
-        <MenalaMark size={110} className="drop-shadow-[0_6px_24px_rgba(245,197,24,0.4)]" />
-        <h1 className="text-white text-2xl font-black tracking-[0.2em] text-center mt-4 leading-none">
-          MENALA
-        </h1>
-        <p className="text-white/60 text-[10px] font-semibold text-center mt-1.5 tracking-[0.14em] uppercase">
-          PT. Menala Internasional Gemilang
-        </p>
-        <p className="text-primary/90 text-xs font-bold text-center mt-1 tracking-widest uppercase">
+      <div className="flex flex-col items-center px-6 -mt-10 pb-6 relative z-10">
+        {/* Wrapper putih rounded — logo asli berlatar putih, jadi biar
+            tetap tajam di atas bg navy, dibungkus card putih dengan shadow. */}
+        <div className="bg-white rounded-2xl px-5 py-4 shadow-2xl">
+          <MenalaLogo size={240} variant="splash" />
+        </div>
+        <p className="text-primary/90 text-xs font-bold text-center mt-4 tracking-widest uppercase">
           Airport Operation System
         </p>
         <p className="text-white/40 text-xs text-center mt-3">

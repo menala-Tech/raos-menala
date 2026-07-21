@@ -317,7 +317,8 @@ function EditStaffModal({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-t-3xl w-full max-w-md mx-auto p-6 max-h-[85vh] overflow-y-auto"
+        className="bg-white rounded-t-3xl w-full max-w-md mx-auto px-6 pt-6 max-h-[85vh] overflow-y-auto"
+        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-1">

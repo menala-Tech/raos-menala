@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
-import { ArrowLeft, Search, Car, Phone, Plus, X, Loader2 } from 'lucide-react'
+import { ArrowLeft, Search, Car, Phone, Plus, X, Loader2, Pencil, Radar } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile, Driver, Branch } from '@/types'
 
@@ -20,12 +20,13 @@ export default function DriversPage() {
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [showAddForm, setShowAddForm] = useState(false)
+  const [editingDriver, setEditingDriver] = useState<Driver | null>(null)
 
   const loadDrivers = useCallback(async (pageNum: number, searchTerm: string) => {
     setLoading(true)
     let query = supabase
       .from('raos_drivers')
-      .select('id, driver_id, name, phone, vehicle_type, vehicle_plate, branch_id, barcode, is_active, branches(name)', { count: 'exact' })
+      .select('id, driver_id, name, phone, vehicle_type, vehicle_plate, branch_id, barcode, is_active, source, branches(name)', { count: 'exact' })
       .eq('is_active', true)
       .order('name')
       .range(pageNum * PAGE_SIZE, pageNum * PAGE_SIZE + PAGE_SIZE - 1)
@@ -130,7 +131,15 @@ export default function DriversPage() {
               <Car size={18} className="text-blue-600" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm text-gray-800 truncate">{driver.name}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="font-semibold text-sm text-gray-800 truncate">{driver.name}</p>
+                {driver.source === 'ssot_driver_airport' && (
+                  <span title="Auto-sync dari Database Driver Airport (SSOT)"
+                        className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0">
+                    <Radar size={9} /> SSOT
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-gray-400">
                 {driver.driver_id} • {(driver as any).branches?.name ?? '-'}
               </p>
@@ -143,12 +152,24 @@ export default function DriversPage() {
                 {driver.vehicle_plate && (
                   <span className="text-[10px] text-gray-400">{driver.vehicle_plate}</span>
                 )}
+                {!driver.phone && !driver.vehicle_type && (
+                  <span className="text-[10px] text-amber-600">Data kendaraan belum dilengkapi</span>
+                )}
               </div>
             </div>
             {driver.vehicle_type && (
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 flex-shrink-0">
                 {driver.vehicle_type}
               </span>
+            )}
+            {isAdmin && (
+              <button
+                onClick={() => setEditingDriver(driver)}
+                className="p-1.5 text-gray-400 hover:text-primary flex-shrink-0"
+                aria-label="Lengkapi data driver"
+              >
+                <Pencil size={14} />
+              </button>
             )}
           </div>
         ))}
@@ -181,6 +202,15 @@ export default function DriversPage() {
           branches={branches}
           onClose={() => setShowAddForm(false)}
           onAdded={() => { setShowAddForm(false); loadDrivers(0, search) }}
+        />
+      )}
+
+      {editingDriver && (
+        <EditDriverModal
+          driver={editingDriver}
+          branches={branches}
+          onClose={() => setEditingDriver(null)}
+          onSaved={() => { setEditingDriver(null); loadDrivers(page, search) }}
         />
       )}
     </AppShell>
@@ -275,6 +305,102 @@ function AddDriverModal({
           <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
             {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
             {saving ? 'Menyimpan...' : 'Simpan Driver'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function EditDriverModal({
+  driver, branches, onClose, onSaved,
+}: { driver: Driver; branches: Branch[]; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    phone: driver.phone ?? '',
+    vehicle_type: driver.vehicle_type ?? '',
+    vehicle_plate: driver.vehicle_plate ?? '',
+    barcode: driver.barcode ?? '',
+    branch_id: driver.branch_id ?? '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const isSsot = driver.source === 'ssot_driver_airport'
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    const { error } = await supabase.from('raos_drivers').update({
+      phone: form.phone || null,
+      vehicle_type: form.vehicle_type || null,
+      vehicle_plate: form.vehicle_plate || null,
+      barcode: form.barcode || null,
+      branch_id: form.branch_id || null,
+    }).eq('id', driver.id)
+    setSaving(false)
+    if (error) {
+      setError(error.message.includes('duplicate') ? 'Barcode sudah dipakai driver lain.' : 'Gagal menyimpan.')
+      return
+    }
+    onSaved()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
+      <div
+        className="bg-white rounded-t-3xl w-full max-w-md mx-auto p-6 max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-bold text-gray-800">Lengkapi Data Driver</h2>
+          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">{driver.name} • {driver.driver_id}</p>
+
+        {isSsot && (
+          <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2 mb-3">
+            Nama &amp; status aktif driver ini otomatis diambil dari SSOT Driver Airport
+            (tidak bisa diubah di sini). Kolom di bawah khusus data operasional RAOS.
+          </p>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            placeholder="No. HP" value={form.phone}
+            onChange={e => setForm({ ...form, phone: e.target.value })}
+            className="input"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              placeholder="Jenis Kendaraan" value={form.vehicle_type}
+              onChange={e => setForm({ ...form, vehicle_type: e.target.value })}
+              className="input"
+            />
+            <input
+              placeholder="Plat Nomor" value={form.vehicle_plate}
+              onChange={e => setForm({ ...form, vehicle_plate: e.target.value })}
+              className="input"
+            />
+          </div>
+          <input
+            placeholder="Barcode (opsional, boleh sama dengan ID Driver)" value={form.barcode}
+            onChange={e => setForm({ ...form, barcode: e.target.value })}
+            className="input"
+          />
+          <select
+            value={form.branch_id}
+            onChange={e => setForm({ ...form, branch_id: e.target.value })}
+            className="input"
+          >
+            <option value="">Pilih Cabang (opsional)</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+
+          {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
+
+          <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={16} />}
+            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
           </button>
         </form>
       </div>

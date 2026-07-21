@@ -55,6 +55,7 @@ export interface Driver {
   branch_id: string
   barcode?: string
   is_active: boolean
+  source?: 'manual' | 'ssot_driver_airport'
 }
 
 export interface ScanOrder {

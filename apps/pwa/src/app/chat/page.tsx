@@ -499,6 +499,31 @@ function ChatPageInner() {
     setRoomMembers(data ?? []); setMembersLoading(false)
   }
 
+  // Fase 3 — keluar dari room (untuk kategori pribadi/proyek, bukan default channel).
+  // Delete membership user → RLS `chat_room_members_delete_own` (migration raos_023)
+  // memastikan user cuma bisa hapus baris miliknya sendiri.
+  async function leaveRoom() {
+    if (!activeRoom || !user) return
+    if (!confirm(`Tinggalkan room "${activeRoom.name}"? Anda tidak akan menerima pesan baru sampai diundang ulang.`)) return
+    const { error } = await supabase.from('chat_room_members')
+      .delete().eq('room_id', activeRoom.id).eq('user_id', user.id)
+    if (error) { alert('Gagal keluar room: ' + error.message); return }
+    setRoomSheet('none')
+    setActiveRoom(null) // balik ke list, useEffect akan refresh loadRooms()
+  }
+
+  // Fase 5 — admin set/ubah retensi pesan per room. Cron server-side
+  // (raos_delete_expired_chat_messages) menghormati kolom auto_delete_days.
+  // Kirim null = matikan retensi (pesan tidak dihapus otomatis).
+  async function updateRetention(days: number | null) {
+    if (!activeRoom || !user) return
+    if (!PIN_ROLES.includes(user.role)) return
+    const { error } = await supabase.from('chat_rooms')
+      .update({ auto_delete_days: days }).eq('id', activeRoom.id)
+    if (error) { alert('Gagal ubah retensi: ' + error.message); return }
+    setActiveRoom({ ...activeRoom, auto_delete_days: days ?? undefined })
+  }
+
   // ── Reactions (Fase 4) ────────────────────────────────────────────────────
 
   async function toggleReaction(messageId: string, emoji: string) {
@@ -882,14 +907,35 @@ function ChatPageInner() {
                         </div>
                       ))}
                     </div>
-                    {activeRoom.auto_delete_days && (
-                      <div className="bg-yellow-50 border border-yellow-100 rounded-2xl px-4 py-3 mb-4">
-                        <p className="text-xs font-semibold text-yellow-700">Retensi Pesan</p>
-                        <p className="text-xs text-yellow-600 mt-0.5">Pesan otomatis dihapus setelah {activeRoom.auto_delete_days} hari</p>
+                    {/* Retensi pesan — read-only untuk semua, dropdown edit khusus admin/koordinator/direksi */}
+                    <div className="bg-yellow-50 border border-yellow-100 rounded-2xl px-4 py-3 mb-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-yellow-700">Retensi Pesan</p>
+                          <p className="text-[11px] text-yellow-600 mt-0.5">
+                            {activeRoom.auto_delete_days
+                              ? `Otomatis dihapus setelah ${activeRoom.auto_delete_days} hari (pesan yang di-pin tetap disimpan)`
+                              : 'Tidak aktif — pesan disimpan selamanya'}
+                          </p>
+                        </div>
+                        {user && PIN_ROLES.includes(user.role) && (
+                          <select
+                            className="text-xs font-semibold bg-white border border-yellow-200 rounded-lg px-2 py-1.5 text-yellow-800 flex-shrink-0"
+                            value={activeRoom.auto_delete_days ?? ''}
+                            onChange={e => updateRetention(e.target.value ? Number(e.target.value) : null)}
+                          >
+                            <option value="">Tidak</option>
+                            <option value="7">7 hari</option>
+                            <option value="30">30 hari</option>
+                            <option value="90">90 hari</option>
+                          </select>
+                        )}
                       </div>
-                    )}
+                    </div>
                     {canLeave && (
-                      <button className="w-full flex items-center justify-center gap-2 text-red-500 border border-red-100 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
+                      <button
+                        onClick={leaveRoom}
+                        className="w-full flex items-center justify-center gap-2 text-red-500 border border-red-100 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
                         <LogOut size={16} /><span className="text-sm font-semibold">Tinggalkan Room</span>
                       </button>
                     )}

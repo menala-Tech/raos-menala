@@ -6,8 +6,9 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { checkGeofence, type GeofenceResult } from '@/lib/geo'
+import { requestLocationTiered } from '@/lib/gps'
 import MenalaLogo from '@/components/MenalaLogo'
-import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera, Navigation } from 'lucide-react'
+import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
 
@@ -37,18 +38,19 @@ export default function ScanPage() {
     }
     init()
 
-    navigator.geolocation.getCurrentPosition(
-      async pos => {
-        const lat = pos.coords.latitude
-        const lng = pos.coords.longitude
-        setLocation({ lat, lng })
-        const result = await checkGeofence(lat, lng)
+    // GPS tiered — coarse dulu (~1s wifi/cell) supaya UI langsung siap,
+    // refine (GPS asli, non-blocking) menyusul untuk presisi lebih baik.
+    // Lihat lib/gps.ts.
+    const abort = requestLocationTiered({
+      onFix: async fix => {
+        setLocation({ lat: fix.lat, lng: fix.lng })
+        const result = await checkGeofence(fix.lat, fix.lng)
         setGeofence(result)
         setLocationStatus(result.isValid ? 'valid' : 'invalid')
       },
-      () => setLocationStatus('unavailable'),
-      { enableHighAccuracy: true }
-    )
+      onUnavailable: () => setLocationStatus('unavailable'),
+    })
+    return abort
   }, [router])
 
   const handleScan = useCallback(async (barcode: string) => {

@@ -12,6 +12,7 @@ import {
 import Link from 'next/link'
 import SelfieCapture from '@/components/SelfieCapture'
 import { checkGeofence, type GeofenceResult } from '@/lib/geo'
+import { requestLocationTiered } from '@/lib/gps'
 import { detectCurrentShift, formatShiftTime, isLate, type Shift } from '@/lib/shift'
 import type { UserProfile, Attendance } from '@/types'
 
@@ -31,6 +32,21 @@ export default function AbsensiPage() {
   const [recentAttendance, setRecentAttendance] = useState<Attendance[]>([])
 
   useEffect(() => {
+    // GPS tiered — coarse dulu (~1s wifi/cell) supaya banner lokasi & status
+    // geo-fence langsung tampil, refine (GPS asli, non-blocking) menyusul.
+    // Dijalankan PARALEL dengan auth/profile fetch di bawah supaya kedua
+    // proses jalan bersamaan, bukan berurutan. Lihat lib/gps.ts.
+    const abortGps = requestLocationTiered({
+      onFix: async fix => {
+        setLocation({ lat: fix.lat, lng: fix.lng })
+        const result = await checkGeofence(fix.lat, fix.lng)
+        setGeofence(result)
+        setLocationValid(result.isValid)
+        setLocationStatus('done')
+      },
+      onUnavailable: () => setLocationStatus('unavailable'),
+    })
+
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/'); return }
@@ -54,21 +70,9 @@ export default function AbsensiPage() {
         .order('date', { ascending: false })
         .limit(7)
       setRecentAttendance(recent ?? [])
-
-      navigator.geolocation.getCurrentPosition(
-        async pos => {
-          const { latitude: lat, longitude: lng } = pos.coords
-          setLocation({ lat, lng })
-          const result = await checkGeofence(lat, lng)
-          setGeofence(result)
-          setLocationValid(result.isValid)
-          setLocationStatus('done')
-        },
-        () => setLocationStatus('unavailable'),
-        { enableHighAccuracy: true }
-      )
     }
     init()
+    return abortGps
   }, [router])
 
   async function handleAbsensi(absenType: 'in' | 'out') {

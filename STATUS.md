@@ -1,7 +1,45 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-22 (sesi 14)*
+*Diupdate: 2026-07-22 (sesi 14, closing)*
 
-## SESI 14 — Sync Staff dari SSOT + Rollback CRUD Staff sesi 13 (22 Juli 2026)
+## SESI 14 — Closing rangkuman (22 Juli 2026, dinihari–pagi)
+
+Sesi paling panjang sampai sekarang. Rangkuman komit yang landed:
+
+| Commit | Ringkasan |
+|---|---|
+| `f49ecd9` | Sync staff SSOT + rollback CRUD staff sesi 13 (migration raos_022 + gas/13_staff_sync.gs + admin UI SSoT-aware + label PIN) |
+| `ba7a00c` | Fix login: hapus `pattern="[0-9]*"` (admin manual pakai password alfanumerik) |
+| `2990bd1` | Ganti logo dengan `Branding/Logo Menala.png` baru (horizontal full + mark cropped + regen PWA icons) |
+| `9afcc62` | Fix logo: teks putih di navy + hapus card putih login (wordmark PNG navy tidak terbaca di bg navy) |
+| `14b1037` | GPS tiered: coarse 3s + refine 8s paralel, `maximumAge:15s` — 10-30s → 0.5-2s |
+| `672361c` | Catat pending hard-block scan/absensi di luar radius (menunggu klarifikasi A/B/C) |
+| `b15f69d` | Fix ambigu FK chat_messages↔user_profiles (2 FK: sender_id + pinned_by) di 6 embed site |
+| `11b7ff7` | Chat gap: leaveRoom handler + dropdown retensi admin (migration raos_023 policies) |
+| `1836580` | Scan UX: buka tab langsung kamera + FAB manual pojok kanan bawah |
+| `3765d7e` | FAB toggle selalu tampil (dulu hilang di scan/success/error state) |
+| `15ae22d` | Modal Edit Staff — padding-bottom hormat BottomNav supaya tombol Simpan kelihatan |
+
+### State akhir sesi 14
+
+- **7 fase chat 100% jalan** (setelah audit + fix 2 gap). Login PIN aktif. Sync staff SSOT jalan 1 jam.
+- Vercel production sinkron dengan commit `15ae22d`.
+- GAS ter-push (14 file). User sudah jalankan sync manual sekali → Hendro (S001) masuk `user_profiles` dengan `source=ssot_master_staff`. Trigger 1-jam aktif.
+- Migration Supabase terakhir: `raos_023_chat_leave_and_retention_policies`.
+
+### ⚠️ Pending konkret untuk sesi 15
+
+- [ ] **Hard-block scan/absensi di luar radius** (staff & koordinator) — Anda minta di sesi 14. Interpretasi persis "50m di luar radius" masih pilih A/B/C (lihat catatan di bawah, sesi 14 detail).
+- [ ] User isi PIN Hendro di sheet (kosong saat ini) atau dia pakai "Lupa PIN" untuk set sendiri.
+- [ ] Set `branch_id` (T1/T2/T3) Hendro via `/admin` — sync tidak isi otomatis.
+- [ ] Hapus `SUPABASE_SERVICE_ROLE_KEY` dari Vercel env vars (tidak dipakai lagi setelah rollback).
+- [ ] Tambah kolom "Jabatan DIREKSI" di HRIS supaya role direksi bisa di-map.
+- [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings (manual 1 klik).
+- [ ] Offline mode (Service Worker upgrade) + push notification (FCM) — belum ada infra.
+- [ ] Isi `kpi_targets` (kosong sejak awal) + aktifkan `logActivity()` GAS.
+
+---
+
+## SESI 14 — Detail: Sync Staff dari SSOT + Rollback CRUD Staff sesi 13 (22 Juli 2026)
 
 - [x] **Pelanggaran SSoT sesi 13 di-rollback**: tombol "Tambah Staff" +
   `POST /api/admin/staff` + `lib/supabaseAdmin.ts` dihapus. Sesi 13 keliru

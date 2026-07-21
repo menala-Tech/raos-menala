@@ -72,6 +72,12 @@
 - [ ] End-to-end test login pakai email + PIN Hendro setelah sync jalan
 - [ ] Tambah kolom "Jabatan DIREKSI" di HRIS supaya mapping role direksi
   bisa dilakukan
+- [ ] **Hard-block scan/absensi di luar radius** untuk role staff & koordinator
+  (admin/direksi tetap bisa override). Interpretasi persis "50m di luar
+  radius" perlu ditentukan: (A) jarak > radius + 50m tolerance, (B) jarak
+  > 50m fix ignore radius, atau (C) hard block kalau di luar radius,
+  50m cuma displayed threshold. Sekarang masih non-blocking sesuai
+  keputusan sesi 4.
 - [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings (manual)
 - [ ] Offline mode (Service Worker) + push notification (FCM)
 

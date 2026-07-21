@@ -1,5 +1,34 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-18 (sesi 8)*
+*Diupdate: 2026-07-22 (sesi 11)*
+
+## SESI 11 — Security Hardening Supabase (22 Juli 2026)
+
+- [x] Migration `raos_019_harden_rpc_and_storage_policy`:
+  - `REVOKE EXECUTE ... FROM PUBLIC` + `GRANT ... TO authenticated` pada
+    `get_my_role()` & `get_my_branch()` — tidak lagi callable oleh `anon`
+  - `DROP POLICY chat_attachments_select` di `storage.objects` — policy tidak
+    pernah dipakai app (chat pakai `getPublicUrl()`, bukan list/download API)
+    dan sebelumnya membuka celah listing semua file bucket
+  - `search_path=public` ternyata SUDAH terpasang di 3 fungsi RAOS sejak
+    sebelumnya (tidak perlu diubah)
+- [x] Verified via Supabase advisor: WARN "anon can execute get_my_role/
+  get_my_branch" dan "public bucket allows listing" sudah hilang
+- [x] Verified Vercel: deployment production READY, sinkron dengan commit
+  `8b869fc` (klaim "belum deploy" di percakapan sebelumnya sudah tidak akurat)
+- ⚠️ **BUKAN fungsi RAOS**: warning `function_search_path_mutable` pada
+  `cleanup_old_saldo_events` dibiarkan — itu milik proyek lain (isi-saldo/
+  monitor-saldo) di Supabase project yang sama, sesuai aturan pemisahan tabel
+
+### Pending sesi berikutnya:
+- [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings (manual,
+  1 klik — tidak ada tabel `auth.config` yang bisa diubah lewat SQL)
+- [ ] Ganti password admin (masih `Menala2026!`)
+- [ ] Isi driver RAOS asli (sebaiknya dari SSOT Driver Airport sheet, tab
+  baru "ID Rifim Airport Soekarno-Hatta" — lihat SSOT_DATA_SOURCES.md)
+- [ ] Offline mode (Service Worker) + push notification (FCM)
+- [ ] CRUD staff di /admin
+
+---
 
 ## SESI 10 — Chat Fase 4–7 + Relokasi Workspace (18 Juli 2026)
 

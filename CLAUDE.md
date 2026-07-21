@@ -155,18 +155,28 @@ Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
 - `email_is_registered_staff(email TEXT)` → validasi email sebelum magic link
 - `get_my_role()`, `get_my_branch()` → helper untuk RLS
 
-**Reminder security:** ketiga helper `SECURITY DEFINER` (`email_is_registered_staff`,
-`get_my_role`, `get_my_branch`) sekarang punya `SET search_path` yg masih mutable
-per advisor (see next section). Perlu diperketat `SET search_path = public` di
-migration berikutnya.
+**Security hardening sesi 11 (22 Juli 2026) — migration `raos_019`:**
+- `get_my_role()` & `get_my_branch()`: sudah `SET search_path=public` (ternyata
+  sudah diset di migration sebelumnya), dan sekarang `REVOKE EXECUTE FROM PUBLIC`
+  + `GRANT EXECUTE TO authenticated` saja — tidak bisa lagi dipanggil `anon`.
+- `email_is_registered_staff` SENGAJA tetap bisa dipanggil `anon` (dipakai
+  validasi email sebelum magic link) — jangan revoke.
+- Storage policy `chat_attachments_select` (SELECT di `storage.objects`) di-DROP:
+  bucket `chat_attachments` sudah `public=true` dan app cuma pakai
+  `getPublicUrl()` (bukan `.list()`/`.download()` API), jadi policy itu cuma
+  membuka celah listing semua file lewat Storage API tanpa pernah dipakai app.
+- `function_search_path_mutable` pada `cleanup_old_saldo_events` **BUKAN
+  fungsi RAOS** (kemungkinan milik proyek isi-saldo/monitor-saldo lain di
+  Supabase project yang sama) — JANGAN disentuh dari sesi RAOS.
+- Sisa 1 WARN yang **tidak perlu difix**: `get_my_role`/`get_my_branch` masih
+  tercatat sebagai "SECURITY DEFINER callable by authenticated" — ini memang
+  desain: keduanya dipanggil authenticated user untuk RLS helper, aman.
 
-## Debt / Pending Tinggi (per sesi 7 — 17 Juli 2026)
+## Debt / Pending Tinggi (per sesi 11 — 22 Juli 2026)
 
-1. **Hardening Supabase security** (5 menit, aman):
-   - `SET search_path = public` di `get_my_role`, `get_my_branch`, `email_is_registered_staff`
-   - `REVOKE EXECUTE ON FUNCTION get_my_role, get_my_branch FROM anon` (biarkan
-     `email_is_registered_staff` bisa anon — dipakai sebelum login untuk magic link)
-   - Aktifkan Leaked Password Protection di Auth Settings (manual, 1 klik)
+1. ~~Hardening Supabase security~~ — SELESAI (lihat di atas), kecuali:
+   - Aktifkan Leaked Password Protection di Auth Settings (manual, 1 klik,
+     tidak bisa lewat SQL/migration — perlu Dashboard atau Management API)
 2. **Fitur Chat Room Staff — Fase 2-7** (lihat `PROMPT_AI_CHAT_ROOM_STAFF_MENALA.md`):
    - Fase 2: kirim foto/file (bikin bucket `chat_attachments` + tabel `chat_message_attachments`)
    - Fase 3: layar Info Room + Pengaturan Room

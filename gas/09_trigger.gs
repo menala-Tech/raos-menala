@@ -42,6 +42,11 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncSelfiePhotosToGDrive')
     .timeBased().everyMinutes(30).create()
 
+  // Sync driver airport dari SSOT (Google Sheets Database Driver Airport)
+  // setiap 6 jam — roster driver jarang berubah, tidak perlu lebih sering
+  ScriptApp.newTrigger('syncDriverAirportFromSSOT')
+    .timeBased().everyHours(6).create()
+
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
 }

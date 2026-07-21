@@ -15,6 +15,7 @@ function onOpen() {
       SpreadsheetApp.getUi().createMenu('🚗 Driver')
         .addItem('Isi Data Mock Driver', 'initMockDriverData')
         .addItem('Import Driver ke Supabase', 'importDriverFromSheet')
+        .addItem('🔄 Sync Driver Airport Soeta (SSOT)', 'syncDriverAirportFromSSOT')
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('📊 KPI & Laporan')

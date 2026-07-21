@@ -95,6 +95,30 @@ Backup Database/2026-07 Juli/      ← reserved untuk backup Supabase (belum dip
    `shifts`, `kpi_targets`, `chat_rooms`, `chat_messages`, `chat_room_members`,
    `activity_logs`, `system_logs`, `notifications`, `system_config`
 
+## Sync Driver Airport (SSOT) — sesi 12, 22 Juli 2026
+
+RAOS **wajib** ambil roster driver dari sumber SSOT global, bukan input manual/mock:
+- SSOT: spreadsheet "Database Driver Airport"
+  (`1FEZxyHPx_GCQKw92hLSf6QxxkXgZn5R1sRswOYM_Tlc`), lihat
+  `C:\Projects\menala\SSOT_DATA_SOURCES.md`
+- RAOS hanya tarik 1 tab: **"ID Rifim Airport Soeta"** (RAOS = Bandara
+  Soekarno-Hatta, cabang lain bukan urusan RAOS)
+- Arah sync: **satu arah** Google Sheets → Supabase, via `gas/12_driver_airport_sync.gs`
+  (`syncDriverAirportFromSSOT()`), trigger otomatis tiap 6 jam + menu manual
+  🛠️ RAOS System → 🚗 Driver → 🔄 Sync Driver Airport Soeta (SSOT)
+- Kolom `raos_drivers.source` (migration `raos_020`) membedakan asal data:
+  - `ssot_driver_airport` — auto-sync, kolom `driver_id`/`name`/`is_active`
+    di-refresh tiap sync, TIDAK BOLEH diedit manual (akan tertimpa)
+  - `manual` — diinput staff via `/admin` form "Tambah Driver", sync SSOT
+    tidak pernah menyentuh baris ini
+- Kolom milik RAOS sendiri (`phone`, `vehicle_type`, `vehicle_plate`, `barcode`,
+  `branch_id`) TIDAK ada di sheet SSOT — sync tidak pernah mengisi/menimpanya,
+  harus dilengkapi manual via `/admin` setelah driver muncul dari sync
+- Driver yang hilang dari sheet SSOT di-nonaktifkan (`is_active=false`), bukan
+  di-delete — supaya histori `scan_orders` (FK ke `raos_drivers.id`) aman
+- `DRIVER_AIRPORT_SHEET_ID` bisa di-override via Script Properties kalau ID
+  spreadsheet SSOT berubah; default hardcode ke ID di atas
+
 ## Modul PWA
 | Route | Fungsi |
 |---|---|

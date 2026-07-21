@@ -1,5 +1,43 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-22 (sesi 11)*
+*Diupdate: 2026-07-22 (sesi 12)*
+
+## SESI 12 — Sync Driver Airport dari SSOT (22 Juli 2026)
+
+- [x] **Compliance SSoT**: sebelumnya `importDriverFromSheet()` mengisi
+  `raos_drivers` dari sheet mock lokal RAOS sendiri ("DATABASE DRIVER") —
+  melanggar aturan SSOT (dilarang punya sumber driver sendiri). Diganti
+  dengan sync dari sumber SSOT resmi.
+- [x] Migration `raos_020_driver_ssot_sync_columns`: kolom `source`
+  (`manual` | `ssot_driver_airport`) + `ssot_synced_at` di `raos_drivers`
+- [x] `gas/12_driver_airport_sync.gs` — `syncDriverAirportFromSSOT()`:
+  - Baca tab "ID Rifim Airport Soeta" dari spreadsheet SSOT
+    "Database Driver Airport" (`1FEZxyHPx...`, lihat SSOT_DATA_SOURCES.md)
+  - Verified isi tab (via Drive read langsung): 1 driver terdaftar —
+    ID 172749767, Agus Sutanto
+  - Upsert ke `raos_drivers` (insert baru / update `name`+`is_active` untuk
+    yang sudah ada dengan `source=ssot_driver_airport`)
+  - Driver dengan `source=manual` tidak pernah ditimpa (dilewati + di-log)
+  - Driver `ssot_driver_airport` yang hilang dari sheet → `is_active=false`
+    (soft-delist, bukan delete, supaya FK `scan_orders` aman)
+  - Kolom RAOS-only (phone/vehicle_type/vehicle_plate/barcode/branch_id)
+    tidak pernah disentuh sync — harus dilengkapi manual via `/admin`
+  - Trigger otomatis tiap 6 jam ditambahkan ke `setupAllTriggers()`
+  - Menu manual: 🛠️ RAOS System → 🚗 Driver → 🔄 Sync Driver Airport Soeta
+- [x] `clasp push` berhasil (13 file)
+- ⚠️ **BELUM dijalankan end-to-end** — perlu dijalankan sekali secara manual
+  dari menu spreadsheet (clasp run butuh deploy sebagai API executable,
+  belum di-setup untuk project ini) + jalankan ulang `setupAllTriggers()`
+  supaya trigger 6-jam baru aktif
+
+### Pending sesi berikutnya:
+- [ ] User jalankan 🔄 Sync Driver Airport Soeta dari menu spreadsheet sekali
+  → verifikasi 1 driver (Agus Sutanto) muncul di `/drivers` RAOS
+- [ ] Jalankan ulang `setupAllTriggers()` (trigger sync 6 jam baru ditambahkan)
+- [ ] Lengkapi phone/vehicle_type/vehicle_plate/barcode driver hasil sync
+  via `/admin` supaya bisa dipakai scan barcode
+- [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings (manual)
+
+---
 
 ## SESI 11 — Security Hardening Supabase (22 Juli 2026)
 

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
-import { ArrowLeft, Search, Car, Phone, Plus, X, Loader2, Pencil, Radar } from 'lucide-react'
+import { ArrowLeft, Search, Car, Phone, Plus, X, Loader2, Pencil, Radar, QrCode } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile, Driver, Branch } from '@/types'
 
@@ -89,12 +89,22 @@ export default function DriversPage() {
             </div>
           </div>
           {isAdmin && (
-            <button
-              onClick={() => setShowAddForm(true)}
-              className="bg-primary text-white p-2 rounded-xl"
-            >
-              <Plus size={18} />
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/barcodes"
+                title="Generate & cetak QR code driver"
+                className="bg-white/10 text-white p-2 rounded-xl border border-white/20"
+              >
+                <QrCode size={18} />
+              </Link>
+              <button
+                onClick={() => setShowAddForm(true)}
+                title="Tambah driver manual"
+                className="bg-primary text-white p-2 rounded-xl"
+              >
+                <Plus size={18} />
+              </button>
+            </div>
           )}
         </div>
         <div className="relative">
@@ -250,7 +260,8 @@ function AddDriverModal({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-t-3xl w-full max-w-md mx-auto p-6 max-h-[85vh] overflow-y-auto"
+        className="bg-white rounded-t-3xl w-full max-w-md mx-auto px-6 pt-6 max-h-[85vh] overflow-y-auto"
+        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -348,7 +359,8 @@ function EditDriverModal({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-t-3xl w-full max-w-md mx-auto p-6 max-h-[85vh] overflow-y-auto"
+        className="bg-white rounded-t-3xl w-full max-w-md mx-auto px-6 pt-6 max-h-[85vh] overflow-y-auto"
+        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-1">

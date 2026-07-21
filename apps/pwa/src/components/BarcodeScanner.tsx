@@ -14,6 +14,14 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
   const [error, setError] = useState('')
   const lastDetectedRef = useRef<{ code: string; at: number } | null>(null)
 
+  // Simpan callback terbaru di ref supaya `onDetected` yang berubah reference
+  // (mis. karena parent pakai useCallback([location, geofence]) dan GPS tiered
+  // refine update state 2-3x dalam detik pertama) TIDAK memicu useEffect di
+  // bawah restart kamera. Sebelumnya bug ini bikin race condition html5-qrcode
+  // start/stop bertumpuk → error boundary Next.js → "This page couldn't load".
+  const onDetectedRef = useRef(onDetected)
+  useEffect(() => { onDetectedRef.current = onDetected }, [onDetected])
+
   useEffect(() => {
     if (!active) return
     let cancelled = false
@@ -32,7 +40,7 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
           const last = lastDetectedRef.current
           if (last && last.code === decodedText && now - last.at < 3000) return
           lastDetectedRef.current = { code: decodedText, at: now }
-          onDetected(decodedText)
+          onDetectedRef.current(decodedText)
         }
         const onFailure = () => { /* frame tanpa barcode — abaikan, ini dipanggil terus-menerus */ }
         const config = { fps: 10, qrbox: { width: 250, height: 150 } }
@@ -70,7 +78,10 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
         scanner.stop().then(() => scanner.clear()).catch(() => {})
       }
     }
-  }, [active, onDetected])
+    // Sengaja tidak include onDetected — pakai ref di atas. Hanya `active` yang
+    // memicu start/stop (mode camera↔manual switch).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
 
   if (error) {
     return (

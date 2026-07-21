@@ -161,7 +161,7 @@ export default function LoginPage() {
                 <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />
                 <input
                   type={showPass ? 'text' : 'password'}
-                  inputMode="numeric" pattern="[0-9]*"
+                  inputMode="numeric"
                   placeholder="PIN" value={password}
                   onChange={e => setPassword(e.target.value)}
                   className="input pl-10 pr-10" autoComplete="current-password" required

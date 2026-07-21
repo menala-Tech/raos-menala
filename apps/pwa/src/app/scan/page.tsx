@@ -22,7 +22,7 @@ export default function ScanPage() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [geofence, setGeofence] = useState<GeofenceResult | null>(null)
   const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid' | 'unavailable'>('checking')
-  const [inputMode, setInputMode] = useState<'camera' | 'manual'>('manual')
+  const [inputMode, setInputMode] = useState<'camera' | 'manual'>('camera')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -129,26 +129,9 @@ export default function ScanPage() {
           {locationStatus === 'unavailable' && 'GPS tidak terdeteksi — scan tetap bisa dilakukan'}
         </div>
 
-        {/* Scanner Area */}
+        {/* Scanner Area — kamera langsung tampil saat buka tab, manual jadi FAB pojok */}
         {scanState === 'idle' && (
           <div className="card">
-            <div className="flex gap-2 mb-3">
-              <button
-                onClick={() => setInputMode('camera')}
-                className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg transition-colors
-                  ${inputMode === 'camera' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500'}`}
-              >
-                <Camera size={14} /> Kamera
-              </button>
-              <button
-                onClick={() => setInputMode('manual')}
-                className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg transition-colors
-                  ${inputMode === 'manual' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500'}`}
-              >
-                <Keyboard size={14} /> Manual
-              </button>
-            </div>
-
             {inputMode === 'camera' ? (
               <>
                 <BarcodeScanner active={inputMode === 'camera'} onDetected={handleScan} />
@@ -174,6 +157,21 @@ export default function ScanPage() {
               </>
             )}
           </div>
+        )}
+
+        {/* FAB toggle — bulat di pojok kanan bawah, di atas BottomNav (bottom ~104px).
+            Klik untuk pindah antara mode Kamera ↔ Manual, hanya saat scanState=idle. */}
+        {scanState === 'idle' && (
+          <button
+            onClick={() => setInputMode(m => m === 'camera' ? 'manual' : 'camera')}
+            aria-label={inputMode === 'camera' ? 'Ganti ke input manual' : 'Ganti ke kamera'}
+            className="fixed right-4 z-20 w-14 h-14 rounded-full bg-secondary text-white
+                       shadow-lg shadow-black/30 flex items-center justify-center
+                       active:scale-95 transition-transform border-2 border-white"
+            style={{ bottom: 'calc(104px + env(safe-area-inset-bottom))' }}
+          >
+            {inputMode === 'camera' ? <Keyboard size={22} /> : <Camera size={22} />}
+          </button>
         )}
 
         {scanState === 'scanning' && (

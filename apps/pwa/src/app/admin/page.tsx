@@ -6,13 +6,14 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, CheckCircle2, XCircle, ShieldCheck,
-  Users, ScanLine, Loader2, QrCode
+  Users, ScanLine, Loader2, QrCode, Plus, Pencil, X, Power
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
-import type { UserProfile } from '@/types'
+import type { UserProfile, Branch } from '@/types'
 
 type Tab = 'validasi' | 'staff'
+type StaffRole = 'direksi' | 'admin' | 'koordinator' | 'staff'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -20,11 +21,14 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('validasi')
   const [pendingScans, setPendingScans] = useState<any[]>([])
   const [staffList, setStaffList] = useState<any[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
+  const [showAddStaff, setShowAddStaff] = useState(false)
+  const [editingStaff, setEditingStaff] = useState<any | null>(null)
 
   const loadData = useCallback(async (uid: string) => {
-    const [{ data: scans }, { data: staff }] = await Promise.all([
+    const [{ data: scans }, { data: staff }, { data: branchData }] = await Promise.all([
       supabase
         .from('scan_orders')
         .select('*, raos_drivers(driver_id, name, vehicle_plate), user_profiles!scan_orders_staff_id_fkey(full_name, staff_id)')
@@ -35,9 +39,11 @@ export default function AdminPage() {
         .from('user_profiles')
         .select('*, branches(name)')
         .order('full_name'),
+      supabase.from('branches').select('*').order('name'),
     ])
     setPendingScans(scans ?? [])
     setStaffList(staff ?? [])
+    setBranches(branchData ?? [])
     setLoading(false)
   }, [])
 
@@ -76,6 +82,20 @@ export default function AdminPage() {
     }
     setProcessing(null)
   }
+
+  async function toggleStaffActive(staff: any) {
+    setProcessing(staff.id)
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ is_active: !staff.is_active })
+      .eq('id', staff.id)
+    if (!error) {
+      setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, is_active: !s.is_active } : s))
+    }
+    setProcessing(null)
+  }
+
+  const isAdmin = user && ['admin', 'direksi'].includes(user.role)
 
   return (
     <AppShell>
@@ -182,27 +202,272 @@ export default function AdminPage() {
         ))}
 
         {/* TAB STAFF */}
+        {!loading && tab === 'staff' && isAdmin && (
+          <button
+            onClick={() => setShowAddStaff(true)}
+            className="w-full flex items-center justify-center gap-2 text-sm font-medium
+                       text-primary bg-primary/5 py-2.5 rounded-xl mb-1"
+          >
+            <Plus size={16} /> Tambah Staff
+          </button>
+        )}
+
         {!loading && tab === 'staff' && staffList.map(s => (
           <div key={s.id} className="card flex items-center gap-3">
             <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center
-                            text-primary font-bold">
+                            text-primary font-bold flex-shrink-0">
               {s.full_name?.charAt(0)}
             </div>
-            <div className="flex-1">
-              <p className="font-semibold text-sm text-gray-800">{s.full_name}</p>
-              <p className="text-xs text-gray-400 capitalize">
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm text-gray-800 truncate">{s.full_name}</p>
+              <p className="text-xs text-gray-400 capitalize truncate">
                 {s.staff_id} • {s.role} • {s.branches?.name ?? '-'}
               </p>
             </div>
             <span className={clsx(
-              'text-[10px] font-semibold px-2 py-0.5 rounded-full',
+              'text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0',
               s.is_active ? 'badge-valid' : 'badge-rejected'
             )}>
               {s.is_active ? 'AKTIF' : 'NONAKTIF'}
             </span>
+            {isAdmin && (
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => setEditingStaff(s)}
+                  className="p-1.5 text-gray-400 hover:text-primary"
+                  aria-label="Edit staff"
+                >
+                  <Pencil size={14} />
+                </button>
+                {s.id !== user?.id && (
+                  <button
+                    onClick={() => toggleStaffActive(s)}
+                    disabled={processing === s.id}
+                    className={clsx('p-1.5', s.is_active ? 'text-gray-400 hover:text-red-500' : 'text-gray-400 hover:text-green-600')}
+                    aria-label={s.is_active ? 'Nonaktifkan staff' : 'Aktifkan staff'}
+                  >
+                    {processing === s.id ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
+
+      {showAddStaff && (
+        <AddStaffModal
+          branches={branches}
+          onClose={() => setShowAddStaff(false)}
+          onAdded={() => { setShowAddStaff(false); user && loadData(user.id) }}
+        />
+      )}
+
+      {editingStaff && (
+        <EditStaffModal
+          staff={editingStaff}
+          branches={branches}
+          onClose={() => setEditingStaff(null)}
+          onSaved={() => { setEditingStaff(null); user && loadData(user.id) }}
+        />
+      )}
     </AppShell>
+  )
+}
+
+function AddStaffModal({
+  branches, onClose, onAdded,
+}: { branches: Branch[]; onClose: () => void; onAdded: () => void }) {
+  const [form, setForm] = useState({
+    email: '', staff_id: '', full_name: '', role: 'staff' as StaffRole, branch_id: '', phone: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [warning, setWarning] = useState('')
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    setWarning('')
+
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch('/api/admin/staff', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify(form),
+    })
+    const json = await res.json()
+    setSaving(false)
+
+    if (!res.ok) {
+      setError(json.error ?? 'Gagal menambah staff.')
+      return
+    }
+    if (json.warning) {
+      setWarning(json.warning)
+      return
+    }
+    onAdded()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
+      <div
+        className="bg-white rounded-t-3xl w-full max-w-md mx-auto p-6 max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-bold text-gray-800">Tambah Staff</h2>
+          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
+        </div>
+
+        {warning ? (
+          <div className="space-y-3">
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">{warning}</p>
+            <button onClick={onAdded} className="btn-primary">Tutup</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <input
+              required type="email" placeholder="Email *" value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })}
+              className="input"
+            />
+            <input
+              required placeholder="ID Staff *" value={form.staff_id}
+              onChange={e => setForm({ ...form, staff_id: e.target.value })}
+              className="input"
+            />
+            <input
+              required placeholder="Nama Lengkap *" value={form.full_name}
+              onChange={e => setForm({ ...form, full_name: e.target.value })}
+              className="input"
+            />
+            <select
+              value={form.role}
+              onChange={e => setForm({ ...form, role: e.target.value as StaffRole })}
+              className="input"
+            >
+              <option value="staff">Staff</option>
+              <option value="koordinator">Koordinator</option>
+              <option value="admin">Admin</option>
+              <option value="direksi">Direksi</option>
+            </select>
+            <select
+              value={form.branch_id}
+              onChange={e => setForm({ ...form, branch_id: e.target.value })}
+              className="input"
+            >
+              <option value="">Pilih Cabang (opsional)</option>
+              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <input
+              placeholder="No. HP (opsional)" value={form.phone}
+              onChange={e => setForm({ ...form, phone: e.target.value })}
+              className="input"
+            />
+
+            <p className="text-[11px] text-gray-400">
+              Staff akan menerima email untuk membuat password sendiri.
+            </p>
+
+            {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
+
+            <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              {saving ? 'Menyimpan...' : 'Buat Akun Staff'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function EditStaffModal({
+  staff, branches, onClose, onSaved,
+}: { staff: any; branches: Branch[]; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    full_name: staff.full_name ?? '',
+    role: staff.role as StaffRole,
+    branch_id: staff.branch_id ?? '',
+    phone: staff.phone ?? '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    const { error } = await supabase.from('user_profiles').update({
+      full_name: form.full_name,
+      role: form.role,
+      branch_id: form.branch_id || null,
+      phone: form.phone || null,
+    }).eq('id', staff.id)
+    setSaving(false)
+    if (error) {
+      setError('Gagal menyimpan perubahan.')
+      return
+    }
+    onSaved()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
+      <div
+        className="bg-white rounded-t-3xl w-full max-w-md mx-auto p-6 max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-bold text-gray-800">Edit Staff</h2>
+          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">{staff.staff_id}</p>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            required placeholder="Nama Lengkap *" value={form.full_name}
+            onChange={e => setForm({ ...form, full_name: e.target.value })}
+            className="input"
+          />
+          <select
+            value={form.role}
+            onChange={e => setForm({ ...form, role: e.target.value as StaffRole })}
+            className="input"
+          >
+            <option value="staff">Staff</option>
+            <option value="koordinator">Koordinator</option>
+            <option value="admin">Admin</option>
+            <option value="direksi">Direksi</option>
+          </select>
+          <select
+            value={form.branch_id}
+            onChange={e => setForm({ ...form, branch_id: e.target.value })}
+            className="input"
+          >
+            <option value="">Pilih Cabang (opsional)</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          <input
+            placeholder="No. HP" value={form.phone}
+            onChange={e => setForm({ ...form, phone: e.target.value })}
+            className="input"
+          />
+
+          {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
+
+          <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={16} />}
+            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
+          </button>
+        </form>
+      </div>
+    </div>
   )
 }

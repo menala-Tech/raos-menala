@@ -1,5 +1,52 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-22 (sesi 12)*
+*Diupdate: 2026-07-22 (sesi 13)*
+
+## SESI 13 — CRUD Staff Lengkap di /admin (22 Juli 2026)
+
+- [x] Migration `raos_021_staff_crud_admin_policy`:
+  - Policy `user_profiles_update_admin` — admin/direksi sekarang bisa UPDATE
+    profil staff MANAPUN (sebelumnya `user_profiles_update_own` cuma
+    mengizinkan user update profilnya sendiri, admin tidak bisa edit staff lain)
+  - ⚠️ **Celah keamanan ditemukan & ditutup saat audit**: policy lama
+    `user_profiles_update_own` (`id = auth.uid()`) tidak membatasi kolom apa
+    yang boleh diubah — staff biasa SECARA TEKNIS bisa update `role`/
+    `is_active` dirinya sendiri jadi admin lewat client biasa. Trigger baru
+    `prevent_self_privilege_escalation()` (BEFORE UPDATE) blokir perubahan
+    `role`/`is_active` pada baris sendiri kecuali aktor sudah admin/direksi
+- [x] `app/api/admin/staff/route.ts` (Route Handler baru, server-only):
+  - POST — buat akun staff baru: verifikasi caller admin/direksi via Bearer
+    token → `auth.admin.createUser()` (butuh service role key, tidak bisa
+    lewat anon key) → insert `user_profiles` → kirim email set-password
+    (reuse flow "Lupa Kata Sandi" yang sudah teruji + SMTP Gmail aktif)
+  - Rollback otomatis: kalau insert `user_profiles` gagal (mis. ID Staff
+    duplikat), auth user yang baru dibuat langsung dihapus lagi (tidak ada
+    akun yatim tanpa profil)
+  - `src/lib/supabaseAdmin.ts` baru — client service-role, SERVER-ONLY,
+    guard error jelas kalau `SUPABASE_SERVICE_ROLE_KEY` belum diset
+- [x] `/admin` tab Staff sekarang punya:
+  - Tombol "Tambah Staff" (admin/direksi) → modal buat akun baru
+  - Tombol edit (pensil) per staff → ubah nama/role/cabang/no. HP langsung
+    dari client (pakai policy admin baru, tidak perlu API route)
+  - Tombol aktif/nonaktifkan (ikon power) per staff, disembunyikan untuk
+    baris diri sendiri (tidak bisa nonaktifkan akun sendiri dari sini)
+- [x] Build + lint pass (route `/api/admin/staff` terdaftar sebagai
+  server-rendered/dynamic, halaman lain tetap static)
+
+### ⚠️ BLOCKER — perlu Anda lakukan manual sebelum fitur "Tambah Staff" jalan:
+- [ ] Set `SUPABASE_SERVICE_ROLE_KEY` di `apps/pwa/.env.local` (lokal) DAN di
+  Vercel Project Settings → Environment Variables (production) — ambil dari
+  Supabase Dashboard → Settings → API → `service_role`. Tidak bisa diambil
+  otomatis (sengaja dibatasi, key ini bypass semua RLS)
+  - Tanpa ini, tombol edit/aktifkan-nonaktifkan staff tetap jalan (pakai RLS
+    biasa), tapi tombol "Tambah Staff" akan gagal dengan pesan error jelas
+
+### Pending sesi berikutnya:
+- [ ] User set `SUPABASE_SERVICE_ROLE_KEY` lalu test end-to-end "Tambah Staff"
+- [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings (manual)
+- [ ] Ganti password admin (masih `Menala2026!`)
+- [ ] Offline mode (Service Worker) + push notification (FCM)
+
+---
 
 ## SESI 12 — Sync Driver Airport dari SSOT (22 Juli 2026)
 

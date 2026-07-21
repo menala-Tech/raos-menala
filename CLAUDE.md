@@ -95,6 +95,24 @@ Backup Database/2026-07 Juli/      ← reserved untuk backup Supabase (belum dip
    `shifts`, `kpi_targets`, `chat_rooms`, `chat_messages`, `chat_room_members`,
    `activity_logs`, `system_logs`, `notifications`, `system_config`
 
+## CRUD Staff & Service Role Key — sesi 13, 22 Juli 2026
+
+- `app/api/admin/staff/route.ts` (POST) buat akun staff baru — satu-satunya
+  tempat di RAOS yang pakai `SUPABASE_SERVICE_ROLE_KEY` (via `lib/supabaseAdmin.ts`,
+  SERVER-ONLY, jangan pernah import dari file `'use client'`)
+- Endpoint ini WAJIB verifikasi Bearer token caller + cek role admin/direksi
+  di awal — service role bypass semua RLS, jangan pernah expose endpoint ini
+  tanpa guard itu
+- Edit/aktifkan-nonaktifkan staff yang sudah ada TIDAK butuh service role —
+  cukup policy `user_profiles_update_admin` (migration `raos_021`), dipanggil
+  langsung dari client seperti tabel lain
+- Trigger `prevent_self_privilege_escalation()` di `user_profiles`: siapapun
+  (termasuk admin) tidak bisa ubah `role`/`is_active` baris miliknya sendiri
+  kecuali dia sudah admin/direksi — cegah staff biasa self-promote jadi admin
+- `SUPABASE_SERVICE_ROLE_KEY` HARUS diset manual di `.env.local` (lokal) +
+  Vercel env vars (production) — tidak pernah commit nilainya, tidak bisa
+  diambil otomatis lewat MCP/tool manapun (dibatasi sengaja demi keamanan)
+
 ## Sync Driver Airport (SSOT) — sesi 12, 22 Juli 2026
 
 RAOS **wajib** ambil roster driver dari sumber SSOT global, bukan input manual/mock:

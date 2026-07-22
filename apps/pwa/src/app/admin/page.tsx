@@ -13,6 +13,7 @@ import Link from 'next/link'
 import clsx from 'clsx'
 import type { UserProfile, Branch } from '@/types'
 import { logActivity } from '@/lib/activity'
+import { invokePush } from '@/lib/pushClient'
 
 type Tab = 'validasi' | 'staff'
 type StaffRole = 'direksi' | 'admin' | 'management' | 'koordinator' | 'staff'
@@ -80,8 +81,23 @@ export default function AdminPage() {
       })
       .eq('id', scanId)
     if (!error) {
+      const scan = pendingScans.find(s => s.id === scanId)
       setPendingScans(prev => prev.filter(s => s.id !== scanId))
-      logActivity(`validasi_scan_${status}`, `Scan ${scanId} → ${status.toUpperCase()}`)
+      logActivity(`validasi_scan_${status}`, `Scan ${scan?.scan_id ?? scanId} → ${status.toUpperCase()}`)
+
+      // Notif ke staff yang melakukan scan (A: scan validated/rejected)
+      if (scan?.staff_id) {
+        const driverName = scan.raos_drivers?.name ?? 'Driver'
+        invokePush({
+          user_ids: [scan.staff_id],
+          title: status === 'valid' ? '✅ Scan Divalidasi' : '❌ Scan Ditolak',
+          body: status === 'valid'
+            ? `Scan ${scan.scan_id} untuk ${driverName} disetujui oleh ${user.full_name}.`
+            : `Scan ${scan.scan_id} untuk ${driverName} ditolak oleh ${user.full_name}. Cek riwayat untuk detail.`,
+          url: '/riwayat',
+          tag: `scan-${scan.scan_id}`,
+        })
+      }
     }
     setProcessing(null)
   }

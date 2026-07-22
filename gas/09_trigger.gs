@@ -14,9 +14,17 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('importAbsensiFromSupabase')
     .timeBased().everyMinutes(30).create()
 
-  // Kirim reminder absensi jam 07:00
+  // Kirim reminder absensi masuk jam 07:00 (D) — WA + push notif
   ScriptApp.newTrigger('kirimReminderAbsensi')
     .timeBased().atHour(7).everyDays(1).create()
+
+  // Reminder absensi pulang jam 15:00 (E) — push notif
+  ScriptApp.newTrigger('kirimReminderPulang')
+    .timeBased().atHour(15).everyDays(1).create()
+
+  // Notif ke koordinator kalau scan pending >15 menit (F) — cek tiap 15 menit
+  ScriptApp.newTrigger('notifyPendingScansKoordinator')
+    .timeBased().everyMinutes(15).create()
 
   // Update KPI semua staff jam 22:00
   ScriptApp.newTrigger('updateAllKpiThisMonth')

@@ -49,6 +49,29 @@ Sesi paling panjang sampai sekarang. Rangkuman komit yang landed:
   handler, subscription flow). Scope 1-2 sesi khusus.
 - [ ] Isi `kpi_targets` (kosong sejak awal).
 
+### Sesi 14 dinihari (23 Juli) — Push notification end-to-end
+
+- Migration `raos_029`: tabel `push_subscriptions` (endpoint UNIQUE + RLS)
+- Migration `raos_030` + `raos_031`: `pg_net` + RPC `raos_dispatch_push`
+  SECURITY DEFINER via vault secret + trigger AFTER INSERT chat_messages
+- Edge Function `raos-send-push` v3 ACTIVE (VAPID Web Push, bukan FCM,
+  prefix RAOS_ secrets — isolate dari PWA lain di project Supabase sama)
+- PWA: `lib/push.ts` subscribe/unsubscribe, `public/sw-push.js` handler
+  lock-screen + vibrate, `lib/pushClient.ts` invoke helper
+- **A** ✓ scan validated → notif ke staff (dari `/admin`)
+- **C** ✓ chat message baru → auto push ke member room (DB trigger)
+- **D** ✓ reminder absensi masuk 07:00 (GAS extend)
+- **E** ✓ reminder absensi pulang 15:00 (GAS baru)
+- **F** ✓ scan pending >15 menit → notif koordinator (GAS baru, cron 15 min)
+
+### ⚠️ Prasyarat push jalan penuh
+- Vercel env `NEXT_PUBLIC_VAPID_PUBLIC_KEY` — done user
+- Supabase secrets `RAOS_VAPID_*` — done user
+- **Vault secret `raos_service_role_key`** untuk chat DB trigger — user
+  jalankan `INSERT INTO vault.secrets (name, secret) VALUES
+  ('raos_service_role_key', '<service_role_key>');` di SQL editor
+- `setupAllTriggers()` re-run di GAS Script Editor supaya D/E/F cron aktif
+
 ### Sesi 14 lanjutan (22 Juli 2026 siang-sore) — batch commit tambahan
 
 | Commit | Ringkas |

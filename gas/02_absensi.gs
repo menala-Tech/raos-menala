@@ -102,8 +102,7 @@ function rekapAbulanan(bulan, tahun) {
 function kirimReminderAbsensi() {
   // Sumber staff = Supabase user_profiles (sync dari SSOT MASTER DATA STAFF via
   // gas/13_staff_sync.gs). Sheet lokal DATABASE STAFF sudah tidak dipakai
-  // sebagai sumber sejak sesi 14 — SSoT rule global (semua PWA RIFIM ambil
-  // staff dari 1 spreadsheet SSOT, lihat SSOT_DATA_SOURCES.md).
+  // sebagai sumber sejak sesi 14 — SSoT rule global.
   const staff = callSupabase(
     'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
   ) || []
@@ -115,17 +114,118 @@ function kirimReminderAbsensi() {
   ) || []
   const sudahAbsen = new Set(absensiHariIni.map(a => a.staff_id))
 
-  let terkirim = 0
-  staff.forEach(s => {
-    if (sudahAbsen.has(s.id)) return
+  const staffBelumAbsen = staff.filter(s => !sudahAbsen.has(s.id))
+
+  // WA reminder (existing behavior)
+  let waTerkirim = 0
+  staffBelumAbsen.forEach(s => {
     if (!s.phone) return
     sendWhatsApp(
       s.phone,
       `⏰ *PENGINGAT ABSENSI*\nHai ${s.full_name}, kamu belum absen masuk hari ini.\nSegera lakukan absensi melalui aplikasi RAOS.`
     )
-    terkirim++
+    waTerkirim++
   })
 
+  // Push notification lock-screen (D) via Edge Function raos-send-push.
+  // Batch semua user_ids sekaligus supaya 1 request.
+  const pushRes = invokePushFromGas_(
+    staffBelumAbsen.map(s => s.id),
+    '⏰ Reminder Absensi Masuk',
+    'Kamu belum absen masuk hari ini. Buka RAOS sekarang untuk check-in.',
+    '/absensi',
+    'reminder-masuk-' + today
+  )
+
   logSistem('cron', 'kirimReminderAbsensi', 'success',
-    `Reminder dikirim ke ${terkirim} dari ${staff.length} staff aktif (${staff.length - terkirim} sudah absen atau tanpa no HP)`)
+    `Belum absen: ${staffBelumAbsen.length} dari ${staff.length} staff. WA: ${waTerkirim}, Push: ${pushRes.sent}/${pushRes.total}`)
+}
+
+// E: Reminder ABSENSI PULANG (jam 15:00 default). Panggil dari trigger cron.
+function kirimReminderPulang() {
+  const staff = callSupabase(
+    'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
+  ) || []
+  if (staff.length === 0) return
+
+  const today = new Date().toISOString().split('T')[0]
+  // Cari yang sudah masuk tapi belum pulang
+  const attendance = callSupabase(
+    `raos_attendance?date=eq.${today}&check_in_at=not.is.null&check_out_at=is.null&select=staff_id`
+  ) || []
+  const belumPulangIds = new Set(attendance.map(a => a.staff_id))
+  const target = staff.filter(s => belumPulangIds.has(s.id))
+  if (target.length === 0) {
+    logSistem('cron', 'kirimReminderPulang', 'success', '0 staff perlu diingatkan (semua sudah check-out atau belum masuk)')
+    return
+  }
+
+  const pushRes = invokePushFromGas_(
+    target.map(s => s.id),
+    '🏁 Reminder Absensi Pulang',
+    'Sudah waktunya check-out. Jangan lupa absen pulang di RAOS.',
+    '/absensi',
+    'reminder-pulang-' + today
+  )
+
+  logSistem('cron', 'kirimReminderPulang', 'success',
+    `Reminder pulang push ke ${pushRes.sent}/${target.length} staff`)
+}
+
+// F: Notif ke koordinator kalau ada scan pending > 15 menit.
+function notifyPendingScansKoordinator() {
+  const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+  const pending = callSupabase(
+    `scan_orders?status=eq.pending&scanned_at=lt.${cutoff}&select=id,scan_id,scanned_at`
+  ) || []
+  if (pending.length === 0) return
+
+  // Ambil koordinator + admin + direksi + management
+  const koord = callSupabase(
+    `user_profiles?is_active=eq.true&role=in.(koordinator,admin,management,direksi)&select=id`
+  ) || []
+  if (koord.length === 0) return
+
+  const pushRes = invokePushFromGas_(
+    koord.map(k => k.id),
+    '⚠️ Scan Pending Perlu Validasi',
+    `${pending.length} scan pending >15 menit. Buka Panel Admin untuk validasi.`,
+    '/admin',
+    'pending-scans'
+  )
+
+  logSistem('cron', 'notifyPendingScansKoordinator', 'success',
+    `${pending.length} scan pending → push ke ${pushRes.sent}/${koord.length} koord/admin`)
+}
+
+// Helper: invoke Edge Function raos-send-push dari GAS. Pakai SUPABASE_KEY
+// (service role) di Script Properties → Edge Function verify_jwt=true
+// bypass role check untuk service_role token.
+function invokePushFromGas_(userIds, title, body, url, tag) {
+  if (!userIds || userIds.length === 0) return { sent: 0, total: 0, failed: 0 }
+  try {
+    const res = UrlFetchApp.fetch(
+      `${CONFIG.SUPABASE_URL}/functions/v1/raos-send-push`,
+      {
+        method: 'post',
+        contentType: 'application/json',
+        headers: {
+          'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`,
+        },
+        payload: JSON.stringify({ user_ids: userIds, title, body, url, tag }),
+        muteHttpExceptions: true,
+      }
+    )
+    const code = res.getResponseCode()
+    const text = res.getContentText()
+    if (code >= 400) {
+      logSistem('warning', 'invokePushFromGas_', 'warning', `Edge Function HTTP ${code}: ${text}`)
+      return { sent: 0, total: userIds.length, failed: userIds.length }
+    }
+    const j = JSON.parse(text)
+    return { sent: j.sent || 0, total: j.total || 0, failed: j.failed || 0 }
+  } catch (e) {
+    logSistem('error', 'invokePushFromGas_', 'error', e.message)
+    return { sent: 0, total: userIds.length, failed: userIds.length }
+  }
 }

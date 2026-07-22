@@ -10,6 +10,13 @@
   }
   html { @apply h-full; }
   body { @apply h-full bg-gray-50 font-sans antialiased; }
+
+  /* Dark mode baseline — body & primary surface. Komponen individual
+     (card, header) masih pakai warna terang; dark mode penuh akan
+     di-migrate per komponen di sesi berikutnya. */
+  html.dark body { @apply bg-gray-900 text-gray-100; }
+  html.dark .card { @apply bg-gray-800 border-gray-700 text-gray-100; }
+  html.dark .input { @apply bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500; }
 }
 
 @layer components {

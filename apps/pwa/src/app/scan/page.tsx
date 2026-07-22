@@ -24,7 +24,20 @@ export default function ScanPage() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [geofence, setGeofence] = useState<GeofenceResult | null>(null)
   const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid' | 'unavailable'>('checking')
-  const [inputMode, setInputMode] = useState<'camera' | 'manual'>('camera')
+  // Default scan mode dari preferensi user di Settings > Aplikasi. Kalau
+  // belum set atau invalid, fallback ke 'camera' (default sesi 14).
+  const [inputMode, setInputMode] = useState<'camera' | 'manual'>(() => {
+    if (typeof window === 'undefined') return 'camera'
+    try {
+      const raw = localStorage.getItem('raos_prefs')
+      if (raw) {
+        const prefs = JSON.parse(raw)
+        // scanMode: 'otomatis' → camera, 'manual' → manual
+        if (prefs.scanMode === 'manual') return 'manual'
+      }
+    } catch { /* ignore */ }
+    return 'camera'
+  })
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {

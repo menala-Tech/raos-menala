@@ -35,6 +35,15 @@ export default function RootLayout({
         <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
         <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
         <meta name="mobile-web-app-capable" content="yes" />
+        {/* Apply dark mode ASAP dari prefs — cegah flash. Inline script
+            supaya jalan sebelum hydration, hindari FOUC. */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          try {
+            var raw = localStorage.getItem('raos_prefs');
+            var tema = raw ? (JSON.parse(raw).tema || 'terang') : 'terang';
+            if (tema === 'gelap') document.documentElement.classList.add('dark');
+          } catch(e) {}
+        `}} />
       </head>
       <body className={`${inter.className} h-full`}>
         <div className="min-h-full max-w-md mx-auto relative">

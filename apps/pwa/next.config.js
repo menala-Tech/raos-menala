@@ -8,6 +8,11 @@ const withPWA = require('@ducanh2912/next-pwa').default({
     disableDevLogs: true,
     skipWaiting: true,
     clientsClaim: true,
+    // Push notification handler — extend SW next-pwa dengan sw-push.js
+    // (importScripts prepend ke sw.js hasil build). Handle event 'push'
+    // + 'notificationclick' untuk lock-screen notif Android/iOS via
+    // Web Push API + VAPID (bukan FCM).
+    importScripts: ['/sw-push.js'],
     // Precache exclude: SW build-time tidak precache asset Supabase
     exclude: [/^https:\/\/vlievtojpmrbsmzlqswl\.supabase\.co\//],
     // Runtime: JANGAN intercept apapun ke Supabase. Kalau SW handle POST

@@ -90,6 +90,11 @@ export default function SettingsPage() {
   const savePrefs = useCallback((next: AppPrefs) => {
     setPrefs(next)
     localStorage.setItem('raos_prefs', JSON.stringify(next))
+    // Apply tema langsung ke <html> supaya toggle terlihat instan (tidak
+    // butuh reload). Inline script di layout.tsx handle first-paint.
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', next.tema === 'gelap')
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
   }, [])
@@ -333,9 +338,10 @@ function SectionAkun({ user, onLogout }: { user: UserProfile | null; onLogout: (
   const [phone, setPhone] = useState(user?.phone ?? '')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const isSSoT = user?.source === 'ssot_master_staff'
 
   async function saveProfile() {
-    if (!user) return
+    if (!user || isSSoT) return
     setSaving(true)
     const { error } = await supabase
       .from('user_profiles').update({ phone }).eq('id', user.id)
@@ -354,18 +360,31 @@ function SectionAkun({ user, onLogout }: { user: UserProfile | null; onLogout: (
           <p className="text-xs text-gray-500 font-medium mb-1">No. WhatsApp</p>
           <input
             type="tel" value={phone} onChange={e => setPhone(e.target.value)}
-            placeholder="08xx-xxxx-xxxx" className="input"
+            placeholder="08xx-xxxx-xxxx"
+            disabled={isSSoT}
+            className={clsx('input', isSSoT && 'bg-gray-50 text-gray-500 cursor-not-allowed')}
           />
         </div>
         {msg && <p className="text-xs text-green-600 font-semibold text-center">{msg}</p>}
-        <button className="btn-primary" onClick={saveProfile} disabled={saving}>
-          {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
-        </button>
+        {!isSSoT && (
+          <button className="btn-primary" onClick={saveProfile} disabled={saving}>
+            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
+          </button>
+        )}
       </div>
 
-      <p className="text-[10px] text-gray-400 px-1">
-        Untuk mengubah nama atau email, hubungi Admin melalui Chat Room.
-      </p>
+      {isSSoT ? (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          Akun Anda tersinkron dari sheet MASTER DATA STAFF (SSoT). Perubahan
+          nama, email, No. WhatsApp, atau ID Staff harus dilakukan di sheet
+          oleh admin — bukan di sini. Sinkronisasi berikutnya (max 1 jam)
+          otomatis update ke sistem.
+        </p>
+      ) : (
+        <p className="text-[10px] text-gray-400 px-1">
+          Untuk mengubah nama atau email, hubungi Admin melalui Chat Room.
+        </p>
+      )}
 
       <button onClick={onLogout}
         className="w-full bg-red-500 text-white font-bold py-3 rounded-xl active:scale-95 transition-all">
@@ -573,21 +592,61 @@ function SectionLokasi({ user, prefs, save }: {
 
 /* ================= SECTION: NOTIFIKASI ================= */
 function SectionNotifikasi({ prefs, save }: { prefs: AppPrefs; save: (p: AppPrefs) => void }) {
+  const [pushMsg, setPushMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function toggleMaster() {
+    const next = !prefs.notifMaster
+    save({ ...prefs, notifMaster: next })
+    setBusy(true); setPushMsg('')
+    if (next) {
+      // Aktifkan → minta izin browser + subscribe Web Push (VAPID)
+      const { subscribePush } = await import('@/lib/push')
+      const r = await subscribePush()
+      if (!r.ok) {
+        if (r.reason === 'permission_denied') {
+          setPushMsg('Izin notifikasi ditolak browser. Aktifkan lewat pengaturan browser HP.')
+        } else if (r.reason === 'vapid_public_key_missing') {
+          setPushMsg('Server belum konfigurasi VAPID key. Hubungi admin sistem.')
+        } else if (r.reason === 'unsupported') {
+          setPushMsg('Browser tidak mendukung Push Notification.')
+        } else {
+          setPushMsg('Gagal aktifkan push: ' + r.reason)
+        }
+      } else {
+        setPushMsg('✓ Notifikasi aktif. Akan muncul di lock screen HP.')
+      }
+    } else {
+      const { unsubscribePush } = await import('@/lib/push')
+      await unsubscribePush()
+      setPushMsg('Notifikasi dinonaktifkan.')
+    }
+    setBusy(false)
+    setTimeout(() => setPushMsg(''), 5000)
+  }
+
   return (
     <div className="space-y-3">
       <div className="card">
         <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-          <div>
+          <div className="flex-1">
             <p className="text-sm font-bold text-gray-800">Aktifkan Notifikasi</p>
-            <p className="text-xs text-gray-400">Toggle master semua notifikasi</p>
+            <p className="text-xs text-gray-400">Toggle master + minta izin browser</p>
           </div>
           <button
-            onClick={() => save({ ...prefs, notifMaster: !prefs.notifMaster })}
-            className={`w-11 h-6 rounded-full relative transition-colors ${prefs.notifMaster ? 'bg-primary' : 'bg-gray-200'}`}
+            onClick={toggleMaster}
+            disabled={busy}
+            className={`w-11 h-6 rounded-full relative transition-colors disabled:opacity-50 ${prefs.notifMaster ? 'bg-primary' : 'bg-gray-200'}`}
           >
             <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 shadow transition-all ${prefs.notifMaster ? 'right-0.5' : 'left-0.5'}`} />
           </button>
         </div>
+        {pushMsg && (
+          <p className={clsx(
+            'text-[11px] text-center py-2 rounded-lg mt-3',
+            pushMsg.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
+          )}>{pushMsg}</p>
+        )}
 
         <p className="text-xs font-bold text-gray-500 uppercase tracking-widest py-3">Jenis Notifikasi</p>
         <div className={clsx('space-y-3', !prefs.notifMaster && 'opacity-40 pointer-events-none')}>

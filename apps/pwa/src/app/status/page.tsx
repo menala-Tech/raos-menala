@@ -36,7 +36,7 @@ export default function StatusPage() {
         .single()
       setUser(profile)
 
-      const isAdmin = profile && ['koordinator', 'admin', 'direksi'].includes(profile.role)
+      const isAdmin = profile && ['koordinator', 'admin', 'management', 'direksi'].includes(profile.role)
 
       const since = new Date()
       if (range === 'today') since.setHours(0, 0, 0, 0)

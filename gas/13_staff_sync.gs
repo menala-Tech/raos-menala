@@ -31,7 +31,11 @@ const MASTER_STAFF_SHEET_ID =
   || '1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw'
 
 const MASTER_STAFF_TAB_NAME = 'MASTER DATA STAFF'
-const RAOS_BRANCH_LABEL = 'ID Rifim Airport Soeta'
+// RAOS tarik staff dari 2 cabang di sheet:
+// 1. 'ID Rifim Airport Soeta' → staff operasional Soeta
+// 2. 'Head Office' → Direksi/Management yang mengurus lintas cabang
+//    (mereka perlu akses RAOS untuk monitoring)
+const RAOS_ALLOWED_BRANCHES = ['ID Rifim Airport Soeta', 'Head Office']
 
 function getMasterStaffSheet_() {
   const ss = SpreadsheetApp.openById(MASTER_STAFF_SHEET_ID)
@@ -66,6 +70,8 @@ function callSupabaseAuth_(endpoint, method, body) {
 
 function mapJabatanToRole_(jabatan) {
   const j = String(jabatan || '').trim().toUpperCase()
+  if (j === 'DIREKSI') return 'direksi'
+  if (j === 'MANAGEMENT') return 'management'
   if (j === 'KOORDINATOR') return 'koordinator'
   if (j === 'ADMIN') return 'admin'
   if (j === 'DIREKSI') return 'direksi'
@@ -96,7 +102,7 @@ function syncStaffFromSSOT() {
       const [emailRaw, namaRaw, /* gaji */, idCabangRaw, staffIdRaw, jabatanRaw, phoneRaw, pinRaw] = row
 
       const idCabang = String(idCabangRaw || '').trim()
-      if (idCabang !== RAOS_BRANCH_LABEL) return // bukan Soeta — lewati (silent)
+      if (RAOS_ALLOWED_BRANCHES.indexOf(idCabang) < 0) return // bukan Soeta/HO — lewati
 
       const email = String(emailRaw || '').trim().toLowerCase()
       const nama = String(namaRaw || '').replace(/⁠/g, '').trim() // buang word joiner

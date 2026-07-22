@@ -21,7 +21,7 @@ import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, Chat
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
-const PIN_ROLES = ['admin', 'koordinator', 'direksi']
+const PIN_ROLES = ['admin', 'management', 'koordinator', 'direksi']
 
 type FilterTab = 'semua' | 'grup' | 'lokasi' | 'pribadi'
 type RoomSheet = 'none' | 'info' | 'settings'

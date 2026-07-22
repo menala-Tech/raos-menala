@@ -15,7 +15,7 @@ import type { UserProfile, Branch } from '@/types'
 import { logActivity } from '@/lib/activity'
 
 type Tab = 'validasi' | 'staff'
-type StaffRole = 'direksi' | 'admin' | 'koordinator' | 'staff'
+type StaffRole = 'direksi' | 'admin' | 'management' | 'koordinator' | 'staff'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -58,7 +58,7 @@ export default function AdminPage() {
         .select('*, branches(*)')
         .eq('id', session.user.id)
         .single()
-      if (!profile || !['koordinator', 'admin', 'direksi'].includes(profile.role)) {
+      if (!profile || !['koordinator', 'admin', 'management', 'direksi'].includes(profile.role)) {
         router.push('/dashboard')
         return
       }
@@ -98,7 +98,7 @@ export default function AdminPage() {
     setProcessing(null)
   }
 
-  const isAdmin = user && ['admin', 'direksi'].includes(user.role)
+  const isAdmin = user && ['admin', 'management', 'direksi'].includes(user.role)
 
   return (
     <AppShell>
@@ -528,6 +528,7 @@ function EditStaffModal({
             <option value="staff">Staff</option>
             <option value="koordinator">Koordinator</option>
             <option value="admin">Admin</option>
+            <option value="management">Management</option>
             <option value="direksi">Direksi</option>
           </select>
           <div>

@@ -93,7 +93,7 @@ export default function BarcodesPage() {
         .select('role')
         .eq('id', session.user.id)
         .single()
-      if (!profile || !['admin', 'koordinator', 'direksi'].includes(profile.role)) {
+      if (!profile || !['admin', 'management', 'koordinator', 'direksi'].includes(profile.role)) {
         router.push('/dashboard')
         return
       }

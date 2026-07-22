@@ -74,7 +74,7 @@ export default function DriversPage() {
     loadDrivers(p, search)
   }
 
-  const isAdmin = user && ['admin', 'direksi'].includes(user.role)
+  const isAdmin = user && ['admin', 'management', 'direksi'].includes(user.role)
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   return (

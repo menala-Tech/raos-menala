@@ -88,7 +88,7 @@ export default function LaporanPage() {
         .select('*, branches(*)')
         .eq('id', session.user.id)
         .single()
-      if (!profile || !['koordinator', 'admin', 'direksi'].includes(profile.role)) {
+      if (!profile || !['koordinator', 'admin', 'management', 'direksi'].includes(profile.role)) {
         router.push('/dashboard')
         return
       }

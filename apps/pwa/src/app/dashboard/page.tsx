@@ -57,7 +57,7 @@ export default function DashboardPage() {
     load()
   }, [router])
 
-  const isAdmin = user && ['koordinator', 'admin', 'direksi'].includes(user.role)
+  const isAdmin = user && ['koordinator', 'admin', 'management', 'direksi'].includes(user.role)
 
   const quick = [
     { href: '/scan',     icon: ScanLine,      label: 'Scan\nBarcode',    color: 'bg-blue-600',   bg: 'bg-blue-50' },

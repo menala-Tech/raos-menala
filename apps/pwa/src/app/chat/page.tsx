@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
-import DateTimeHeader from '@/components/DateTimeHeader'
+import { DateTimeStack } from '@/components/DateTimeHeader'
 import {
   ArrowLeft, Send, MessageCircle, Users, Bell, BellOff, Search,
   Paperclip, FileText, X, Loader2, Download,
@@ -1512,20 +1512,22 @@ function ChatPageInner() {
         <div className="flex items-center gap-3 mb-3">
           <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
           <div className="flex-1"><MenalaLogo size={28} showText /></div>
-          <DateTimeHeader compact />
         </div>
-        <div className="flex items-start justify-between">
-          <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="font-black text-xl">Chat Room Staff</h1>
             <p className="text-white/50 text-xs mt-0.5">Komunikasi cepat, koordinasi akurat</p>
           </div>
-          <button
-            onClick={openContactSheet}
-            aria-label="Mulai chat pribadi dengan staff"
-            title="Mulai chat pribadi"
-            className="bg-white/10 hover:bg-white/20 rounded-xl p-2 mt-1 active:scale-95 transition-transform">
-            <Users size={18} className="text-white" />
-          </button>
+          <div className="flex items-start gap-2 flex-shrink-0">
+            <DateTimeStack />
+            <button
+              onClick={openContactSheet}
+              aria-label="Mulai chat pribadi dengan staff"
+              title="Mulai chat pribadi"
+              className="bg-white/10 hover:bg-white/20 rounded-xl p-2 active:scale-95 transition-transform">
+              <Users size={18} className="text-white" />
+            </button>
+          </div>
         </div>
         <div className="relative mt-3">
           <Search className="absolute left-3 top-2.5 text-white/40" size={16} />

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
-import DateTimeHeader from '@/components/DateTimeHeader'
+import { DateTimeStack } from '@/components/DateTimeHeader'
 import {
   ArrowLeft, Camera, MapPin, CheckCircle2, Clock, UserCheck,
   Fingerprint, Navigation, AlertTriangle
@@ -137,11 +137,13 @@ export default function AbsensiPage() {
           <div className="flex-1">
             <MenalaLogo size={28} showText />
           </div>
-          <DateTimeHeader compact />
         </div>
-        <div>
-          <h1 className="font-black text-xl tracking-wide">Absensi Staff</h1>
-          <p className="text-white/50 text-xs mt-0.5">{dateStr}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="font-black text-xl tracking-wide">Absensi Staff</h1>
+            <p className="text-white/50 text-xs mt-0.5">{dateStr}</p>
+          </div>
+          <DateTimeStack />
         </div>
 
         {/* Location badge */}

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
-import DateTimeHeader from '@/components/DateTimeHeader'
+import { DateTimeStack } from '@/components/DateTimeHeader'
 import {
   ArrowLeft, Search, ScanLine, UserCheck, Filter, CheckCircle2, Clock,
   X, BarChart3, MapPin, Car, User, Calendar
@@ -137,17 +137,22 @@ export default function RiwayatPage() {
         <div className="flex items-center gap-3 mb-3">
           <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
           <div className="flex-1"><MenalaLogo size={28} showText /></div>
-          <DateTimeHeader compact />
-          <button onClick={() => setShowSummary(true)}>
-            <BarChart3 size={20} className="text-primary" />
-          </button>
         </div>
 
-        <div className="mb-3">
-          <h1 className="font-black text-xl">Riwayat Aktivitas</h1>
-          <p className="text-white/50 text-xs mt-0.5">
-            Semua aktivitas scan &amp; absensi tersimpan otomatis
-          </p>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="font-black text-xl">Riwayat Aktivitas</h1>
+            <p className="text-white/50 text-xs mt-0.5">
+              Semua aktivitas scan &amp; absensi tersimpan otomatis
+            </p>
+          </div>
+          <div className="flex items-start gap-2 flex-shrink-0">
+            <DateTimeStack />
+            <button onClick={() => setShowSummary(true)}
+              className="bg-white/10 hover:bg-white/20 rounded-xl p-2 active:scale-95 transition-transform">
+              <BarChart3 size={20} className="text-primary" />
+            </button>
+          </div>
         </div>
 
         <div className="relative">

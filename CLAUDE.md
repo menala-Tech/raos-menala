@@ -247,20 +247,133 @@ Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
   tercatat sebagai "SECURITY DEFINER callable by authenticated" — ini memang
   desain: keduanya dipanggil authenticated user untuk RLS helper, aman.
 
-## Debt / Pending Tinggi (per sesi 11 — 22 Juli 2026)
+## Update Sesi 14 (22 Juli 2026 — dinihari s/d pagi)
 
-1. ~~Hardening Supabase security~~ — SELESAI (lihat di atas), kecuali:
-   - Aktifkan Leaked Password Protection di Auth Settings (manual, 1 klik,
-     tidak bisa lewat SQL/migration — perlu Dashboard atau Management API)
-2. **Fitur Chat Room Staff — Fase 2-7** (lihat `PROMPT_AI_CHAT_ROOM_STAFF_MENALA.md`):
-   - Fase 2: kirim foto/file (bikin bucket `chat_attachments` + tabel `chat_message_attachments`)
-   - Fase 3: layar Info Room + Pengaturan Room
-   - Fase 4: reaksi emoji + pin message
-   - Fase 5: auto-hapus pesan (retention per room via pg_cron)
-   - Fase 6: kirim lokasi
-   - Fase 7: polling
-3. **KPI produksi**: `kpi_targets` masih kosong. Perlu insert target + hitung dari GAS.
-4. **logActivity()**: 0 baris di `activity_logs` — logging belum aktif meski helper GAS ada.
-5. **CRUD staff** di `/admin`: sekarang cuma view + validasi scan, belum bisa
-   create/edit/deactivate staff.
+### Chat — kontak pribadi + gap Fase 3/5 ditutup
+
+- **RPC `get_or_create_pribadi_room(other_user_id)`** (migration `raos_024`) —
+  SECURITY DEFINER, idempotent. Return room `pribadi` existing kalau sudah ada
+  antara caller + other, atau bikin baru + auto-tambah 2 member. Dipakai
+  ikon Users di header chat list → sheet Kontak Staff → tap staff → open chat.
+- **Policy `chat_room_members_delete_own` + `chat_rooms_update_admin`**
+  (migration `raos_023`) — user boleh leave room (delete row miliknya) +
+  admin/koordinator/direksi boleh update `chat_rooms.auto_delete_days`
+  (dropdown retensi 7/30/90 hari di Pengaturan Room).
+- **PostgREST embed ambigu FK** — `chat_messages` punya 2 FK ke
+  `user_profiles` (`sender_id_fkey` + `pinned_by_fkey`, yang kedua ditambah
+  Fase 4). SEMUA query embed harus eksplisit:
+  `user_profiles!chat_messages_sender_id_fkey(...)`. Kalau tambah embed
+  baru di chat/page.tsx atau file lain, WAJIB pakai FK name eksplisit.
+
+### SSoT Staff — sudah aktif
+
+- Sync satu-arah spreadsheet MASTER DATA STAFF → Supabase `user_profiles`
+  via `gas/13_staff_sync.gs`, trigger 1 jam, filter
+  `ID CABANG = "ID Rifim Airport Soeta"`. Migration `raos_022` tambah kolom
+  `source` (`manual` | `ssot_master_staff`) + `ssot_synced_at` + trigger
+  `prevent_ssot_staff_column_edit` (blok edit `full_name`/`role`/`phone`/
+  `staff_id` dari client, service_role GAS di-bypass).
+- **Login PIN**: PIN kolom H sheet → password Supabase Auth. Form login
+  label "PIN", `inputMode="numeric"` tanpa `pattern` strict (supaya admin
+  manual dengan password alfanumerik tetap bisa login).
+- **RPC `get_auth_user_id_by_email`** (migration `raos_022b`) — helper
+  GAS untuk lookup auth.users by email, service_role only.
+- **Rollback sesi 13**: `POST /api/admin/staff` + `lib/supabaseAdmin.ts` +
+  tombol Tambah Staff DIHAPUS. `SUPABASE_SERVICE_ROLE_KEY` **tidak lagi
+  dipakai di PWA** — service role hanya di GAS (`SUPABASE_SERVICE_KEY`
+  Script Property). Kalau sempat di-set di `.env.local`/Vercel, hapus.
+
+### GPS tiered — scan & absensi cepat
+
+- `lib/gps.ts` `requestLocationTiered({ onFix, onUnavailable })`:
+  - Fase COARSE (`enableHighAccuracy:false, timeout:3s, maximumAge:15s`)
+    — wifi/cell trilateration, 0.5-2 detik, cukup untuk validasi geofence.
+  - Fase REFINE (`enableHighAccuracy:true, timeout:8s, maximumAge:15s`)
+    — GPS asli, non-blocking, cuma overwrite kalau accuracy turun ≥30m.
+  - Dua fase dilempar paralel dari mount (bukan berurutan).
+- Dipakai di `/scan` & `/absensi` — waktu ke UI-siap turun 10-30s → 0.5-2s
+  (terutama indoor terminal Soeta yang atapnya struktur baja).
+
+### BarcodeScanner — jangan restart tiap parent re-render
+
+- `BarcodeScanner` useEffect **hanya** depend ke `[active]`, BUKAN
+  `[active, onDetected]`. `onDetected` disimpan di ref (`onDetectedRef`)
+  supaya reference berubah (mis. dari `useCallback([location, geofence])`
+  saat GPS refine) TIDAK memicu stop/start html5-qrcode. Race stop/start
+  bertumpuk = page crash → "This page couldn't load".
+- Pola sama harus dipakai kalau bikin komponen kamera lain nanti.
+
+### PWA — SW skipWaiting
+
+- `next.config.js` `workboxOptions: { skipWaiting: true, clientsClaim: true }`
+  → SW baru langsung take over tanpa nunggu semua tab RAOS ditutup. Update
+  code (mis. fix bug) langsung aktif setelah refresh, tidak nyangkut di
+  bundle lama.
+- **First-time upgrade**: user perlu clear cache PWA sekali secara manual
+  (long-press icon → Info aplikasi → Hapus data) karena SW versi lama
+  belum tahu `skipWaiting`. Update setelah ini otomatis.
+
+### UI konvensi tambahan (sesi 14)
+
+- **`SwipeBackWrapper` attach ke `containerRef`** (BUKAN `document`) —
+  cegah wrapper luar (AppShell) + wrapper dalam (room chat) sama-sama
+  fire. Plus `e.stopPropagation()` di `onTouchEnd`.
+- **Modal bottom-sheet di halaman ber-BottomNav**: harus pakai
+  `paddingBottom: 'calc(96px + env(safe-area-inset-bottom))'` di container
+  scroll — bukan `p-6` flat — supaya tombol CTA (Simpan, dll) tidak
+  ketutup BottomNav 90px. Contoh: modal Edit Staff di `/admin`, modal
+  Tambah/Edit Driver di `/drivers`.
+- **`DateTimeHeader` component** (`src/components/DateTimeHeader.tsx`) —
+  chip tanggal+jam WIB realtime (tick 1s). Dipakai di header dashboard,
+  chat, absensi, scan, riwayat. Variant `compact` untuk kanan atas.
+- **`MiniCalendar` component** (`src/components/MiniCalendar.tsx`) —
+  grid bulanan Sen-Min di dashboard, highlight hari ini primary bg.
+- **`Logo Menala.png` baru** dari `Branding/` folder (horizontal 1200×268
+  mark + wordmark navy + tagline). Split di build-time:
+  `public/images/logo-menala.png` = mark cropped 360×268 (dipakai
+  MenalaMark + generate-icons.js), `logo-menala-full.png` = horizontal
+  bundled (dipakai kalau nanti perlu di surface bg terang, mis. laporan
+  PDF). `MenalaLogo` component render mark PNG + teks manual tone-aware
+  (default onNavy = putih untuk header/splash bg navy).
+
+### GAS out-of-sync yang sudah difix
+
+- `kirimReminderAbsensi()` sekarang fetch dari Supabase `user_profiles?is_active=eq.true`
+  (bukan sheet lokal DATABASE STAFF yang sudah tidak dipakai post-SSOT).
+- Menu 🚗 Driver **"Isi Data Mock Driver"** & **"Import Driver ke Supabase"**
+  HIDDEN dari menu 10_menu.gs (pre-SSOT era, insert `source=manual` bisa
+  duplikat dengan sync SSOT). Fungsi masih ada di `03_order.gs` kalau
+  perlu dipanggil manual dari script editor untuk debug.
+
+## Debt / Pending Tinggi (per akhir sesi 14 — 22 Juli 2026)
+
+1. **KPI pipeline REFACTOR BESAR** (belum pernah jalan). `updateAllKpiThisMonth`
+   loop `staff_id` TEXT dari sheet, tapi `kpi_targets.staff_id` FK UUID →
+   insert selalu gagal. `kpi_targets` masih 0 baris. Butuh: sheet TARGET STAFF
+   diisi + refactor pipe pakai `user_profiles` Supabase UUID + rekap absensi
+   dari `raos_attendance` (bukan sheet ABSENSI lokal).
+2. **Hard-block scan/absensi di luar radius** (staff & koordinator). Sekarang
+   masih non-blocking. Interpretasi persis "50m di luar radius" perlu dipilih:
+   (A) jarak > radius + 50m tolerance, (B) jarak > 50m fix ignore radius,
+   (C) hard block kalau di luar radius, 50m cuma display threshold.
+3. **Chat gap sesi 15**:
+   - Create Room (proyek/multi-member) via `/admin` — perlu INSERT policy +
+     modal + member picker.
+   - Voice message (MediaRecorder + bucket mime `audio/webm` + type baru
+     `'audio'` di `chat_messages` + UI record/play).
+4. Aktifkan Leaked Password Protection di Supabase Auth Settings (manual, 1
+   klik, tidak bisa lewat SQL).
+5. Ganti password admin (masih `Menala2026!`).
+6. Set `branch_id` (T1/T2/T3) untuk Hendro (staff Soeta) via `/admin` — sync
+   SSOT tidak isi otomatis karena kolom itu RAOS-only.
+7. Isi PIN Hendro di sheet MASTER DATA STAFF (kolom H, minimal 6 digit
+   angka). Sync berikutnya (max 1 jam) propagate ke password Supabase Auth.
+8. Hapus `SUPABASE_SERVICE_ROLE_KEY` dari Vercel env vars kalau sempat
+   di-set sesi 13 (tidak dipakai lagi di PWA).
+9. Tambah kolom "Jabatan DIREKSI" di HRIS — mapping role direksi belum ada
+   di sheet.
+10. `logActivity()`: 0 baris di `activity_logs` — logging GAS belum aktif
+    meski helper ada.
+11. Offline mode (Service Worker upgrade cache-first strategy) + push
+    notification (FCM) — belum ada infra.
 6. **Push Notification (FCM)** & **Offline mode** (SW upgrade): belum ada infra.

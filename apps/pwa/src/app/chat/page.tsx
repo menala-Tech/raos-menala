@@ -13,6 +13,7 @@ import {
   Info, Settings, ChevronRight, LogOut, Pin, PinOff,
   Copy, SmilePlus, MapPin, Navigation,
   BarChart2, CheckSquare, Square, Plus, Trash2, Lock,
+  Mic, Trash, StopCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatPollOption, UserProfile } from '@/types'
@@ -139,6 +140,14 @@ function ChatPageInner() {
   const [pinnedMsg, setPinnedMsg]       = useState<ChatMessage | null>(null)
   const [actionMenu, setActionMenu]     = useState<ActionMenu | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Voice recorder (Fase 8) — MediaRecorder blob → upload → message type 'audio'
+  const [recording, setRecording]           = useState(false)
+  const [recSeconds, setRecSeconds]         = useState(0)
+  const [uploadingAudio, setUploadingAudio] = useState(false)
+  const mediaRecRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Kontak sheet — daftar staff untuk mulai chat pribadi
   const [contactSheet, setContactSheet] = useState(false)
@@ -505,6 +514,93 @@ function ChatPageInner() {
       .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
       .eq('room_id', activeRoom.id).limit(30)
     setRoomMembers(data ?? []); setMembersLoading(false)
+  }
+
+  // ── Voice recorder (Fase 8) ──────────────────────────────────────────────
+  const VOICE_MAX_SECONDS = 60
+
+  function pickAudioMime(): string {
+    // Chrome/Firefox: webm/opus. iOS Safari: mp4/aac. Fallback ke default.
+    if (typeof MediaRecorder === 'undefined') return ''
+    if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm'
+    if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4'
+    return ''
+  }
+
+  async function startRecording() {
+    if (!activeRoom || !user || recording) return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = pickAudioMime()
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream)
+      audioChunksRef.current = []
+      rec.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null }
+        const blob = new Blob(audioChunksRef.current, { type: rec.mimeType || 'audio/webm' })
+        if (blob.size < 1000) return // terlalu pendek, batal
+        await uploadVoiceMessage(blob, rec.mimeType || 'audio/webm')
+      }
+      mediaRecRef.current = rec
+      rec.start()
+      setRecording(true)
+      setRecSeconds(0)
+      recTimerRef.current = setInterval(() => {
+        setRecSeconds(s => {
+          if (s + 1 >= VOICE_MAX_SECONDS) { stopRecording(); return VOICE_MAX_SECONDS }
+          return s + 1
+        })
+      }, 1000)
+    } catch (err: any) {
+      alert('Tidak bisa akses mikrofon. Cek izin mic di setelan browser.')
+    }
+  }
+
+  function stopRecording() {
+    const rec = mediaRecRef.current
+    if (rec && rec.state !== 'inactive') rec.stop()
+    setRecording(false)
+    mediaRecRef.current = null
+  }
+
+  function cancelRecording() {
+    if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null }
+    const rec = mediaRecRef.current
+    if (rec && rec.state !== 'inactive') {
+      audioChunksRef.current = [] // clear chunks supaya onstop skip upload
+      rec.stop()
+    }
+    setRecording(false)
+    setRecSeconds(0)
+    mediaRecRef.current = null
+  }
+
+  async function uploadVoiceMessage(blob: Blob, mime: string) {
+    if (!activeRoom || !user) return
+    setUploadingAudio(true)
+    const ext = mime.includes('mp4') ? 'm4a' : (mime.includes('webm') ? 'webm' : 'ogg')
+    const storagePath = `${user.id}/${activeRoom.id}/voice-${Date.now()}.${ext}`
+    const { error: upErr } = await supabase.storage.from('chat_attachments').upload(storagePath, blob, {
+      upsert: false, contentType: mime,
+    })
+    if (upErr) { alert('Gagal upload suara: ' + upErr.message); setUploadingAudio(false); return }
+    const { data: { publicUrl } } = supabase.storage.from('chat_attachments').getPublicUrl(storagePath)
+    const { data: msg } = await supabase.from('chat_messages').insert({
+      room_id: activeRoom.id, sender_id: user.id, type: 'audio',
+      content: `Voice ${recSeconds}s`, media_url: publicUrl,
+    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+    if (msg) {
+      await supabase.from('chat_message_attachments').insert({
+        message_id: msg.id, room_id: activeRoom.id, uploader_id: user.id,
+        file_name: `Voice ${recSeconds}s`, file_size: blob.size,
+        mime_type: mime, storage_path: storagePath, url: publicUrl,
+      })
+      setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg as ChatMessage])
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
+    setRecSeconds(0)
+    setUploadingAudio(false)
   }
 
   // Kontak sheet — daftar staff aktif untuk mulai chat pribadi
@@ -1015,7 +1111,7 @@ function ChatPageInner() {
                 onClick={() => msgRefs.current[pinnedMsg.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
                 className="flex-1 min-w-0 text-left">
                 <p className="text-[10px] font-bold text-primary">Pesan Disematkan</p>
-                <p className="text-xs text-gray-600 truncate">{pinnedMsg.content || (pinnedMsg.type === 'image' ? '📷 Gambar' : '📎 File')}</p>
+                <p className="text-xs text-gray-600 truncate">{pinnedMsg.content || (pinnedMsg.type === 'image' ? '📷 Gambar' : pinnedMsg.type === 'audio' ? '🎤 Pesan suara' : '📎 File')}</p>
               </button>
               {canPin && (
                 <button onClick={unpinMessage} className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0">
@@ -1090,6 +1186,16 @@ function ChatPageInner() {
                         </div>
                         <Download size={14} className={isMe ? 'text-white/50' : 'text-gray-400'} />
                       </a>
+                    )}
+
+                    {/* AUDIO / VOICE MESSAGE (Fase 8) */}
+                    {msg.type === 'audio' && msg.media_url && (
+                      <div className={clsx('flex items-center gap-2 rounded-xl px-3 py-2 mb-1.5',
+                        isMe ? 'bg-white/10' : 'bg-gray-100')}>
+                        <Mic size={16} className={clsx('flex-shrink-0', isMe ? 'text-primary' : 'text-red-500')} />
+                        <audio controls preload="metadata" src={msg.media_url}
+                          className="h-8 min-w-[180px] max-w-[220px]" />
+                      </div>
                     )}
 
                     {/* LOCATION */}
@@ -1278,42 +1384,77 @@ function ChatPageInner() {
           )}
 
           {/* ── Input bar ─────────────────────────────────────────────────── */}
-          <div className="bg-white border-t border-gray-100 px-3 py-2.5 flex items-center gap-2 flex-shrink-0">
-            <button onClick={() => fileInputRef.current?.click()} disabled={uploading || sendingLocation}
-              className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
-              title="Kirim foto / file">
-              <Paperclip size={20} />
-            </button>
-            <button onClick={sendLocation} disabled={uploading || sendingLocation || pollSending}
-              className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-40 flex-shrink-0"
-              title="Kirim lokasi">
-              {sendingLocation
-                ? <Loader2 size={18} className="animate-spin text-red-400" />
-                : <MapPin size={20} />}
-            </button>
-            <button onClick={() => setPollSheet(true)} disabled={uploading || sendingLocation || pollSending}
-              className="text-gray-400 hover:text-secondary transition-colors disabled:opacity-40 flex-shrink-0"
-              title="Buat polling">
-              <BarChart2 size={20} />
-            </button>
-            <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-              className="hidden" onChange={handleFileSelect} />
-            <input
-              type="text"
-              placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan...'}
-              value={text}
-              onChange={e => setText(e.target.value)}
-              onKeyDown={e => { if (e.key !== 'Enter') return; pendingFile ? sendWithAttachment() : sendMessage() }}
-              className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
-              disabled={uploading || sendingLocation || pollSending}
-            />
-            <button
-              onClick={pendingFile ? sendWithAttachment : sendMessage}
-              disabled={(!text.trim() && !pendingFile) || sending || uploading}
-              className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0">
-              {uploading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} strokeWidth={2.5} />}
-            </button>
-          </div>
+          {recording ? (
+            <div className="bg-red-50 border-t border-red-100 px-4 py-3 flex items-center gap-3 flex-shrink-0">
+              <button onClick={cancelRecording}
+                className="text-red-500 hover:text-red-700 flex-shrink-0"
+                title="Batal rekam">
+                <Trash size={22} />
+              </button>
+              <div className="flex-1 flex items-center gap-2 text-red-700 font-semibold">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+                </span>
+                <span className="text-sm tabular-nums">
+                  {String(Math.floor(recSeconds / 60)).padStart(2, '0')}:
+                  {String(recSeconds % 60).padStart(2, '0')}
+                </span>
+                <span className="text-xs text-red-500">/ 01:00</span>
+              </div>
+              <button onClick={stopRecording}
+                className="bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-2xl flex-shrink-0"
+                title="Kirim rekaman">
+                <StopCircle size={20} />
+              </button>
+            </div>
+          ) : (
+            <div className="bg-white border-t border-gray-100 px-3 py-2.5 flex items-center gap-2 flex-shrink-0">
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading || sendingLocation || uploadingAudio}
+                className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
+                title="Kirim foto / file">
+                <Paperclip size={20} />
+              </button>
+              <button onClick={sendLocation} disabled={uploading || sendingLocation || pollSending || uploadingAudio}
+                className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-40 flex-shrink-0"
+                title="Kirim lokasi">
+                {sendingLocation
+                  ? <Loader2 size={18} className="animate-spin text-red-400" />
+                  : <MapPin size={20} />}
+              </button>
+              <button onClick={() => setPollSheet(true)} disabled={uploading || sendingLocation || pollSending || uploadingAudio}
+                className="text-gray-400 hover:text-secondary transition-colors disabled:opacity-40 flex-shrink-0"
+                title="Buat polling">
+                <BarChart2 size={20} />
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                className="hidden" onChange={handleFileSelect} />
+              <input
+                type="text"
+                placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan...'}
+                value={text}
+                onChange={e => setText(e.target.value)}
+                onKeyDown={e => { if (e.key !== 'Enter') return; pendingFile ? sendWithAttachment() : sendMessage() }}
+                className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
+                disabled={uploading || sendingLocation || pollSending || uploadingAudio}
+              />
+              {(text.trim() || pendingFile) ? (
+                <button
+                  onClick={pendingFile ? sendWithAttachment : sendMessage}
+                  disabled={sending || uploading}
+                  className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0">
+                  {uploading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} strokeWidth={2.5} />}
+                </button>
+              ) : (
+                <button
+                  onClick={startRecording} disabled={uploadingAudio}
+                  className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0"
+                  title="Rekam suara (max 60 detik)">
+                  {uploadingAudio ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} strokeWidth={2.5} />}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </SwipeBackWrapper>
     )

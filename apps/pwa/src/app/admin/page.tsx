@@ -7,6 +7,7 @@ import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, CheckCircle2, XCircle, ShieldCheck,
   Users, ScanLine, Loader2, QrCode, Pencil, X, Power, Lock,
+  MessageCirclePlus, Search, Check,
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
@@ -25,6 +26,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
   const [editingStaff, setEditingStaff] = useState<any | null>(null)
+  const [showCreateRoom, setShowCreateRoom] = useState(false)
 
   const loadData = useCallback(async (_uid: string) => {
     const [{ data: scans }, { data: staff }, { data: branchData }] = await Promise.all([
@@ -111,8 +113,8 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Quick link */}
-      <div className="px-4 pt-3 pb-1 bg-white border-b border-gray-100">
+      {/* Quick links */}
+      <div className="px-4 pt-3 pb-1 bg-white border-b border-gray-100 space-y-1.5">
         <Link
           href="/admin/barcodes"
           className="flex items-center gap-2 text-sm text-primary font-medium py-2 px-3 bg-primary/5 rounded-lg"
@@ -120,6 +122,15 @@ export default function AdminPage() {
           <QrCode size={16} />
           Generator QR Code Driver
         </Link>
+        {isAdmin && (
+          <button
+            onClick={() => setShowCreateRoom(true)}
+            className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-secondary/5 rounded-lg text-left"
+          >
+            <MessageCirclePlus size={16} />
+            Buat Room Proyek Baru
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -271,7 +282,167 @@ export default function AdminPage() {
           onSaved={() => { setEditingStaff(null); user && loadData(user.id) }}
         />
       )}
+
+      {showCreateRoom && user && (
+        <CreateProyekRoomModal
+          me={user.id}
+          onClose={() => setShowCreateRoom(false)}
+          onCreated={() => { setShowCreateRoom(false); router.push('/chat') }}
+        />
+      )}
     </AppShell>
+  )
+}
+
+function CreateProyekRoomModal({
+  me, onClose, onCreated,
+}: { me: string; onClose: () => void; onCreated: () => void }) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [search, setSearch] = useState('')
+  const [staffList, setStaffList] = useState<Array<{ id: string; full_name: string; staff_id: string; role: string }>>([])
+  const [loadingStaff, setLoadingStaff] = useState(true)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    supabase.from('user_profiles')
+      .select('id, full_name, staff_id, role')
+      .eq('is_active', true)
+      .order('full_name')
+      .then(({ data }) => {
+        setStaffList((data ?? []).filter(u => u.id !== me))
+        setLoadingStaff(false)
+      })
+  }, [me])
+
+  function toggleMember(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    if (name.trim().length < 3) { setError('Nama room minimal 3 karakter.'); return }
+    setSaving(true)
+    const { error } = await supabase.rpc('create_proyek_room', {
+      p_name: name.trim(),
+      p_description: description.trim(),
+      p_member_ids: Array.from(selected),
+    })
+    setSaving(false)
+    if (error) { setError('Gagal buat room: ' + error.message); return }
+    onCreated()
+  }
+
+  const filtered = staffList.filter(u =>
+    !search ||
+    u.full_name.toLowerCase().includes(search.toLowerCase()) ||
+    u.staff_id.toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
+      <div
+        className="bg-white rounded-t-3xl w-full max-w-md mx-auto px-6 pt-6 max-h-[90vh] overflow-y-auto"
+        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-bold text-gray-800">Buat Room Proyek</h2>
+          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">
+          Room kolaborasi lintas staff. Anda otomatis jadi anggota, staff yang di-tag
+          bisa langsung akses room begitu dibuat.
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            required minLength={3}
+            placeholder="Nama Room *"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            className="input"
+          />
+          <textarea
+            placeholder="Deskripsi (opsional)"
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            rows={2}
+            className="input resize-none"
+          />
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                Anggota ({selected.size} dipilih)
+              </p>
+              {selected.size > 0 && (
+                <button type="button" onClick={() => setSelected(new Set())}
+                  className="text-[11px] text-red-500 font-semibold">Kosongkan</button>
+              )}
+            </div>
+            <div className="relative mb-2">
+              <Search size={13} className="absolute left-3 top-2.5 text-gray-400" />
+              <input
+                type="text" placeholder="Cari nama / ID staff..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="input pl-8 text-sm"
+              />
+            </div>
+            <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-64 overflow-y-auto">
+              {loadingStaff && <p className="text-center text-gray-400 text-xs py-6">Memuat staff...</p>}
+              {!loadingStaff && filtered.length === 0 && (
+                <p className="text-center text-gray-400 text-xs py-6">Tidak ada staff cocok.</p>
+              )}
+              {!loadingStaff && filtered.map(u => {
+                const isSelected = selected.has(u.id)
+                return (
+                  <button
+                    type="button" key={u.id}
+                    onClick={() => toggleMember(u.id)}
+                    className={clsx(
+                      'w-full flex items-center gap-3 px-3 py-2 text-left transition-colors',
+                      isSelected ? 'bg-primary/5' : 'hover:bg-gray-50'
+                    )}
+                  >
+                    <div className={clsx(
+                      'w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border-2',
+                      isSelected ? 'bg-primary border-primary' : 'border-gray-300'
+                    )}>
+                      {isSelected && <Check size={12} className="text-secondary" strokeWidth={4} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{u.full_name}</p>
+                      <p className="text-[11px] text-gray-400 capitalize truncate">
+                        {u.staff_id} • {u.role}
+                      </p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1.5">
+              Kosongkan pilihan kalau mau bikin room dulu, undang anggota belakangan lewat Info Room.
+            </p>
+          </div>
+
+          {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
+
+          <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <MessageCirclePlus size={16} />}
+            {saving ? 'Membuat...' : 'Buat Room Proyek'}
+          </button>
+        </form>
+      </div>
+    </div>
   )
 }
 

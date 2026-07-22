@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
+import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
 import {
   User, Smartphone, MapPin, Bell, Shield,
@@ -107,31 +108,37 @@ export default function SettingsPage() {
       keamanan: 'Keamanan', data: 'Data & Sync',
     }
     return (
-      <AppShell>
-        <div className="bg-secondary text-white px-4 pt-10 pb-4 flex items-center gap-3 sticky top-0 z-30">
-          <button onClick={() => setSection(null)} className="text-white/70">
-            <ChevronLeft size={24} />
-          </button>
-          <h1 className="font-black text-lg flex-1">{TITLES[section]}</h1>
-          <MenalaLogo size={26} showText={false} />
-        </div>
-
-        {saved && (
-          <div className="mx-4 mt-3 bg-green-50 border border-green-200 rounded-xl px-3 py-2
-                          flex items-center gap-2 text-green-700 text-xs font-semibold">
-            <CheckCircle2 size={14} /> Perubahan tersimpan
+      // Wrap SwipeBackWrapper WITH onBack — register di module-level guard
+      // supaya AppShell luar (fallback router.back) skip. Swipe back di
+      // sub-menu Pengaturan → setSection(null) → balik ke main Settings
+      // (BUKAN lompat ke /dashboard).
+      <SwipeBackWrapper onBack={() => setSection(null)}>
+        <AppShell>
+          <div className="bg-secondary text-white px-4 pt-10 pb-4 flex items-center gap-3 sticky top-0 z-30">
+            <button onClick={() => setSection(null)} className="text-white/70">
+              <ChevronLeft size={24} />
+            </button>
+            <h1 className="font-black text-lg flex-1">{TITLES[section]}</h1>
+            <MenalaLogo size={26} showText={false} />
           </div>
-        )}
 
-        <div className="px-4 py-4">
-          {section === 'akun'       && <SectionAkun user={user} onLogout={handleLogout} />}
-          {section === 'aplikasi'   && <SectionAplikasi prefs={prefs} save={savePrefs} />}
-          {section === 'lokasi'     && <SectionLokasi user={user} prefs={prefs} save={savePrefs} />}
-          {section === 'notifikasi' && <SectionNotifikasi prefs={prefs} save={savePrefs} />}
-          {section === 'keamanan'   && <SectionKeamanan />}
-          {section === 'data'       && <SectionData />}
-        </div>
-      </AppShell>
+          {saved && (
+            <div className="mx-4 mt-3 bg-green-50 border border-green-200 rounded-xl px-3 py-2
+                            flex items-center gap-2 text-green-700 text-xs font-semibold">
+              <CheckCircle2 size={14} /> Perubahan tersimpan
+            </div>
+          )}
+
+          <div className="px-4 py-4">
+            {section === 'akun'       && <SectionAkun user={user} onLogout={handleLogout} />}
+            {section === 'aplikasi'   && <SectionAplikasi prefs={prefs} save={savePrefs} />}
+            {section === 'lokasi'     && <SectionLokasi user={user} prefs={prefs} save={savePrefs} />}
+            {section === 'notifikasi' && <SectionNotifikasi prefs={prefs} save={savePrefs} />}
+            {section === 'keamanan'   && <SectionKeamanan />}
+            {section === 'data'       && <SectionData />}
+          </div>
+        </AppShell>
+      </SwipeBackWrapper>
     )
   }
 

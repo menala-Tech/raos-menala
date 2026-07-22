@@ -14,6 +14,7 @@ import Link from 'next/link'
 import SelfieCapture from '@/components/SelfieCapture'
 import { checkGeofence, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
+import { logActivity } from '@/lib/activity'
 import { detectCurrentShift, formatShiftTime, isLate, type Shift } from '@/lib/shift'
 import type { UserProfile, Attendance } from '@/types'
 
@@ -109,6 +110,7 @@ export default function AbsensiPage() {
         selfie_in_url: selfiePath, is_location_valid: locationValid, status,
       }, { onConflict: 'staff_id,date' }).select().single()
       setToday(data)
+      logActivity('absensi_masuk', `${status} @ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
     } else {
       const { data } = await supabase.from('raos_attendance').update({
         check_out_at: now,
@@ -116,6 +118,7 @@ export default function AbsensiPage() {
         selfie_out_url: selfiePath,
       }).eq('staff_id', user.id).eq('date', dateStr).select().single()
       setToday(data)
+      logActivity('absensi_pulang', `@ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
     }
     setLoading(false)
     setSelfieBlob(null)

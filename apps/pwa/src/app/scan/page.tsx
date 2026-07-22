@@ -7,6 +7,7 @@ import AppShell from '@/components/layout/AppShell'
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { checkGeofence, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
+import { logActivity } from '@/lib/activity'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
@@ -94,6 +95,7 @@ export default function ScanPage() {
     } else {
       setScanState('success')
       setLastScan(scan)
+      logActivity('scan_barcode', `${scanId} — ${driver.name} (${driver.driver_id})`)
     }
 
     if (inputRef.current) inputRef.current.value = ''

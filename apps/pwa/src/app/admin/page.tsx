@@ -12,6 +12,7 @@ import {
 import Link from 'next/link'
 import clsx from 'clsx'
 import type { UserProfile, Branch } from '@/types'
+import { logActivity } from '@/lib/activity'
 
 type Tab = 'validasi' | 'staff'
 type StaffRole = 'direksi' | 'admin' | 'koordinator' | 'staff'
@@ -80,6 +81,7 @@ export default function AdminPage() {
       .eq('id', scanId)
     if (!error) {
       setPendingScans(prev => prev.filter(s => s.id !== scanId))
+      logActivity(`validasi_scan_${status}`, `Scan ${scanId} → ${status.toUpperCase()}`)
     }
     setProcessing(null)
   }

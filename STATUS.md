@@ -42,8 +42,32 @@ Sesi paling panjang sampai sekarang. Rangkuman komit yang landed:
 - [ ] Hapus `SUPABASE_SERVICE_ROLE_KEY` dari Vercel env vars (tidak dipakai lagi setelah rollback).
 - [ ] Tambah kolom "Jabatan DIREKSI" di HRIS supaya role direksi bisa di-map.
 - [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings (manual 1 klik).
-- [ ] Offline mode (Service Worker upgrade) + push notification (FCM) — belum ada infra.
-- [ ] Isi `kpi_targets` (kosong sejak awal) + aktifkan `logActivity()` GAS.
+- [ ] Offline mode PENUH (queue mutation IndexedDB + sync on online) —
+  sesi 14-continued sudah tambah OnlineStatusBanner (UI info), tapi belum
+  ada queue persistence. Scope full sesi 15+.
+- [ ] Push notification (FCM) — belum ada infra (VAPID keys, SW push
+  handler, subscription flow). Scope 1-2 sesi khusus.
+- [ ] Isi `kpi_targets` (kosong sejak awal).
+
+### Sesi 14 lanjutan (22 Juli 2026 siang-sore) — batch commit tambahan
+
+| Commit | Ringkas |
+|---|---|
+| `7150017` | #2 Create Room proyek admin + #3 Voice message 60s |
+| `b3ca584` | Swipe back room pushState/popstate |
+| `ba1bbf0` | Voice mime strip + layout dashboard (DateTimeStack + kalender compact) |
+| `9bf9d21` | Swipe module-guard + PWA icon transparan |
+| `aac24e1` | DateTimeStack seragam di 4 header |
+| `8ac18e9` | CHECK constraint audio (raos_026) + retry upload + audio download |
+| `67adb32` | Swipe /settings sub-menu + SW NetworkOnly Supabase (fix upload PDF) |
+| final | logActivity di scan/absensi/validasi + OnlineStatusBanner |
+
+Yang SELESAI dari pending list lama:
+- ~~logActivity() aktivasi~~ ✅ (helper di `lib/activity.ts`, panggil di 4 action utama)
+- ~~Create Room proyek /admin~~ ✅
+- ~~Voice message~~ ✅
+- ~~Swipe back bug~~ ✅ (module-level guard, 4 halaman)
+- ~~Icon PWA transparan~~ ✅
 
 ---
 

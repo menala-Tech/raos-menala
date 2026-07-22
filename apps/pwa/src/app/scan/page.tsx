@@ -42,11 +42,21 @@ export default function ScanPage() {
 
     // GPS tiered — coarse dulu (~1s wifi/cell) supaya UI langsung siap,
     // refine (GPS asli, non-blocking) menyusul untuk presisi lebih baik.
-    // Lihat lib/gps.ts.
+    // Geofence check filter by user.branch_id supaya hanya pickup point
+    // di Terminal user yang dicek (staff T3 tidak divalidasi ke PP T1/T2).
+    // Init user perlu selesai dulu supaya branch_id available; fetch ulang
+    // di sini pakai getSession().
+    let userBranchId: string | null = null
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return
+      supabase.from('user_profiles').select('branch_id').eq('id', session.user.id).single()
+        .then(({ data }) => { userBranchId = data?.branch_id ?? null })
+    })
+
     const abort = requestLocationTiered({
       onFix: async fix => {
         setLocation({ lat: fix.lat, lng: fix.lng })
-        const result = await checkGeofence(fix.lat, fix.lng)
+        const result = await checkGeofence(fix.lat, fix.lng, userBranchId)
         setGeofence(result)
         setLocationStatus(result.isValid ? 'valid' : 'invalid')
       },

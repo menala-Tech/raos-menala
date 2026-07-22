@@ -21,14 +21,28 @@ export interface GeofenceResult {
 }
 
 /**
- * Cek apakah koordinat berada di dalam radius geo-fence pickup point aktif mana pun.
+ * Cek apakah koordinat berada di dalam radius geo-fence pickup point aktif.
  * Sesuai spec Absensi.md: setiap pickup point punya radius_meters sendiri.
+ *
+ * `branchId` opsional — kalau ada, hanya cek pickup point di Terminal user
+ * (mis. staff T3 tidak divalidasi terhadap PP T1/T2). Kalau null (mis.
+ * direksi Head Office yang lintas terminal), cek semua pickup point aktif.
  */
-export async function checkGeofence(lat: number, lng: number): Promise<GeofenceResult> {
-  const { data: points } = await supabase
+export async function checkGeofence(
+  lat: number,
+  lng: number,
+  branchId?: string | null
+): Promise<GeofenceResult> {
+  let query = supabase
     .from('pickup_points')
-    .select('id, name, latitude, longitude, radius_meters')
+    .select('id, name, latitude, longitude, radius_meters, branch_id')
     .eq('is_active', true)
+
+  if (branchId) {
+    query = query.eq('branch_id', branchId)
+  }
+
+  const { data: points } = await query
 
   if (!points || points.length === 0) {
     return { isValid: false, nearestPointId: null, nearestPointName: null, distanceMeters: null }

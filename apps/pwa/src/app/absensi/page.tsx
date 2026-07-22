@@ -36,12 +36,21 @@ export default function AbsensiPage() {
   useEffect(() => {
     // GPS tiered — coarse dulu (~1s wifi/cell) supaya banner lokasi & status
     // geo-fence langsung tampil, refine (GPS asli, non-blocking) menyusul.
-    // Dijalankan PARALEL dengan auth/profile fetch di bawah supaya kedua
-    // proses jalan bersamaan, bukan berurutan. Lihat lib/gps.ts.
+    // Geofence check pakai user.branch_id supaya cuma pickup point Terminal
+    // user yang dicek. userBranchId di-fetch paralel — kalau belum ready
+    // saat fix pertama datang, cek semua (null); begitu ready, refine akan
+    // pakai filter branch.
+    let userBranchId: string | null = null
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return
+      supabase.from('user_profiles').select('branch_id').eq('id', session.user.id).single()
+        .then(({ data }) => { userBranchId = data?.branch_id ?? null })
+    })
+
     const abortGps = requestLocationTiered({
       onFix: async fix => {
         setLocation({ lat: fix.lat, lng: fix.lng })
-        const result = await checkGeofence(fix.lat, fix.lng)
+        const result = await checkGeofence(fix.lat, fix.lng, userBranchId)
         setGeofence(result)
         setLocationValid(result.isValid)
         setLocationStatus('done')

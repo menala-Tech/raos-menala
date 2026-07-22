@@ -371,8 +371,28 @@ function ChatPageInner() {
     setUploading(true)
     const safeName = pendingFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const storagePath = `${user.id}/${activeRoom.id}/${Date.now()}-${safeName}`
-    const { error: upErr } = await supabase.storage.from('chat_attachments').upload(storagePath, pendingFile, { upsert: false })
-    if (upErr) { alert('Gagal upload: ' + upErr.message); setUploading(false); return }
+
+    // Retry sekali kalau "Failed to fetch" (network hiccup / SW race saat
+    // first-time skipWaiting take-over). Kalau tetap gagal → beritahu user.
+    async function tryUpload() {
+      return supabase.storage.from('chat_attachments').upload(storagePath, pendingFile!, {
+        upsert: false, contentType: pendingFile!.type || undefined,
+      })
+    }
+    let { error: upErr } = await tryUpload()
+    if (upErr && /failed to fetch|network/i.test(upErr.message)) {
+      await new Promise(r => setTimeout(r, 800))
+      const retry = await tryUpload()
+      upErr = retry.error
+    }
+    if (upErr) {
+      const isNetwork = /failed to fetch|network/i.test(upErr.message)
+      alert(isNetwork
+        ? 'Gagal upload: koneksi bermasalah. Cek internet & coba lagi.'
+        : 'Gagal upload: ' + upErr.message)
+      console.error('[attachment] upload gagal:', upErr, 'file:', pendingFile.name, pendingFile.type, pendingFile.size)
+      setUploading(false); return
+    }
     const { data: { publicUrl } } = supabase.storage.from('chat_attachments').getPublicUrl(storagePath)
     const msgType = pendingFile.type.startsWith('image/') ? 'image' : 'file'
     const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
@@ -1239,7 +1259,12 @@ function ChatPageInner() {
                         isMe ? 'bg-white/10' : 'bg-gray-100')}>
                         <Mic size={16} className={clsx('flex-shrink-0', isMe ? 'text-primary' : 'text-red-500')} />
                         <audio controls preload="metadata" src={msg.media_url}
-                          className="h-8 min-w-[180px] max-w-[220px]" />
+                          className="h-8 min-w-[160px] max-w-[200px]" />
+                        <a href={msg.media_url} download target="_blank" rel="noopener noreferrer"
+                          className={clsx('flex-shrink-0', isMe ? 'text-white/60 hover:text-white' : 'text-gray-400 hover:text-gray-600')}
+                          title="Unduh pesan suara">
+                          <Download size={14} />
+                        </a>
                       </div>
                     )}
 

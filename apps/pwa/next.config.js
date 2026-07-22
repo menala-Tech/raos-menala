@@ -4,14 +4,17 @@ const withPWA = require('@ducanh2912/next-pwa').default({
   aggressiveFrontEndNavCaching: true,
   reloadOnOnline: true,
   disable: process.env.NODE_ENV === 'development',
-  // Service Worker baru langsung take over tanpa menunggu semua tab RAOS
-  // ditutup — biar update code (contoh: fix bug scan/barcode) langsung
-  // aktif setelah refresh, tidak nyangkut di bundle lama yang bikin
-  // "This page couldn't load".
   workboxOptions: {
     disableDevLogs: true,
     skipWaiting: true,
     clientsClaim: true,
+    // JANGAN cache/handle request ke Supabase API — mereka realtime & auth
+    // sensitive. Kalau di-precache atau di-intercept salah, upload storage
+    // (mis. kirim foto/file/voice di chat) bisa gagal "Failed to fetch"
+    // karena SW proxy fetch ke handler yang tidak siap POST.
+    // Sumber URL: NEXT_PUBLIC_SUPABASE_URL — hard-code hostname supaya
+    // tidak butuh env di build-time SW.
+    exclude: [/^https:\/\/vlievtojpmrbsmzlqswl\.supabase\.co\//],
   },
 })
 

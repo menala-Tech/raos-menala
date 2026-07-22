@@ -228,27 +228,19 @@ function ChatPageInner() {
     setPolls(map)
   }
 
-  // Sinkron activeRoom ↔ browser history — supaya swipe back, tombol back HP
-  // Android, tombol back browser desktop, dan tombol Kembali di header semua
-  // konsisten kembali ke room list (BUKAN lompat ke dashboard atau halaman
-  // sebelumnya di history). Push state saat open room, popstate listener
-  // untuk close. Ini mekanisme SATU-SATUNYA untuk close room dari input user.
+  // Sinkron tombol back HP Android + browser desktop dengan close room.
+  // pushState entry dummy saat open, popstate → setActiveRoom(null).
+  // Swipe di wrapper langsung panggil setActiveRoom (bukan history.back)
+  // karena SwipeBackWrapper sudah punya module-level guard yang cegah
+  // outer AppShell wrapper ikut fire.
   useEffect(() => {
     if (!activeRoom) return
     const stateTag = { raosChatRoom: activeRoom.id }
-    // Push entry baru — swipe/back akan popState kembali ke entry sebelumnya.
     window.history.pushState(stateTag, '', window.location.pathname + window.location.search)
-    const onPop = () => {
-      // Ke sini kalau user back/swipe → keluar dari room, kembali ke list.
-      setActiveRoom(null)
-    }
+    const onPop = () => setActiveRoom(null)
     window.addEventListener('popstate', onPop)
     return () => {
       window.removeEventListener('popstate', onPop)
-      // Kalau room ditutup PROGRAMMATIC (bukan lewat back — mis. leaveRoom),
-      // pop state extra yang tadi kita push supaya history bersih. Kalau user
-      // sudah pencet back sendiri, history sudah pop → skip. Deteksi via
-      // state tag di window.history.state.
       if ((window.history.state as any)?.raosChatRoom === activeRoom.id) {
         window.history.back()
       }
@@ -801,7 +793,7 @@ function ChatPageInner() {
     const canLeave = NON_DEFAULT_CATEGORIES.includes(activeRoom.category)
 
     return (
-      <SwipeBackWrapper onBack={() => window.history.back()}>
+      <SwipeBackWrapper onBack={() => setActiveRoom(null)}>
         <div className="flex flex-col h-screen max-w-md mx-auto">
 
           {/* ── Lightbox ──────────────────────────────────────────────────── */}
@@ -1137,7 +1129,7 @@ function ChatPageInner() {
 
           {/* ── Header ────────────────────────────────────────────────────── */}
           <div className="bg-secondary text-white px-4 pt-10 pb-3 flex items-center gap-3 flex-shrink-0">
-            <button onClick={() => window.history.back()} className="text-white/70"><ArrowLeft size={22} /></button>
+            <button onClick={() => setActiveRoom(null)} className="text-white/70"><ArrowLeft size={22} /></button>
             <button onClick={openInfoSheet}
               className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}>
               {style.label}

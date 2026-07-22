@@ -8,6 +8,12 @@ const EDGE_ZONE = 24        // px dari tepi kiri layar untuk mulai gesture
 const TRIGGER_DISTANCE = 90 // px geser untuk memicu navigasi kembali
 const MAX_DRAG = 120        // batas maksimal geser visual (efek resistance)
 
+// Module-level registry — wrapper dengan onBack (mis. room chat) daftar diri.
+// Wrapper tanpa onBack (AppShell luar, fallback router.back) skip kalau ada
+// inner yang aktif. Mencegah double-fire yang bikin swipe dari room lompat
+// ke halaman sebelum-sebelumnya (mis. /settings → /dashboard).
+const activeInnerHandlers = new Set<() => void>()
+
 /**
  * Swipe-to-go-back untuk mode PWA standalone (Add to Home Screen).
  * Browser biasa sudah punya gesture ini secara native; iOS/Android standalone
@@ -41,6 +47,11 @@ export default function SwipeBackWrapper({ children, onBack, disabled }: Props) 
     const indicator = indicatorRef.current
     if (!container) return
 
+    // Registry: wrapper dengan onBack daftar diri di module set. Wrapper
+    // tanpa onBack skip kalau ada wrapper inner terdaftar (cegah double fire).
+    const handlerToken = () => {}
+    if (onBack) activeInnerHandlers.add(handlerToken)
+
     function setTransform(dx: number) {
       container!.style.transform = dx ? `translateX(${dx}px)` : ''
       container!.style.transition = dx ? 'none' : 'transform 0.2s ease-out'
@@ -50,6 +61,9 @@ export default function SwipeBackWrapper({ children, onBack, disabled }: Props) 
     }
 
     function onTouchStart(e: TouchEvent) {
+      // Kalau wrapper ini fallback (tanpa onBack, mis. AppShell luar) dan ada
+      // inner wrapper aktif (mis. room chat), diamkan — inner yang handle.
+      if (!onBack && activeInnerHandlers.size > 0) return
       const t = e.touches[0]
       if (t.clientX > EDGE_ZONE) return
       stateRef.current = { startX: t.clientX, startY: t.clientY, active: true, dx: 0 }
@@ -96,6 +110,7 @@ export default function SwipeBackWrapper({ children, onBack, disabled }: Props) 
       container.removeEventListener('touchstart', onTouchStart)
       container.removeEventListener('touchmove', onTouchMove)
       container.removeEventListener('touchend', onTouchEnd)
+      if (onBack) activeInnerHandlers.delete(handlerToken)
     }
   }, [pathname, router, onBack, disabled])
 

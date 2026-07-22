@@ -7,7 +7,7 @@ import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, CheckCircle2, XCircle, ShieldCheck,
   Users, ScanLine, Loader2, QrCode, Pencil, X, Power, Lock,
-  MessageCirclePlus, Search, Check,
+  MessageCirclePlus, Search, Check, Bell,
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
@@ -125,13 +125,44 @@ export default function AdminPage() {
           Generator QR Code Driver
         </Link>
         {isAdmin && (
-          <button
-            onClick={() => setShowCreateRoom(true)}
-            className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-secondary/5 rounded-lg text-left"
-          >
-            <MessageCirclePlus size={16} />
-            Buat Room Proyek Baru
-          </button>
+          <>
+            <button
+              onClick={() => setShowCreateRoom(true)}
+              className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-secondary/5 rounded-lg text-left"
+            >
+              <MessageCirclePlus size={16} />
+              Buat Room Proyek Baru
+            </button>
+            <button
+              onClick={async () => {
+                if (!user) return
+                if (!confirm('Kirim test push notification ke akun Anda sendiri sekarang?')) return
+                const { data: { session } } = await supabase.auth.getSession()
+                const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/raos-send-push`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${session?.access_token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    user_ids: [user.id],
+                    title: '🔔 Test Notifikasi RAOS',
+                    body: 'Kalau Anda lihat pesan ini di lock screen HP, push notification jalan!',
+                    url: '/dashboard',
+                    tag: 'raos-test',
+                  }),
+                })
+                const j = await res.json()
+                alert(res.ok
+                  ? `Test push terkirim.\nSent: ${j.sent}, Failed: ${j.failed}, Total: ${j.total}${j.note ? `\nNote: ${j.note}` : ''}${j.errors ? '\n\nErrors:\n' + JSON.stringify(j.errors, null, 2) : ''}`
+                  : `Gagal: HTTP ${res.status}\n${JSON.stringify(j, null, 2)}`)
+              }}
+              className="w-full flex items-center gap-2 text-sm text-blue-600 font-medium py-2 px-3 bg-blue-50 rounded-lg text-left"
+            >
+              <Bell size={16} />
+              Test Push Notification (ke saya sendiri)
+            </button>
+          </>
         )}
       </div>
 

@@ -566,8 +566,16 @@ function ChatPageInner() {
         stream.getTracks().forEach(t => t.stop())
         if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null }
         const blob = new Blob(audioChunksRef.current, { type: rec.mimeType || 'audio/webm' })
-        if (blob.size < 1000) return // terlalu pendek, batal
-        await uploadVoiceMessage(blob, rec.mimeType || 'audio/webm')
+        // Baca durasi FINAL dari state via functional setter (recSeconds via closure
+        // di sini sudah stale karena onstop diset di startRecording, sedangkan
+        // state ter-update lewat tick interval).
+        let finalSeconds = 0
+        setRecSeconds(s => { finalSeconds = s; return s })
+        if (blob.size < 500) {
+          console.warn('[voice] blob terlalu kecil, skip upload:', blob.size)
+          return
+        }
+        await uploadVoiceMessage(blob, rec.mimeType || 'audio/webm', finalSeconds)
       }
       mediaRecRef.current = rec
       rec.start()
@@ -603,26 +611,44 @@ function ChatPageInner() {
     mediaRecRef.current = null
   }
 
-  async function uploadVoiceMessage(blob: Blob, mime: string) {
+  async function uploadVoiceMessage(blob: Blob, mimeRaw: string, seconds: number) {
     if (!activeRoom || !user) return
     setUploadingAudio(true)
-    const ext = mime.includes('mp4') ? 'm4a' : (mime.includes('webm') ? 'webm' : 'ogg')
+    // Strip parameter (mis. "audio/webm;codecs=opus" → "audio/webm") supaya
+    // match strict whitelist bucket allowed_mime_types.
+    const mime = mimeRaw.split(';')[0].trim() || 'audio/webm'
+    const ext = mime.includes('mp4') ? 'm4a' : (mime.includes('webm') ? 'webm' : (mime.includes('mpeg') ? 'mp3' : 'ogg'))
     const storagePath = `${user.id}/${activeRoom.id}/voice-${Date.now()}.${ext}`
+
     const { error: upErr } = await supabase.storage.from('chat_attachments').upload(storagePath, blob, {
       upsert: false, contentType: mime,
     })
-    if (upErr) { alert('Gagal upload suara: ' + upErr.message); setUploadingAudio(false); return }
+    if (upErr) {
+      console.error('[voice] upload gagal:', upErr, 'mime:', mime, 'size:', blob.size)
+      alert('Gagal upload suara: ' + upErr.message)
+      setUploadingAudio(false); return
+    }
+
     const { data: { publicUrl } } = supabase.storage.from('chat_attachments').getPublicUrl(storagePath)
-    const { data: msg } = await supabase.from('chat_messages').insert({
+    const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'audio',
-      content: `Voice ${recSeconds}s`, media_url: publicUrl,
+      content: `Voice ${seconds}s`, media_url: publicUrl,
     }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+
+    if (msgErr) {
+      console.error('[voice] insert message gagal:', msgErr)
+      alert('Gagal simpan pesan suara: ' + msgErr.message)
+      setUploadingAudio(false); return
+    }
+
     if (msg) {
-      await supabase.from('chat_message_attachments').insert({
+      const { error: attErr } = await supabase.from('chat_message_attachments').insert({
         message_id: msg.id, room_id: activeRoom.id, uploader_id: user.id,
-        file_name: `Voice ${recSeconds}s`, file_size: blob.size,
+        file_name: `Voice ${seconds}s`, file_size: blob.size,
         mime_type: mime, storage_path: storagePath, url: publicUrl,
       })
+      if (attErr) console.warn('[voice] insert attachment metadata gagal (pesan tetap terkirim):', attErr)
+
       setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg as ChatMessage])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }

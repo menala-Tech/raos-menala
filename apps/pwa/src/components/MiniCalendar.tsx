@@ -47,37 +47,37 @@ export default function MiniCalendar() {
   }
 
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-white rounded-xl px-3 py-2.5 shadow-sm border border-gray-100">
+      <div className="flex items-center justify-between mb-1.5">
         <button onClick={prevMonth} aria-label="Bulan sebelumnya"
-          className="w-7 h-7 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-500">
-          <ChevronLeft size={16} />
+          className="w-6 h-6 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-500">
+          <ChevronLeft size={14} />
         </button>
         <button onClick={jumpToday}
-          className="font-bold text-sm text-gray-800 capitalize hover:text-primary"
+          className="font-bold text-xs text-gray-800 capitalize hover:text-primary"
           title="Kembali ke hari ini">
           {monthName}
         </button>
         <button onClick={nextMonth} aria-label="Bulan berikutnya"
-          className="w-7 h-7 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-500">
-          <ChevronRight size={16} />
+          className="w-6 h-6 rounded-md hover:bg-gray-100 flex items-center justify-center text-gray-500">
+          <ChevronRight size={14} />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center mb-1">
+      <div className="grid grid-cols-7 gap-0.5 text-center">
         {DAYS_ID.map((d, i) => (
           <span key={d} className={
-            'text-[10px] font-semibold py-1 ' +
+            'text-[9px] font-semibold ' +
             (i === 6 ? 'text-red-400' : 'text-gray-400')
           }>{d}</span>
         ))}
       </div>
-      <div className="grid grid-cols-7 gap-1 text-center">
+      <div className="grid grid-cols-7 gap-0.5 text-center mt-1">
         {grid.map((c, i) => (
-          <div key={i} className="aspect-square flex items-center justify-center">
+          <div key={i} className="h-7 flex items-center justify-center">
             {c.day && (
               <span className={
-                'w-7 h-7 flex items-center justify-center text-xs rounded-full ' +
+                'w-6 h-6 flex items-center justify-center text-[11px] rounded-full ' +
                 (c.isToday
                   ? 'bg-primary text-secondary font-black'
                   : (i % 7 === 6 ? 'text-red-400' : 'text-gray-700'))

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
-import DateTimeHeader from '@/components/DateTimeHeader'
+import { DateTimeStack } from '@/components/DateTimeHeader'
 import MiniCalendar from '@/components/MiniCalendar'
 import {
   ScanLine, Clock, UserCheck, MessageCircle,
@@ -88,7 +88,7 @@ export default function DashboardPage() {
       {/* ===== HEADER ===== */}
       <div className="bg-secondary text-white px-4 pt-10 pb-5 sticky top-0 z-30">
         {/* Top row — logo + notif */}
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-4">
           <MenalaLogo size={36} showText />
           <Link href="/notifications" className="relative">
             <Bell size={22} className="text-white/70" />
@@ -101,27 +101,25 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        {/* Tanggal + jam realtime */}
-        <div className="mb-3"><DateTimeHeader /></div>
-
-        {/* User greeting */}
-        <div className="flex items-center gap-3 mb-4">
+        {/* User greeting + DateTime widget di kanan (tanggal atas, jam bawah) */}
+        <div className="flex items-start gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center
                           text-secondary font-black text-base shadow-md flex-shrink-0">
             {user?.full_name?.charAt(0) ?? '?'}
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <p className="text-white/60 text-xs">{greeting()},</p>
-            <h1 className="font-bold text-base leading-tight">{user?.full_name ?? '...'}</h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
+            <h1 className="font-bold text-base leading-tight truncate">{user?.full_name ?? '...'}</h1>
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className="capitalize text-xs text-primary font-semibold">{user?.role}</span>
               <span className="text-white/30 text-xs">•</span>
-              <span className="text-xs text-white/50">{(user as any)?.branches?.name ?? ''}</span>
-              <span className="bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-1">
+              <span className="text-xs text-white/50 truncate">{(user as any)?.branches?.name ?? ''}</span>
+              <span className="bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
                 Online
               </span>
             </div>
           </div>
+          <DateTimeStack />
         </div>
 
         {/* Stats */}
@@ -140,13 +138,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-4 py-4 space-y-4">
-        {/* Kalender bulanan */}
-        <div>
-          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Kalender</h2>
-          <MiniCalendar />
-        </div>
-
-        {/* Quick Access */}
+        {/* Quick Access — Menu Utama di atas supaya cepat diakses */}
         <div>
           <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Menu Utama</h2>
           <div className="grid grid-cols-4 gap-3">
@@ -164,6 +156,12 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
+        </div>
+
+        {/* Kalender bulanan compact di bawah menu */}
+        <div>
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Kalender</h2>
+          <MiniCalendar />
         </div>
 
         {/* Target Hari Ini */}

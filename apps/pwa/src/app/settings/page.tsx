@@ -113,7 +113,7 @@ export default function SettingsPage() {
       // sub-menu Pengaturan → setSection(null) → balik ke main Settings
       // (BUKAN lompat ke /dashboard).
       <SwipeBackWrapper onBack={() => setSection(null)}>
-        <AppShell>
+        <AppShell noSwipe>
           <div className="bg-secondary text-white px-4 pt-10 pb-4 flex items-center gap-3 sticky top-0 z-30">
             <button onClick={() => setSection(null)} className="text-white/70">
               <ChevronLeft size={24} />
@@ -521,7 +521,24 @@ function SectionLokasi({ user, prefs, save }: {
             return (
               <button
                 key={p.id}
-                onClick={() => save({ ...prefs, pickupPointId: p.id })}
+                onClick={async () => {
+                  save({ ...prefs, pickupPointId: p.id })
+                  // Sinkronkan branch_id user_profiles ke branch pickup point
+                  // supaya header dashboard + scan + absensi otomatis tampil
+                  // Terminal yang benar (tidak stuck di T1 lama).
+                  // Policy user_profiles_update_own memungkinkan user update
+                  // baris sendiri, trigger prevent_self_privilege_escalation
+                  // tidak blokir branch_id (hanya role/is_active).
+                  if (user && user.branch_id !== p.branch_id) {
+                    await supabase.from('user_profiles')
+                      .update({ branch_id: p.branch_id })
+                      .eq('id', user.id)
+                    // Reload halaman supaya user prop di parent refresh
+                    // (tidak elegan, tapi paling reliable — parent tidak
+                    // subscribe realtime user_profiles).
+                    window.location.reload()
+                  }
+                }}
                 className={clsx(
                   'w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors text-left',
                   selected ? 'border-primary bg-primary/5' : 'border-gray-100 bg-white'

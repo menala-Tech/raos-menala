@@ -372,25 +372,49 @@ function ChatPageInner() {
     const safeName = pendingFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const storagePath = `${user.id}/${activeRoom.id}/${Date.now()}-${safeName}`
 
-    // Retry sekali kalau "Failed to fetch" (network hiccup / SW race saat
-    // first-time skipWaiting take-over). Kalau tetap gagal → beritahu user.
+    // Direct fetch bypass Supabase SDK wrapper — beberapa versi SDK punya
+    // issue di Chrome mobile untuk PDF/file POST (SDK internal transform
+    // multipart yang kadang di-block browser). Direct fetch dengan
+    // Authorization + apikey header lebih andal.
+    const { data: { session } } = await supabase.auth.getSession()
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const uploadUrl = `${supabaseUrl}/storage/v1/object/chat_attachments/${storagePath}`
+
     async function tryUpload() {
-      return supabase.storage.from('chat_attachments').upload(storagePath, pendingFile!, {
-        upsert: false, contentType: pendingFile!.type || undefined,
+      return fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token ?? anonKey}`,
+          'apikey': anonKey,
+          'Content-Type': pendingFile!.type || 'application/octet-stream',
+          'x-upsert': 'false',
+        },
+        body: pendingFile!,
       })
     }
-    let { error: upErr } = await tryUpload()
-    if (upErr && /failed to fetch|network/i.test(upErr.message)) {
+
+    let res: Response
+    try {
+      res = await tryUpload()
+      if (!res.ok && res.status === 0) throw new Error('Failed to fetch')
+    } catch (e: any) {
+      // Retry sekali kalau exception (network hiccup)
+      console.warn('[attachment] retry after:', e?.message)
       await new Promise(r => setTimeout(r, 800))
-      const retry = await tryUpload()
-      upErr = retry.error
+      try {
+        res = await tryUpload()
+      } catch (e2: any) {
+        alert('Gagal upload: koneksi bermasalah. Cek internet & coba lagi.')
+        console.error('[attachment] upload gagal 2x:', e2)
+        setUploading(false); return
+      }
     }
-    if (upErr) {
-      const isNetwork = /failed to fetch|network/i.test(upErr.message)
-      alert(isNetwork
-        ? 'Gagal upload: koneksi bermasalah. Cek internet & coba lagi.'
-        : 'Gagal upload: ' + upErr.message)
-      console.error('[attachment] upload gagal:', upErr, 'file:', pendingFile.name, pendingFile.type, pendingFile.size)
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      alert(`Gagal upload (HTTP ${res.status}): ${body.slice(0, 200) || res.statusText}`)
+      console.error('[attachment] server reject:', res.status, body)
       setUploading(false); return
     }
     const { data: { publicUrl } } = supabase.storage.from('chat_attachments').getPublicUrl(storagePath)

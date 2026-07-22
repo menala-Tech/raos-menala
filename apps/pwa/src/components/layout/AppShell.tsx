@@ -4,15 +4,24 @@ import BottomNav from './BottomNav'
 import SwipeBackWrapper from '../SwipeBackWrapper'
 import OnlineStatusBanner from '../OnlineStatusBanner'
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+interface AppShellProps {
+  children: React.ReactNode
+  /** Skip SwipeBackWrapper default (mis. dipakai kalau parent sudah wrap
+   *  dengan SwipeBackWrapper sendiri, seperti /settings sub-view). */
+  noSwipe?: boolean
+}
+
+export default function AppShell({ children, noSwipe }: AppShellProps) {
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <OnlineStatusBanner />
-      <SwipeBackWrapper>
-        <main className="flex-1 pb-20">
-          {children}
-        </main>
-      </SwipeBackWrapper>
+      {noSwipe ? (
+        <main className="flex-1 pb-20">{children}</main>
+      ) : (
+        <SwipeBackWrapper>
+          <main className="flex-1 pb-20">{children}</main>
+        </SwipeBackWrapper>
+      )}
       <BottomNav />
     </div>
   )

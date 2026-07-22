@@ -72,9 +72,12 @@ export default function SwipeBackWrapper({ children, onBack, disabled }: Props) 
       setTransform(s.dx)
     }
 
-    function onTouchEnd() {
+    function onTouchEnd(e: TouchEvent) {
       const s = stateRef.current
       if (s.active && s.dx > TRIGGER_DISTANCE) {
+        // Cegah wrapper luar (mis. AppShell) ikut fire kalau wrapper ini
+        // sudah handle swipe back — target berbeda (setActiveRoom vs router.back).
+        e.stopPropagation()
         if (onBack) onBack()
         else router.back()
       }
@@ -82,13 +85,17 @@ export default function SwipeBackWrapper({ children, onBack, disabled }: Props) 
       stateRef.current.active = false
     }
 
-    document.addEventListener('touchstart', onTouchStart, { passive: true })
-    document.addEventListener('touchmove', onTouchMove, { passive: true })
-    document.addEventListener('touchend', onTouchEnd)
+    // Attach ke container-nya sendiri (BUKAN document) — kalau ada 2 wrapper
+    // nested (mis. AppShell luar + room-chat dalam), keduanya tidak akan
+    // sama-sama fire; wrapper terdalam handle event dulu, event.stopPropagation
+    // di onTouchEnd cegah wrapper luar ikut trigger router.back().
+    container.addEventListener('touchstart', onTouchStart, { passive: true })
+    container.addEventListener('touchmove', onTouchMove, { passive: true })
+    container.addEventListener('touchend', onTouchEnd)
     return () => {
-      document.removeEventListener('touchstart', onTouchStart)
-      document.removeEventListener('touchmove', onTouchMove)
-      document.removeEventListener('touchend', onTouchEnd)
+      container.removeEventListener('touchstart', onTouchStart)
+      container.removeEventListener('touchmove', onTouchMove)
+      container.removeEventListener('touchend', onTouchEnd)
     }
   }, [pathname, router, onBack, disabled])
 

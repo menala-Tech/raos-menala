@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
+import DateTimeHeader from '@/components/DateTimeHeader'
 import {
   ArrowLeft, Send, MessageCircle, Users, Bell, BellOff, Search,
   Paperclip, FileText, X, Loader2, Download,
@@ -138,6 +139,13 @@ function ChatPageInner() {
   const [pinnedMsg, setPinnedMsg]       = useState<ChatMessage | null>(null)
   const [actionMenu, setActionMenu]     = useState<ActionMenu | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Kontak sheet — daftar staff untuk mulai chat pribadi
+  const [contactSheet, setContactSheet] = useState(false)
+  const [contactList, setContactList]   = useState<Array<{ id: string; full_name: string; role: string; staff_id: string; branches?: { name: string } | null }>>([])
+  const [contactLoading, setContactLoading] = useState(false)
+  const [contactSearch, setContactSearch]   = useState('')
+  const [openingPribadi, setOpeningPribadi] = useState<string | null>(null)
 
   // ── Data loaders ──────────────────────────────────────────────────────────
 
@@ -499,6 +507,32 @@ function ChatPageInner() {
     setRoomMembers(data ?? []); setMembersLoading(false)
   }
 
+  // Kontak sheet — daftar staff aktif untuk mulai chat pribadi
+  async function openContactSheet() {
+    setContactSheet(true)
+    setContactLoading(true)
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('id, full_name, role, staff_id, branches(name)')
+      .eq('is_active', true)
+      .order('full_name')
+    setContactList((data ?? []).filter(u => u.id !== user?.id) as any)
+    setContactLoading(false)
+  }
+
+  // Mulai / buka chat pribadi dengan staff lain. RPC handle dedup (idempotent).
+  async function startPribadiChat(otherUserId: string) {
+    setOpeningPribadi(otherUserId)
+    const { data: roomId, error } = await supabase.rpc('get_or_create_pribadi_room', { p_other_user_id: otherUserId })
+    setOpeningPribadi(null)
+    if (error || !roomId) { alert('Gagal buka chat pribadi: ' + (error?.message ?? 'unknown')); return }
+    const { data: room } = await supabase.from('chat_rooms').select('*').eq('id', roomId).single()
+    if (room) {
+      setContactSheet(false)
+      setActiveRoom(room)
+    }
+  }
+
   // Fase 3 — keluar dari room (untuk kategori pribadi/proyek, bukan default channel).
   // Delete membership user → RLS `chat_room_members_delete_own` (migration raos_023)
   // memastikan user cuma bisa hapus baris miliknya sendiri.
@@ -625,17 +659,24 @@ function ChatPageInner() {
           {lightboxUrl && (
             <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center"
               onClick={() => setLightboxUrl(null)}>
-              <button className="absolute top-5 right-5 text-white/70"><X size={28} /></button>
+              <button
+                onClick={() => setLightboxUrl(null)}
+                aria-label="Tutup"
+                className="absolute top-5 right-5 w-11 h-11 rounded-full bg-white/10 backdrop-blur-sm
+                           text-white flex items-center justify-center active:scale-95">
+                <X size={22} />
+              </button>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={lightboxUrl} alt="Preview"
-                className="max-w-[92vw] max-h-[85vh] object-contain rounded-xl shadow-2xl"
+                className="max-w-[92vw] max-h-[80vh] object-contain rounded-xl shadow-2xl"
                 onClick={e => e.stopPropagation()} />
               <a href={lightboxUrl} target="_blank" rel="noopener noreferrer" download
                 onClick={e => e.stopPropagation()}
-                className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2
-                           bg-white/10 hover:bg-white/20 text-white text-xs font-semibold
-                           px-5 py-2.5 rounded-full backdrop-blur-sm transition-colors">
-                <Download size={14} /> Unduh Gambar
+                style={{ bottom: 'calc(28px + env(safe-area-inset-bottom))' }}
+                className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2
+                           bg-primary hover:bg-primary/90 text-secondary text-sm font-bold
+                           px-6 py-3 rounded-full shadow-lg active:scale-95 transition-transform">
+                <Download size={18} /> Unduh Gambar
               </a>
             </div>
           )}
@@ -1285,13 +1326,20 @@ function ChatPageInner() {
         <div className="flex items-center gap-3 mb-3">
           <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
           <div className="flex-1"><MenalaLogo size={28} showText /></div>
+          <DateTimeHeader compact />
         </div>
         <div className="flex items-start justify-between">
           <div>
             <h1 className="font-black text-xl">Chat Room Staff</h1>
             <p className="text-white/50 text-xs mt-0.5">Komunikasi cepat, koordinasi akurat</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-2 mt-1"><Users size={18} className="text-white/60" /></div>
+          <button
+            onClick={openContactSheet}
+            aria-label="Mulai chat pribadi dengan staff"
+            title="Mulai chat pribadi"
+            className="bg-white/10 hover:bg-white/20 rounded-xl p-2 mt-1 active:scale-95 transition-transform">
+            <Users size={18} className="text-white" />
+          </button>
         </div>
         <div className="relative mt-3">
           <Search className="absolute left-3 top-2.5 text-white/40" size={16} />
@@ -1369,6 +1417,63 @@ function ChatPageInner() {
           <p className="text-[10px] text-gray-400">Hanya peserta yang diundang dapat bergabung • Data terenkripsi end-to-end</p>
         </div>
       </div>
+
+      {/* Kontak sheet — daftar staff aktif untuk mulai chat pribadi */}
+      {contactSheet && (
+        <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={() => setContactSheet(false)}>
+          <div
+            className="bg-white rounded-t-3xl w-full max-w-md mx-auto pt-4 max-h-[85vh] flex flex-col"
+            style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pb-2">
+              <div className="w-10 h-1 bg-gray-200 rounded-full" />
+            </div>
+            <div className="px-5 flex items-center justify-between mb-3">
+              <div>
+                <h2 className="font-bold text-gray-800">Kontak Staff</h2>
+                <p className="text-[11px] text-gray-400">Ketuk untuk mulai chat pribadi</p>
+              </div>
+              <button onClick={() => setContactSheet(false)}><X size={20} className="text-gray-400" /></button>
+            </div>
+            <div className="px-5 pb-2">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-2.5 text-gray-400" />
+                <input type="text" placeholder="Cari nama / ID staff..." value={contactSearch}
+                  onChange={e => setContactSearch(e.target.value)}
+                  className="input pl-9 text-sm w-full" />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-3">
+              {contactLoading && <p className="text-center text-gray-400 text-sm py-6">Memuat...</p>}
+              {!contactLoading && (() => {
+                const filtered = contactList.filter(u =>
+                  !contactSearch ||
+                  u.full_name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+                  u.staff_id.toLowerCase().includes(contactSearch.toLowerCase())
+                )
+                if (filtered.length === 0) {
+                  return <p className="text-center text-gray-400 text-sm py-6">Tidak ada staff cocok.</p>
+                }
+                return filtered.map(u => (
+                  <button key={u.id} onClick={() => startPribadiChat(u.id)} disabled={openingPribadi === u.id}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 active:bg-gray-100 disabled:opacity-60 text-left">
+                    <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
+                      {u.full_name?.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">{u.full_name}</p>
+                      <p className="text-[11px] text-gray-400 capitalize truncate">{u.staff_id} • {u.role} • {u.branches?.name ?? '—'}</p>
+                    </div>
+                    {openingPribadi === u.id
+                      ? <Loader2 size={16} className="animate-spin text-primary flex-shrink-0" />
+                      : <MessageCircle size={16} className="text-gray-300 flex-shrink-0" />}
+                  </button>
+                ))
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   )
 }

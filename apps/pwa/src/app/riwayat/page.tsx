@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
+import DateTimeHeader from '@/components/DateTimeHeader'
 import {
   ArrowLeft, Search, ScanLine, UserCheck, Filter, CheckCircle2, Clock,
   X, BarChart3, MapPin, Car, User, Calendar
@@ -136,6 +137,7 @@ export default function RiwayatPage() {
         <div className="flex items-center gap-3 mb-3">
           <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
           <div className="flex-1"><MenalaLogo size={28} showText /></div>
+          <DateTimeHeader compact />
           <button onClick={() => setShowSummary(true)}>
             <BarChart3 size={20} className="text-primary" />
           </button>

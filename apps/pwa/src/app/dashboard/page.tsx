@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
+import DateTimeHeader from '@/components/DateTimeHeader'
+import MiniCalendar from '@/components/MiniCalendar'
 import {
   ScanLine, Clock, UserCheck, MessageCircle,
   Target, CheckCircle2, AlertCircle, Bell,
@@ -86,7 +88,7 @@ export default function DashboardPage() {
       {/* ===== HEADER ===== */}
       <div className="bg-secondary text-white px-4 pt-10 pb-5 sticky top-0 z-30">
         {/* Top row — logo + notif */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-2">
           <MenalaLogo size={36} showText />
           <Link href="/notifications" className="relative">
             <Bell size={22} className="text-white/70" />
@@ -98,6 +100,9 @@ export default function DashboardPage() {
             )}
           </Link>
         </div>
+
+        {/* Tanggal + jam realtime */}
+        <div className="mb-3"><DateTimeHeader /></div>
 
         {/* User greeting */}
         <div className="flex items-center gap-3 mb-4">
@@ -135,6 +140,12 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-4 py-4 space-y-4">
+        {/* Kalender bulanan */}
+        <div>
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Kalender</h2>
+          <MiniCalendar />
+        </div>
+
         {/* Quick Access */}
         <div>
           <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Menu Utama</h2>

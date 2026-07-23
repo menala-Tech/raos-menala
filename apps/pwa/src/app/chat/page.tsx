@@ -1144,19 +1144,38 @@ function ChatPageInner() {
                               : 'Tidak aktif — pesan disimpan selamanya'}
                           </p>
                         </div>
-                        {user && PIN_ROLES.includes(user.role) && (
-                          <select
-                            className="text-xs font-semibold bg-white border border-yellow-200 rounded-lg px-2 py-1.5 text-yellow-800 flex-shrink-0"
-                            value={activeRoom.auto_delete_days ?? ''}
-                            onChange={e => updateRetention(e.target.value ? Number(e.target.value) : null)}
-                          >
-                            <option value="">Tidak</option>
-                            <option value="7">7 hari</option>
-                            <option value="30">30 hari</option>
-                            <option value="90">90 hari</option>
-                          </select>
-                        )}
                       </div>
+                      {user && PIN_ROLES.includes(user.role) && (
+                        // Chip button — HINDARI native <select>. Native picker
+                        // di Android dismiss dengan back gesture, dan gesture
+                        // itu consume pushState dummy (baris 239) → popstate →
+                        // setActiveRoom(null) → keluar dari room. Chip = tap
+                        // langsung tanpa native picker.
+                        <div className="flex gap-1.5 mt-3">
+                          {([
+                            { val: null, label: 'Tidak' },
+                            { val: 7,    label: '7 hari' },
+                            { val: 30,   label: '30 hari' },
+                            { val: 90,   label: '90 hari' },
+                          ]).map(opt => {
+                            const isActive = (activeRoom.auto_delete_days ?? null) === opt.val
+                            return (
+                              <button
+                                key={opt.label}
+                                onClick={() => updateRetention(opt.val)}
+                                className={clsx(
+                                  'flex-1 text-[11px] font-bold py-1.5 rounded-lg transition-colors',
+                                  isActive
+                                    ? 'bg-yellow-500 text-white'
+                                    : 'bg-white border border-yellow-200 text-yellow-800'
+                                )}
+                              >
+                                {opt.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                     {canLeave && (
                       <button

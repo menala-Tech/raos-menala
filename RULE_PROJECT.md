@@ -7,7 +7,7 @@ Berbeda dari `STATUS.md` (kronologi per sesi) dan `CLAUDE.md` (panduan
 teknis + state fitur). File ini murni **rule book**: aturan yang tidak
 berubah lintas sesi, hanya bertambah kalau ada policy baru.
 
-Update terakhir: **2026-07-22 (akhir sesi 14)**
+Update terakhir: **2026-07-23 (akhir sesi 14 dinihari-pagi — push notif live)**
 
 ---
 
@@ -120,6 +120,18 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
   pertama (pending sesi 15).
 - **SMTP Gmail** aktif untuk magic link + reset PIN. App Password
   disimpan di Supabase Auth Settings (bukan di repo).
+- **VAPID keypair Web Push** (sesi 14 dinihari 23 Juli):
+  - Vercel env `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (public, aman)
+  - Supabase Edge Function Secrets `RAOS_VAPID_PUBLIC_KEY`,
+    `RAOS_VAPID_PRIVATE_KEY`, `RAOS_VAPID_SUBJECT` (prefix RAOS_ WAJIB
+    supaya tidak konflik dengan `VAPID_*` PWA lain di project Supabase
+    yang sama)
+  - Vault secret `raos_service_role_key` untuk RPC `raos_dispatch_push`
+    yang panggil Edge Function dari DB trigger. SET via Vault UI Dashboard,
+    BUKAN SQL insert (permission `_crypto_aead_det_noncegen` denied).
+  - Pair public key di Vercel HARUS MATCH private key di Supabase Secrets.
+    Kalau tidak match, push subscribe di client sukses tapi Edge Function
+    signing fail (401 dari FCM/push service).
 
 ---
 
@@ -168,8 +180,29 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
   bg terang pakai `tone="onLight"`.
 - Import `DateTimeHeader` dari `@/components/DateTimeHeader` untuk chip
   tanggal+jam realtime. Prop `compact` untuk kanan atas header.
+- Import `DateTimeStack` dari `@/components/DateTimeHeader` (bukan default)
+  untuk kotak vertikal tanggal atas + jam bold + WIB bawah. Dipakai di
+  header dashboard/scan/chat/riwayat/absensi (tone onNavy).
 - Import `MiniCalendar` dari `@/components/MiniCalendar` — grid bulanan
   dengan highlight hari ini.
+- Import `OnlineStatusBanner` sudah otomatis wrap AppShell — banner top
+  reactive ke `navigator.onLine`.
+
+### 5.4 Push Notification (Web Push VAPID, bukan Firebase)
+- Kalau butuh trigger push dari client PWA (admin/koord/direksi only):
+  `import { invokePush } from '@/lib/pushClient'`. Fire-and-forget.
+- Kalau butuh trigger push dari client staff biasa (mis. mention chat):
+  JANGAN pakai `invokePush` (akan 403). Pakai DB trigger + RPC
+  `raos_dispatch_push` (bypass role via service_role di vault).
+- Kalau butuh trigger dari GAS cron: pakai helper `invokePushFromGas_`
+  di `gas/02_absensi.gs` (auto pakai `CONFIG.SUPABASE_KEY` service role
+  → bypass role di Edge Function).
+- JANGAN buat Edge Function push baru — pakai `raos-send-push` yang
+  sudah ada. Kalau butuh custom payload structure, extend payload di
+  client dan handle di SW `public/sw-push.js`.
+- SW push handler `showNotification` HARUS include: `requireInteraction:
+  true` + `vibrate: [...]` + `tag` + `data: {url}` supaya konsisten dengan
+  lock-screen behavior yang diharapkan user.
 
 ---
 
@@ -190,11 +223,23 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
   - `syncDriverAirportFromSSOT` — 6 jam
   - `syncStaffFromSSOT` — **1 jam** (baru sesi 14)
   - `pushDashboardToSupabase` — 15 menit
-  - `kirimReminderAbsensi` — jam 07:00 harian
+  - `reminderShiftDispatcher` — tiap 5 menit (dispatcher 6 waktu reminder
+    per shift, sesi 14 pagi 23 Juli). Menggantikan `kirimReminderAbsensi`
+    single trigger. Alias `kirimReminderAbsensi/kirimReminderPulang` tetap
+    ada untuk backward-compat.
+  - `notifyPendingScansKoordinator` — tiap 15 menit (F, sesi 14 dinihari)
   - `updateAllKpiThisMonth` — jam 22:00 harian (BROKEN sampai KPI refactor)
   - `kirimLaporanHarianAdmin` — jam 21:00 harian
   - `backupHarian` — jam 02:00 harian
   - `autoHapusRiwayatLama` — tanggal 2 tiap bulan jam 01:00
+
+### 6.1 Helper GAS untuk push notification (sesi 14 dinihari)
+- `invokePushFromGas_(userIds, title, body, url, tag)` di `02_absensi.gs`
+  — panggil Edge Function `raos-send-push` pakai `CONFIG.SUPABASE_KEY`
+  (service_role, bypass role check). Return `{sent, failed, total}`.
+- Kalau tambah reminder/notif baru dari GAS, pakai helper ini.
+  JANGAN direct fetch ke Edge Function tanpa helper (kehilangan error
+  handling + log ke LOG SISTEM).
 
 ---
 

@@ -146,6 +146,92 @@ RAOS **wajib** ambil daftar staff dari SSOT global, bukan CRUD sendiri di PWA
   (`SUPABASE_SERVICE_KEY` di Script Properties, sudah lama ada) untuk buat
   auth user via `/auth/v1/admin/users`
 
+## Push Notification (Web Push VAPID) — sesi 14 dinihari-pagi 23 Juli
+
+Full stack Web Push (BUKAN Firebase/FCM). Pattern mengikuti isi-saldo.
+
+**Env & secrets:**
+- Vercel `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (public, aman di-embed client)
+- Supabase Edge Function secrets: `RAOS_VAPID_PUBLIC_KEY`,
+  `RAOS_VAPID_PRIVATE_KEY`, `RAOS_VAPID_SUBJECT` (prefix RAOS_ — isolate
+  dari PWA lain yang share Supabase project, mereka pakai `VAPID_*` tanpa
+  prefix untuk keypair sendiri)
+- Supabase Vault `raos_service_role_key` — untuk DB trigger yang panggil
+  Edge Function via `pg_net` HTTP (chat broadcast). SET via Vault UI,
+  BUKAN SQL insert (permission crypto denied).
+
+**Komponen:**
+- Tabel `public.push_subscriptions` (RLS: user CRUD own, admin/mgmt/direksi
+  read all). Migration `raos_029`.
+- Edge Function `raos-send-push` (v3 ACTIVE, verify_jwt=true). Payload
+  `{user_ids[], title, body, url, tag}`. Role guard admin/mgmt/direksi
+  kecuali caller service_role (bypass untuk system trigger).
+- Auth pattern Edge Function: `createClient(SUPABASE_URL, ANON_KEY,
+  { global: { headers: { Authorization: authHeader } }})` +
+  `userClient.auth.getUser()` tanpa arg. JANGAN pakai
+  `admin.auth.getUser(token)` — bug "Auth session missing!".
+- SW handler `public/sw-push.js` inject via next.config.js
+  `workboxOptions.importScripts:['/sw-push.js']`. `showNotification`
+  dengan `requireInteraction:true`+`vibrate:[200,100,200,100,500]` supaya
+  muncul di lock screen Android/iOS + suara + getar.
+- `lib/push.ts`: `subscribePush()` / `unsubscribePush()` /
+  `isPushSupported()`. Toggle master Notifikasi di Settings call ini.
+- `lib/pushClient.ts`: `invokePush({user_ids, title, body, url, tag})`
+  fire-and-forget dari admin/koord/direksi PWA (staff biasa 403).
+- RPC `public.raos_dispatch_push(user_ids[], title, body, url, tag)` —
+  SECURITY DEFINER + `SET search_path=public,extensions,vault`. Baca
+  `vault.decrypted_secrets` name='raos_service_role_key', panggil Edge
+  Function via `net.http_post`. Dipakai DB trigger.
+
+**Trigger otomatis yang aktif** (migration `raos_030`/`raos_031`/`raos_032`):
+- `trg_raos_notify_new_chat_message` AFTER INSERT `chat_messages` →
+  push ke semua member room lain (broadcast chat, preview per type).
+- `trg_raos_broadcast_absensi_to_chat` AFTER INSERT/UPDATE
+  `raos_attendance` → post pesan format WA-style ke room 'Absensi'
+  (chain: pesan chat → push notif ke member room Absensi).
+
+**Trigger dari client PWA:**
+- `/admin` validateScan → `invokePush` ke `scan.staff_id` (notif
+  divalidasi/ditolak).
+
+**Trigger cron GAS** (via `invokePushFromGas_` pakai service_role):
+- Dispatcher `reminderShiftDispatcher` fire tiap 5 menit, cek WIB clock
+  vs 6 target time (06:30/14:30/22:30 masuk + 15:00/23:00/07:00 pulang).
+  Dedup via Script Properties cache per hari.
+- `notifyPendingScansKoordinator` tiap 15 menit — scan pending > 15m
+  → push ke koord/admin/mgmt/direksi.
+
+**PENTING**: kalau bikin fitur baru yang butuh push, JANGAN buat Edge
+Function baru — pakai `raos-send-push` yang sudah ada. Kalau butuh dari
+client staff biasa (role_not_allowed), pakai DB trigger + RPC
+`raos_dispatch_push` (bypass role via service_role di vault).
+
+## Reminder Absensi 6 Waktu per Shift — sesi 14 pagi 23 Juli
+
+- AppPrefs: `reminderPagi/Siang/Malam` objek `{masuk, pulang}` (bukan
+  `reminderMasuk/Pulang` flat lama). Default:
+  - Pagi 06:30/15:00, Siang 14:30/23:00, Malam 22:30/07:00
+- UI Settings > Notifikasi: 3 group per shift (🌅☀️🌙) × 2 time input.
+- GAS: 6 fungsi `reminderMasuk/Pulang{Pagi/Siang/Malam}` + dispatcher
+  `reminderShiftDispatcher` tiap 5 menit. Backward-compat alias
+  `kirimReminderAbsensi/kirimReminderPulang` tetap ada.
+- Alasan pakai dispatcher (bukan 6 cron `atHour`): GAS ScriptApp cuma
+  support jam bulat. Dispatcher granular per-menit + dedup cache.
+
+## Broadcast Absensi ke Room Chat — sesi 14 pagi 23 Juli
+
+- Room chat kategori 'proyek' bernama 'Absensi' (ID `9bdd3316-1c81-4943-943f-cc9d76cf97e9`).
+  Bisa lain sepanjang `lower(name) = 'absensi'` — trigger case-insensitive.
+- Room WAJIB punya member (query manual: `INSERT INTO chat_room_members
+  SELECT room_id, id FROM user_profiles WHERE is_active`). Kalau kosong,
+  pesan tetap post tapi push tidak kirim ke siapa-siapa.
+- Format pesan WA-style: ✅ ABSEN MASUK / 🏁 ABSEN PULANG + Nama +
+  Cabang + Shift + Jam WIB + Tanggal + Lokasi + footer PT.
+- Sender_id = staff yang absen. Bubble di sisi kanan mereka kalau buka
+  room.
+- Chain: pesan chat INSERT → `trg_raos_notify_new_chat_message` push
+  notif ke member room lain.
+
 ## Sync Driver Airport (SSOT) — sesi 12, 22 Juli 2026
 
 RAOS **wajib** ambil roster driver dari sumber SSOT global, bukan input manual/mock:

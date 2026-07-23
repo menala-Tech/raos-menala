@@ -20,7 +20,8 @@ export default function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md
-                    bg-white border-t border-gray-100 shadow-xl z-50 pb-safe">
+                    bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800
+                    shadow-xl z-50 pb-safe">
       <div className="flex items-end h-16 relative">
 
         {NAV_LEFT.map(({ href, icon: Icon, label }) => {
@@ -50,7 +51,7 @@ export default function BottomNav() {
               'shadow-[0_6px_24px_rgba(0,0,0,0.35)] transition-transform active:scale-95',
               scanActive
                 ? 'bg-primary ring-4 ring-primary/30'
-                : 'bg-secondary ring-4 ring-white'
+                : 'bg-secondary ring-4 ring-white dark:ring-gray-900'
             )}
           >
             <ScanLine size={30} className="text-white" strokeWidth={2.2} />

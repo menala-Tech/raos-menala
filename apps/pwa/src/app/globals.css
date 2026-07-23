@@ -11,12 +11,49 @@
   html { @apply h-full; }
   body { @apply h-full bg-gray-50 font-sans antialiased; }
 
-  /* Dark mode baseline — body & primary surface. Komponen individual
-     (card, header) masih pakai warna terang; dark mode penuh akan
-     di-migrate per komponen di sesi berikutnya. */
+  /* Dark mode — baseline + sweep umum via specificity override.
+     Selector `html.dark .bg-white` menang atas `.bg-white` (2 class vs 1),
+     jadi kita bisa flip surface & typography default tanpa harus tambah
+     `dark:` variant di setiap komponen. Warna semantic (primary/secondary/
+     accent/danger, bg-red-50, bg-green-100 dll) sengaja tidak di-override
+     supaya badge status tetap terbaca. Kalau ada komponen dengan
+     kombinasi khusus yang jadi jelek, pakai `dark:` variant inline sebagai
+     tambal spesifik. */
   html.dark body { @apply bg-gray-900 text-gray-100; }
-  html.dark .card { @apply bg-gray-800 border-gray-700 text-gray-100; }
+
+  /* Surface — putih & abu terang di light jadi gelap di dark */
+  html.dark .bg-white       { background-color: rgb(31 41 55); }   /* gray-800 */
+  html.dark .bg-gray-50     { background-color: rgb(17 24 39); }   /* gray-900 */
+  html.dark .bg-gray-100    { background-color: rgb(31 41 55); }   /* gray-800 */
+  html.dark .bg-gray-200    { background-color: rgb(55 65 81); }   /* gray-700 */
+
+  /* Border */
+  html.dark .border-gray-100 { border-color: rgb(55 65 81); }      /* gray-700 */
+  html.dark .border-gray-200 { border-color: rgb(55 65 81); }      /* gray-700 */
+  html.dark .border-gray-300 { border-color: rgb(75 85 99); }      /* gray-600 */
+  html.dark .divide-gray-100 > * + * { border-color: rgb(55 65 81); }
+
+  /* Typography — flip abu-abu gelap ke abu-abu terang */
+  html.dark .text-gray-900   { color: rgb(243 244 246); }          /* gray-100 */
+  html.dark .text-gray-800   { color: rgb(229 231 235); }          /* gray-200 */
+  html.dark .text-gray-700   { color: rgb(209 213 219); }          /* gray-300 */
+  html.dark .text-gray-600   { color: rgb(156 163 175); }          /* gray-400 */
+  html.dark .text-gray-500   { color: rgb(156 163 175); }          /* gray-400 */
+  html.dark .text-gray-400   { color: rgb(107 114 128); }          /* gray-500 */
+  html.dark .text-gray-300   { color: rgb(75 85 99); }             /* gray-600 */
+
+  /* Placeholder di dark mode ditangani lewat override `.input` di bawah,
+     tidak perlu override utility placeholder-gray-* (bikin circular @apply). */
+
+  /* Base components (specificity lebih tinggi supaya menang dari Tailwind) */
+  html.dark .card  { @apply bg-gray-800 border-gray-700 text-gray-100; }
   html.dark .input { @apply bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500; }
+  html.dark .btn-secondary { @apply bg-gray-800 border-gray-700 text-gray-100; }
+
+  /* Shadow — soft shadow lebih pas di dark */
+  html.dark .shadow-sm { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.35); }
+  html.dark .shadow-lg { box-shadow: 0 10px 25px -3px rgb(0 0 0 / 0.5); }
+  html.dark .shadow-xl { box-shadow: 0 20px 45px -5px rgb(0 0 0 / 0.55); }
 }
 
 @layer components {

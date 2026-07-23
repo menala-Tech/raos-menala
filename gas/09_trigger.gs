@@ -14,13 +14,12 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('importAbsensiFromSupabase')
     .timeBased().everyMinutes(30).create()
 
-  // Kirim reminder absensi masuk jam 07:00 (D) — WA + push notif
-  ScriptApp.newTrigger('kirimReminderAbsensi')
-    .timeBased().atHour(7).everyDays(1).create()
-
-  // Reminder absensi pulang jam 15:00 (E) — push notif
-  ScriptApp.newTrigger('kirimReminderPulang')
-    .timeBased().atHour(15).everyDays(1).create()
+  // Reminder absensi per shift — dispatcher tiap 5 menit cek WIB clock vs
+  // target time (06:30/14:30/22:30 masuk + 15:00/23:00/07:00 pulang).
+  // Presisi: dispatcher fire kalau jam+menit MATCH target (±2 menit window).
+  // GAS ScriptApp cron minimum granularity 1 menit — 5 menit hemat quota.
+  ScriptApp.newTrigger('reminderShiftDispatcher')
+    .timeBased().everyMinutes(5).create()
 
   // Notif ke koordinator kalau scan pending >15 menit (F) — cek tiap 15 menit
   ScriptApp.newTrigger('notifyPendingScansKoordinator')
@@ -63,6 +62,52 @@ function setupAllTriggers() {
 
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
+}
+
+// Dispatcher reminder shift — fire tiap 5 menit, cek jam WIB sekarang
+// vs 6 target (masuk pagi/siang/malam + pulang pagi/siang/malam).
+// Kalau match dalam window ±2 menit (karena cron ±5 min), panggil fungsi
+// yang sesuai. Sekali per hari per target (dedup via script cache).
+function reminderShiftDispatcher() {
+  const now = new Date()
+  // WIB = UTC+7. GAS timezone bisa beda, hitung manual.
+  const wibNow = new Date(now.getTime() + (7 - now.getTimezoneOffset() / -60) * 3600 * 1000)
+  // Actually simpler: pakai Utilities.formatDate dengan zone 'Asia/Jakarta'
+  const hhmm = Utilities.formatDate(now, 'Asia/Jakarta', 'HH:mm')
+  const today = Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy-MM-dd')
+
+  // Target: 6 slot reminder
+  const targets = [
+    { time: '06:30', fn: reminderMasukPagi,  key: 'masuk-pagi' },
+    { time: '14:30', fn: reminderMasukSiang, key: 'masuk-siang' },
+    { time: '22:30', fn: reminderMasukMalam, key: 'masuk-malam' },
+    { time: '15:00', fn: reminderPulangPagi, key: 'pulang-pagi' },
+    { time: '23:00', fn: reminderPulangSiang, key: 'pulang-siang' },
+    { time: '07:00', fn: reminderPulangMalam, key: 'pulang-malam' },
+  ]
+
+  const cache = PropertiesService.getScriptProperties()
+
+  targets.forEach(t => {
+    if (!isWithinWindow_(hhmm, t.time, 2)) return
+    const cacheKey = `REMINDER_FIRED_${today}_${t.key}`
+    if (cache.getProperty(cacheKey)) return // sudah fire hari ini
+    try {
+      t.fn()
+      cache.setProperty(cacheKey, '1')
+    } catch (e) {
+      logSistem('error', `reminderShiftDispatcher:${t.key}`, 'error', e.message)
+    }
+  })
+}
+
+// Cek apakah hhmm within ±windowMin menit dari targetHhmm
+function isWithinWindow_(hhmm, targetHhmm, windowMin) {
+  const [h1, m1] = hhmm.split(':').map(Number)
+  const [h2, m2] = targetHhmm.split(':').map(Number)
+  const min1 = h1 * 60 + m1
+  const min2 = h2 * 60 + m2
+  return Math.abs(min1 - min2) <= windowMin
 }
 
 function autoHapusRiwayatLama() {

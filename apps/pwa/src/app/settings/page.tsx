@@ -26,6 +26,11 @@ const ROLE_COLORS: Record<string, string> = {
 }
 
 /* ===== Preferensi lokal (spec setting.md — persist di perangkat) ===== */
+interface ShiftReminder {
+  masuk: string  // "HH:mm" 24h
+  pulang: string
+}
+
 interface AppPrefs {
   bahasa: string
   tema: 'terang' | 'gelap'
@@ -36,8 +41,9 @@ interface AppPrefs {
   simpanFoto: 'perangkat' | 'cloud'
   notifMaster: boolean
   notifJenis: Record<string, boolean>
-  reminderMasuk: string
-  reminderPulang: string
+  reminderPagi: ShiftReminder
+  reminderSiang: ShiftReminder
+  reminderMalam: ShiftReminder
   pickupPointId: string | null
 }
 
@@ -54,8 +60,13 @@ const DEFAULT_PREFS: AppPrefs = {
     'Scan Berhasil': true, 'Scan Pending': true, 'Validasi Koordinator': true,
     'Pengingat Absen': true, 'Pengumuman': true, 'Chat Room': true,
   },
-  reminderMasuk: '07:00',
-  reminderPulang: '15:00',
+  // Reminder time per shift — sesuai spec user (30 menit sebelum shift +
+  // tepat di jam pulang). Cron GAS baca ini via user-config atau hardcode
+  // di setupAllTriggers. Kalau user ubah di sini, cron GAS TIDAK auto
+  // ikut ubah (perlu re-run setupAllTriggers manual dari script editor).
+  reminderPagi:  { masuk: '06:30', pulang: '15:00' },
+  reminderSiang: { masuk: '14:30', pulang: '23:00' },
+  reminderMalam: { masuk: '22:30', pulang: '07:00' },
   pickupPointId: null,
 }
 
@@ -658,25 +669,45 @@ function SectionNotifikasi({ prefs, save }: { prefs: AppPrefs; save: (p: AppPref
       </div>
 
       <div className="card">
-        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Waktu Pengingat</p>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600 font-medium">Absen Masuk</span>
-            <input
-              type="time" value={prefs.reminderMasuk}
-              onChange={e => save({ ...prefs, reminderMasuk: e.target.value })}
-              className="border border-gray-200 rounded-lg px-2 py-1 text-sm font-bold text-gray-700"
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600 font-medium">Absen Pulang</span>
-            <input
-              type="time" value={prefs.reminderPulang}
-              onChange={e => save({ ...prefs, reminderPulang: e.target.value })}
-              className="border border-gray-200 rounded-lg px-2 py-1 text-sm font-bold text-gray-700"
-            />
-          </div>
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Waktu Pengingat per Shift</p>
+        <div className="space-y-4">
+          {([
+            { key: 'reminderPagi' as const,  label: '🌅 Shift Pagi',  hint: 'default 06:30 masuk, 15:00 pulang' },
+            { key: 'reminderSiang' as const, label: '☀️ Shift Siang', hint: 'default 14:30 masuk, 23:00 pulang' },
+            { key: 'reminderMalam' as const, label: '🌙 Shift Malam', hint: 'default 22:30 masuk, 07:00 pulang' },
+          ]).map(({ key, label, hint }) => {
+            const val = prefs[key]
+            return (
+              <div key={key}>
+                <p className="text-xs font-semibold text-gray-700 mb-1">{label}</p>
+                <p className="text-[10px] text-gray-400 mb-2">{hint}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500">Reminder MASUK</label>
+                    <input
+                      type="time" value={val.masuk}
+                      onChange={e => save({ ...prefs, [key]: { ...val, masuk: e.target.value } })}
+                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-gray-700 w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">Reminder PULANG</label>
+                    <input
+                      type="time" value={val.pulang}
+                      onChange={e => save({ ...prefs, [key]: { ...val, pulang: e.target.value } })}
+                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold text-gray-700 w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
+        <p className="text-[10px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mt-3">
+          ⚠️ Waktu di sini adalah preferensi tampilan. Cron server-side GAS pakai
+          jadwal fixed sesuai default. Kalau Anda ubah, minta admin re-configure
+          trigger GAS supaya sinkron.
+        </p>
       </div>
     </div>
   )

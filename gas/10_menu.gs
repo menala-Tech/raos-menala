@@ -33,8 +33,18 @@ function onOpen() {
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('🔔 Notifikasi')
-        .addItem('Kirim Reminder Absensi Masuk (07:00)', 'kirimReminderAbsensi')
-        .addItem('Kirim Reminder Absensi Pulang (15:00)', 'kirimReminderPulang')
+        .addSubMenu(
+          SpreadsheetApp.getUi().createMenu('⏰ Reminder Masuk')
+            .addItem('Pagi (06:30)', 'reminderMasukPagi')
+            .addItem('Siang (14:30)', 'reminderMasukSiang')
+            .addItem('Malam (22:30)', 'reminderMasukMalam')
+        )
+        .addSubMenu(
+          SpreadsheetApp.getUi().createMenu('🏁 Reminder Pulang')
+            .addItem('Pagi (15:00)', 'reminderPulangPagi')
+            .addItem('Siang (23:00)', 'reminderPulangSiang')
+            .addItem('Malam (07:00)', 'reminderPulangMalam')
+        )
         .addItem('Notif Scan Pending → Koordinator', 'notifyPendingScansKoordinator')
         .addItem('Push Dashboard ke Supabase', 'pushDashboardToSupabase')
     )

@@ -99,10 +99,32 @@ function rekapAbulanan(bulan, tahun) {
   return rekap
 }
 
-function kirimReminderAbsensi() {
-  // Sumber staff = Supabase user_profiles (sync dari SSOT MASTER DATA STAFF via
-  // gas/13_staff_sync.gs). Sheet lokal DATABASE STAFF sudah tidak dipakai
-  // sebagai sumber sejak sesi 14 — SSoT rule global.
+// Helper: ambil shift id by name dari Supabase (cache di script property utk hemat request).
+function getShiftIdByName_(name) {
+  const key = 'SHIFT_ID_' + name.toUpperCase()
+  let id = PropertiesService.getScriptProperties().getProperty(key)
+  if (!id) {
+    const shifts = callSupabase(`shifts?name=eq.${encodeURIComponent(name)}&select=id&limit=1`) || []
+    if (shifts.length > 0) {
+      id = shifts[0].id
+      PropertiesService.getScriptProperties().setProperty(key, id)
+    }
+  }
+  return id
+}
+
+// Kirim reminder MASUK per shift. Panggil target: staff dengan shift ini
+// yang BELUM absen hari ini. Kirim WA (kalau ada phone) + push.
+function kirimReminderMasukShift_(shiftName) {
+  const shiftId = getShiftIdByName_(shiftName)
+  if (!shiftId) {
+    logSistem('warning', 'kirimReminderMasukShift_', 'warning', `Shift "${shiftName}" tidak ditemukan di DB shifts`)
+    return
+  }
+  // Note: user_profiles TIDAK punya kolom shift_id (shift ditentukan runtime
+  // by clock via detectCurrentShift). Untuk reminder, target = SEMUA staff
+  // aktif yang belum absen hari ini. Filter per shift bisa ditambah kalau
+  // nanti user_profiles punya kolom default_shift_id.
   const staff = callSupabase(
     'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
   ) || []
@@ -114,63 +136,76 @@ function kirimReminderAbsensi() {
   ) || []
   const sudahAbsen = new Set(absensiHariIni.map(a => a.staff_id))
 
-  const staffBelumAbsen = staff.filter(s => !sudahAbsen.has(s.id))
+  const belum = staff.filter(s => !sudahAbsen.has(s.id))
+  if (belum.length === 0) {
+    logSistem('cron', `reminderMasuk${shiftName}`, 'success', '0 staff belum absen (semua sudah check-in)')
+    return
+  }
 
-  // WA reminder (existing behavior)
   let waTerkirim = 0
-  staffBelumAbsen.forEach(s => {
+  belum.forEach(s => {
     if (!s.phone) return
     sendWhatsApp(
       s.phone,
-      `⏰ *PENGINGAT ABSENSI*\nHai ${s.full_name}, kamu belum absen masuk hari ini.\nSegera lakukan absensi melalui aplikasi RAOS.`
+      `⏰ *PENGINGAT ABSENSI MASUK — Shift ${shiftName}*\nHai ${s.full_name}, sebentar lagi shift ${shiftName} mulai.\nSegera absen masuk di aplikasi RAOS.`
     )
     waTerkirim++
   })
 
-  // Push notification lock-screen (D) via Edge Function raos-send-push.
-  // Batch semua user_ids sekaligus supaya 1 request.
   const pushRes = invokePushFromGas_(
-    staffBelumAbsen.map(s => s.id),
-    '⏰ Reminder Absensi Masuk',
-    'Kamu belum absen masuk hari ini. Buka RAOS sekarang untuk check-in.',
+    belum.map(s => s.id),
+    `⏰ Reminder Masuk — Shift ${shiftName}`,
+    `Sebentar lagi shift ${shiftName} mulai. Buka RAOS untuk check-in.`,
     '/absensi',
-    'reminder-masuk-' + today
+    `reminder-masuk-${shiftName.toLowerCase()}-${today}`
   )
 
-  logSistem('cron', 'kirimReminderAbsensi', 'success',
-    `Belum absen: ${staffBelumAbsen.length} dari ${staff.length} staff. WA: ${waTerkirim}, Push: ${pushRes.sent}/${pushRes.total}`)
+  logSistem('cron', `reminderMasuk${shiftName}`, 'success',
+    `${belum.length} staff belum absen. WA: ${waTerkirim}, Push: ${pushRes.sent}/${pushRes.total}`)
 }
 
-// E: Reminder ABSENSI PULANG (jam 15:00 default). Panggil dari trigger cron.
-function kirimReminderPulang() {
+// Kirim reminder PULANG per shift. Target: staff yang sudah check_in tapi
+// belum check_out.
+function kirimReminderPulangShift_(shiftName) {
   const staff = callSupabase(
     'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
   ) || []
   if (staff.length === 0) return
 
   const today = new Date().toISOString().split('T')[0]
-  // Cari yang sudah masuk tapi belum pulang
   const attendance = callSupabase(
     `raos_attendance?date=eq.${today}&check_in_at=not.is.null&check_out_at=is.null&select=staff_id`
   ) || []
   const belumPulangIds = new Set(attendance.map(a => a.staff_id))
   const target = staff.filter(s => belumPulangIds.has(s.id))
   if (target.length === 0) {
-    logSistem('cron', 'kirimReminderPulang', 'success', '0 staff perlu diingatkan (semua sudah check-out atau belum masuk)')
+    logSistem('cron', `reminderPulang${shiftName}`, 'success', '0 staff perlu diingatkan')
     return
   }
 
   const pushRes = invokePushFromGas_(
     target.map(s => s.id),
-    '🏁 Reminder Absensi Pulang',
+    `🏁 Reminder Pulang — Shift ${shiftName}`,
     'Sudah waktunya check-out. Jangan lupa absen pulang di RAOS.',
     '/absensi',
-    'reminder-pulang-' + today
+    `reminder-pulang-${shiftName.toLowerCase()}-${today}`
   )
 
-  logSistem('cron', 'kirimReminderPulang', 'success',
-    `Reminder pulang push ke ${pushRes.sent}/${target.length} staff`)
+  logSistem('cron', `reminderPulang${shiftName}`, 'success',
+    `Push ke ${pushRes.sent}/${target.length} staff belum check-out`)
 }
+
+// ─── Trigger callables (bind ke ScriptApp.newTrigger) ─────────────────
+function reminderMasukPagi()  { kirimReminderMasukShift_('Pagi') }
+function reminderMasukSiang() { kirimReminderMasukShift_('Siang') }
+function reminderMasukMalam() { kirimReminderMasukShift_('Malam') }
+function reminderPulangPagi()  { kirimReminderPulangShift_('Pagi') }
+function reminderPulangSiang() { kirimReminderPulangShift_('Siang') }
+function reminderPulangMalam() { kirimReminderPulangShift_('Malam') }
+
+// Backward-compat alias untuk trigger lama
+function kirimReminderAbsensi() { kirimReminderMasukShift_('Pagi') }
+function kirimReminderPulang()  { kirimReminderPulangShift_('Pagi') }
 
 // F: Notif ke koordinator kalau ada scan pending > 15 menit.
 function notifyPendingScansKoordinator() {

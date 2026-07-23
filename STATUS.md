@@ -49,6 +49,37 @@ Sesi paling panjang sampai sekarang. Rangkuman komit yang landed:
   handler, subscription flow). Scope 1-2 sesi khusus.
 - [ ] Isi `kpi_targets` (kosong sejak awal).
 
+### Sesi 14 pagi (23 Juli) — Reminder 6 shift + Broadcast absensi
+
+- **Reminder 6 waktu per shift** (commit `7e05fff`):
+  - AppPrefs restruktur: `reminderMasuk/Pulang` (2 string flat) →
+    `reminderPagi/Siang/Malam` (3 objek `ShiftReminder{masuk,pulang}`).
+  - UI Settings > Notifikasi: 3 group per shift × 2 time input (default
+    Pagi 06:30/15:00, Siang 14:30/23:00, Malam 22:30/07:00).
+  - GAS: 6 fungsi `reminderMasuk/Pulang{Pagi/Siang/Malam}` + dispatcher
+    `reminderShiftDispatcher` yang fire tiap 5 menit, cek jam WIB vs
+    target ±2 menit, dedup via Script Properties cache per hari per key.
+    Alasan pakai dispatcher: GAS `atHour(H)` cuma jam bulat, 06:30 tidak
+    bisa. 1 trigger vs 6 trigger, granular sampai per-menit.
+  - Menu spreadsheet: sub-menu `Reminder Masuk` + `Reminder Pulang` per
+    shift untuk test manual.
+  - Backward-compat alias `kirimReminderAbsensi/kirimReminderPulang`
+    tetap ada.
+
+- **Broadcast absensi ke chat room "Absensi"** (migration `raos_032`):
+  - Trigger `trg_raos_broadcast_absensi_to_chat` AFTER INSERT/UPDATE
+    `raos_attendance` → post pesan format WA-style ke room 'Absensi'
+    (sender_id = staff). Deteksi INSERT check_in_at = event MASUK,
+    UPDATE check_out_at NULL→value = event PULANG. Skip kalau room
+    tidak ada.
+  - Format: ✅ ABSEN MASUK / 🏁 ABSEN PULANG + Nama + Cabang + Shift +
+    Jam WIB + Tanggal + status Lokasi + footer PT.
+  - Chain effect: pesan chat INSERT → trigger raos_notify_new_chat_message
+    push notif ke member room.
+  - **Prasyarat**: room 'Absensi' harus punya member (staff/koord/admin
+    yang mau dapat notif). Sekarang belum di-populate — admin add
+    manual via Info Room > invite member (atau lewat SQL).
+
 ### Sesi 14 dinihari (23 Juli) — Push notification end-to-end
 
 - Migration `raos_029`: tabel `push_subscriptions` (endpoint UNIQUE + RLS)

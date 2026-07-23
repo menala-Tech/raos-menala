@@ -1,4 +1,78 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
+*Diupdate: 2026-07-23 (sesi 14 pagi — audit Settings + docs sync)*
+
+## SESI 14 pagi (23 Juli 2026) — Audit fungsi Settings
+
+Setelah user tanya "cek semua fungsi pengaturan apakah sudah berjalan",
+dilakukan audit menyeluruh halaman /settings. Hasil per item dari
+screenshot user + code inspection:
+
+### Update status dari audit sebelumnya
+
+| Item | Status baru | Commit |
+|---|---|---|
+| ⚠️ Edit No.WA BUG SSoT | ✅ **FIXED** disable input SSoT + banner amber | `b8c9488` |
+| ❌ Scan Mode default | ✅ **FIXED** /scan baca `localStorage.raos_prefs.scanMode` | `b8c9488` |
+| ❌ Tema (Terang/Gelap) | ⚠️ **BASELINE** dark class + body/card/input; komponen belum full migrate | `b8c9488` |
+| ❌ Reminder masuk/pulang | ✅ **FIXED** 6 waktu per shift + dispatcher GAS | `7e05fff` |
+| ❌ Toggle master notif | ✅ **FIXED** wire subscribe/unsubscribe Web Push | `b8c9488` |
+| ❌ Force lock/standby | ✅ **FIXED** Web Push VAPID + SW `requireInteraction` + `vibrate` | `b8c9488` + `a13ac5a` |
+| ✅ Lokasi/Terminal | ✅ tetap jalan | `a2711f1` |
+| ✅ Keamanan/Password | ✅ tetap jalan | — |
+| ✅ Data & Sync | ✅ tetap jalan | — |
+| ✅ Bersihkan Cache | ✅ tetap jalan | — |
+| ✅ Logout | ✅ tetap jalan | — |
+
+### 🔴 Yang MASIH belum selesai (5 real + 2 partial)
+
+**Real belum ada implementasi:**
+1. **Bahasa (ID/EN)** — placeholder, butuh `react-i18next` setup +
+   extract semua string komponen. Scope: 1-2 sesi khusus.
+2. **Ukuran Teks** — placeholder, butuh CSS scale variable + apply
+   di semua text class. Scope: 1 sesi.
+3. **Simpan Foto Scan** (perangkat vs cloud) — placeholder. Sebenarnya
+   scan foto sudah di Supabase Storage bucket. Pilihan "perangkat"
+   tidak masuk akal untuk system multi-user → REKOMENDASI: hapus
+   toggle ini dari UI Settings (cleanup, bukan fitur).
+4. **Toggle Suara/Getaran** — placeholder. Perlu wire ke Audio API
+   untuk suara + `navigator.vibrate()` untuk getar saat notif in-app.
+   Scope: 0.5 sesi (mudah).
+5. **Bantuan / Panduan / FAQ / Chat Admin** — section belum di-audit
+   isinya. Kemungkinan cuma link ke halaman lain. Butuh audit +
+   putuskan konten (embed FAQ, atau tetap link).
+
+**Partial (perlu polishing lanjutan):**
+6. **Dark mode** — baseline OK (body + card + input di globals.css),
+   TAPI komponen individual (chip warna, badge, dropdown Settings,
+   modal, dsb) belum konsisten pakai `dark:*` variant. Beberapa spot
+   masih terang saat dark mode aktif. Butuh sweep manual per file
+   (~1-2 sesi kerja).
+7. **Toggle jenis notif granular** — 6 toggle di Notifikasi (Scan
+   Berhasil, Scan Pending, Validasi Koordinator, Pengingat Absen,
+   Pengumuman, Chat Room) SAVE ke localStorage tapi BELUM di-consume
+   di Edge Function/DB trigger. Push kirim ke semua target tanpa
+   filter preferensi user. Butuh:
+   - Sinkron `notifJenis` dari localStorage ke DB (kolom baru di
+     `user_profiles` atau tabel `notification_prefs`)
+   - Edge Function `raos-send-push` baca preferensi target user
+     sebelum kirim, skip yang OFF untuk jenis notif yang match
+   - Kategorisasi tag di push payload sesuai jenis (mis. `tag:
+     'jenis:chat_room'`, `'jenis:scan_berhasil'`, dsb)
+   - Scope: 1 sesi.
+
+### Prioritas rekomendasi (kalau lanjut)
+
+- **TINGGI**: #7 Toggle jenis notif granular — user complain kalau
+  cuma mau Chat notif tapi dapat semua.
+- **SEDANG**: #4 Toggle Suara/Getaran (cepat), #5 Bantuan audit (cepat).
+- **RENDAH**: #1 Bahasa i18n (scope besar), #2 Ukuran Teks, #6 Dark mode
+  full migration.
+- **SKIP/HAPUS**: #3 Simpan Foto Scan (fitur tidak relevan multi-user).
+
+---
+
+# STATUS.md lama (sesi 14 sebelumnya)
+
 *Diupdate: 2026-07-22 (sesi 14, closing)*
 
 ## SESI 14 — Closing rangkuman (22 Juli 2026, dinihari–pagi)

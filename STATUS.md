@@ -1,5 +1,71 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-23 (sesi 14 pagi — audit Settings + docs sync)*
+*Diupdate: 2026-07-23 (sesi 15 sore — 2 partial kuning tuntas + 3 fix bonus)*
+
+## SESI 15 (23 Juli 2026, sore) — 2 partial kuning + 3 fix bonus
+
+Fokus: tuntas #7 Toggle jenis notif granular + #6 Dark mode dari
+audit sesi 14 pagi. Ketemu 3 bug tambahan saat verifikasi user.
+
+### Ringkas commit sesi 15
+
+| Commit | Ringkas |
+|---|---|
+| `a95ac43` | feat(notif): toggle jenis notif granular — filter kategori Edge Function |
+| `0a22700` | feat(dark-mode): sweep komponen individual via globals.css override |
+| `bf6672f` | fix(chat): dropdown retensi pesan → chip button (cegah keluar room) |
+| `7112627` | fix(push): subscribePush pakai getSession bukan getUser |
+
+### Migration Supabase sesi 15
+- `raos_033_notification_prefs` — kolom `user_profiles.notification_prefs` jsonb (default 7 kategori all-true) + RPC `raos_dispatch_push` tambah `p_kategori` + trigger `raos_notify_new_chat_message` pass `'chat_room'`
+- `raos_034_chat_rooms_rpc_include_retention` — extend RPC `get_chat_rooms_for_user` return `auto_delete_days` (fix bug dropdown reset "Tidak")
+
+### Edge Function
+- `raos-send-push` v5 ACTIVE — baca `body.kategori`, filter target dengan `notification_prefs.master=false` atau `[kategori]=false` sebelum kirim
+
+### 7 Kategori push (mapping label UI → key)
+| Label UI | Key kategori | Call site |
+|---|---|---|
+| Scan Berhasil | `scan_berhasil` | `/admin` validate scan |
+| Scan Pending | `scan_pending` | reserved |
+| Validasi Koordinator | `validasi_koordinator` | GAS `notifyPendingScansKoordinator` |
+| Pengingat Absen | `pengingat_absen` | GAS reminder masuk/pulang 6 waktu |
+| Pengumuman | `pengumuman` | reserved |
+| Chat Room | `chat_room` | DB trigger chat_messages + broadcast absensi |
+| `master` | `master` | toggle atas — kalau false, semua di-skip |
+
+**Test push admin sengaja skip kategori** supaya bypass filter (untuk debug).
+
+### End-to-end verified sesi 15
+- ✅ TEST filter ON: kategori `chat_room`, Bobby `chat_room=true` → `total:1, filtered_out:0`
+- ✅ TEST filter OFF: kategori `chat_room`, Bobby `chat_room=false` → `total:0, filtered_out:1`
+- ✅ Vault secret `raos_service_role_key` UPDATED via UI Dashboard ke **Secret API key baru** format `sb_secret_*` (bukan legacy service_role JWT — Supabase project ini sudah migrate ke new API keys system)
+
+### 3 fix bonus (ketemu saat verifikasi)
+1. **Dropdown retensi pesan chat reset ke "Tidak"** meski DB tersimpan 7/30/90 → RPC `get_chat_rooms_for_user` tidak return `auto_delete_days`. Fix: migration `raos_034` extend RPC (`bf6672f`).
+2. **Pilih retention keluar dari room ke list chat** → native `<select>` di Android dismiss dengan back gesture → consume pushState dummy → popstate → `setActiveRoom(null)`. Fix: ganti native `<select>` dengan 4 chip button (`bf6672f`).
+3. **Tombol Aktifkan Notifikasi gagal `not_authenticated`** → `supabase.auth.getUser()` query server bisa fail meski session valid di storage. Fix: ganti ke `getSession()` konsisten dengan pattern lain (`7112627`).
+
+### State akhir sesi 15
+- Supabase: 34 migration, `push_subscriptions: 0` (Bobby lama FCM 410 expired), `system_logs: 2225`, `chat_messages: 43`
+- GAS: 14 file terakhir clasp-push commit `a95ac43`. Trigger aktif rutin — dashboard/import/sync tiap 15-30 menit sukses, `syncStaffFromSSOT` tiap 1 jam sukses (3 update)
+- Vercel: sinkron dengan `7112627` (auto-deploy triggered)
+- Vault secret akhirnya benar → chat push DB trigger + GAS reminder push berikutnya akan sukses (sebelumnya 401 karena JWT lama)
+
+### Pending sesi 16
+- [ ] User re-subscribe push di HP setelah deploy READY (Bobby subscription lama sudah expired) — validasi push notif chat/reminder benar-benar sampai
+- [ ] **KPI pipeline REFACTOR BESAR** (belum pernah jalan) — sama dengan pending sesi 14
+- [ ] **Hard-block scan/absensi di luar radius** — belum ada klarifikasi A/B/C
+- [ ] **Toggle Suara/Getaran** (Settings audit sesi 14 pagi) — 0.5 sesi
+- [ ] Set `branch_id` Hendro (T1/T2/T3) via `/admin`
+- [ ] Isi PIN Hendro di sheet MASTER DATA STAFF kolom H (≥6 digit)
+- [ ] Tambah kolom "Jabatan DIREKSI" di HRIS
+- [ ] Aktifkan Leaked Password Protection di Supabase Auth Settings
+- [ ] Ganti password admin (`Menala2026!`)
+- [ ] Hapus `SUPABASE_SERVICE_ROLE_KEY` dari Vercel env vars kalau sempat di-set
+- [ ] Bahasa (i18n), Ukuran Teks, Bantuan/FAQ (sisa Settings audit)
+- [ ] Offline mode penuh (IndexedDB queue), aktifasi `logActivity()` (0 baris di production)
+
+---
 
 ## SESI 14 pagi (23 Juli 2026) — Audit fungsi Settings
 

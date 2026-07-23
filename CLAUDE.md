@@ -146,6 +146,76 @@ RAOS **wajib** ambil daftar staff dari SSOT global, bukan CRUD sendiri di PWA
   (`SUPABASE_SERVICE_KEY` di Script Properties, sudah lama ada) untuk buat
   auth user via `/auth/v1/admin/users`
 
+## Filter Kategori Push — sesi 15 sore (23 Juli 2026)
+
+- Migration `raos_033_notification_prefs`:
+  - Kolom `user_profiles.notification_prefs` jsonb, default 7 field
+    all-true: `master, scan_berhasil, scan_pending, validasi_koordinator,
+    pengingat_absen, pengumuman, chat_room`
+  - Update RPC `raos_dispatch_push(p_kategori text DEFAULT NULL)` — kalau
+    di-set, di-sisipkan ke body Edge Function
+  - Update trigger `raos_notify_new_chat_message` pass `'chat_room'`
+- **Edge Function `raos-send-push` v5 ACTIVE** — baca `body.kategori`,
+  query `user_profiles.notification_prefs` untuk `user_ids` target,
+  skip yang `master=false` atau `[kategori]=false`. Response body punya
+  `filtered_out` count untuk debugging.
+- **Client `settings/page.tsx`**:
+  - Load `notification_prefs` dari DB saat mount, merge ke `AppPrefs`
+  - `savePrefs()` deteksi kalau `notifMaster` atau `notifJenis` berubah
+    → fire-and-forget upsert ke `user_profiles.notification_prefs`
+    (mapping label UI → key snake_case via `LABEL_TO_KEY`)
+- **Mapping call site → kategori** (lihat RULE_PROJECT.md §5.5):
+  - `/admin` validate scan → `'scan_berhasil'`
+  - GAS reminder masuk/pulang → `'pengingat_absen'`
+  - GAS `notifyPendingScansKoordinator` → `'validasi_koordinator'`
+  - DB trigger chat_messages → `'chat_room'`
+  - Test push admin → SKIP kategori (bypass filter)
+- **End-to-end verified**: filter ON → send terkirim, filter OFF →
+  filtered_out=1 (no send), all melalui `raos_dispatch_push` + response
+  200 dari `raos-send-push`
+
+### Vault secret raos_service_role_key — pakai `sb_secret_*` bukan JWT
+
+Supabase project RAOS sudah migrate ke new API keys system. Isi vault
+secret harus **Secret API key baru** format `sb_secret_...` (di Dashboard
+→ Project Settings → API Keys → tab "Publishable and secret API keys" →
+section Secret keys → `default`).
+
+**JANGAN paste legacy service_role JWT** (format `eyJhbGci...` di halaman
+"Legacy API keys") — akan gagal 401 "invalid_token: missing sub claim"
+karena Edge Function `SUPABASE_SERVICE_ROLE_KEY` env sekarang sudah
+di-rotate ke `sb_secret_*`.
+
+Set via SQL editor (bukan direct UPDATE ke `vault.secrets` yang di-blok):
+```sql
+SELECT vault.update_secret(
+  (SELECT id FROM vault.secrets WHERE name = 'raos_service_role_key'),
+  'sb_secret_XXXXXXXXXX',
+  'raos_service_role_key',
+  'Secret API key untuk RPC raos_dispatch_push'
+);
+```
+
+## Fix bug chat retensi pesan — sesi 15 sore
+
+- **Migration `raos_034`** — extend RPC `get_chat_rooms_for_user` return
+  `auto_delete_days`. Sebelumnya RPC tidak return field ini →
+  `activeRoom.auto_delete_days` selalu `undefined` di client → dropdown
+  reset ke "Tidak" meski DB tersimpan 7/30/90.
+- **Chip button** menggantikan native `<select>` di Pengaturan Room
+  Retensi Pesan. Native picker di Android dismiss dengan back gesture →
+  consume `pushState` dummy di `useEffect activeRoom` → `popstate` →
+  `setActiveRoom(null)` → user keluar dari room ke list chat. Chip button
+  = 4 tombol horizontal (Tidak/7/30/90 hari), tap langsung tanpa native
+  picker.
+
+## Fix push subscribe not_authenticated — sesi 15 sore
+
+`lib/push.ts` `subscribePush()` sebelumnya pakai `supabase.auth.getUser()`
+yang query ke Auth server (bisa timeout/fail meski session valid di
+localStorage). Ganti ke `getSession()` konsisten dengan pattern
+`lib/pushClient.ts`, `admin/page.tsx`.
+
 ## Push Notification (Web Push VAPID) — sesi 14 dinihari-pagi 23 Juli
 
 Full stack Web Push (BUKAN Firebase/FCM). Pattern mengikuti isi-saldo.
@@ -431,7 +501,7 @@ Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
   duplikat dengan sync SSOT). Fungsi masih ada di `03_order.gs` kalau
   perlu dipanggil manual dari script editor untuk debug.
 
-## Debt / Pending Tinggi (per akhir sesi 14 — 22 Juli 2026)
+## Debt / Pending Tinggi (per akhir sesi 15 — 23 Juli 2026)
 
 1. **KPI pipeline REFACTOR BESAR** (belum pernah jalan). `updateAllKpiThisMonth`
    loop `staff_id` TEXT dari sheet, tapi `kpi_targets.staff_id` FK UUID →

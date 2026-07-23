@@ -7,7 +7,7 @@ Berbeda dari `STATUS.md` (kronologi per sesi) dan `CLAUDE.md` (panduan
 teknis + state fitur). File ini murni **rule book**: aturan yang tidak
 berubah lintas sesi, hanya bertambah kalau ada policy baru.
 
-Update terakhir: **2026-07-23 (akhir sesi 14 dinihari-pagi — push notif live)**
+Update terakhir: **2026-07-23 (akhir sesi 15 sore — filter kategori push + fix chat retensi)**
 
 ---
 
@@ -127,8 +127,15 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
     supaya tidak konflik dengan `VAPID_*` PWA lain di project Supabase
     yang sama)
   - Vault secret `raos_service_role_key` untuk RPC `raos_dispatch_push`
-    yang panggil Edge Function dari DB trigger. SET via Vault UI Dashboard,
-    BUKAN SQL insert (permission `_crypto_aead_det_noncegen` denied).
+    yang panggil Edge Function dari DB trigger. SET via Vault UI Dashboard
+    (Integrations → Vault → Secrets), atau via `vault.update_secret(id, ...)`
+    di SQL Editor — BUKAN direct UPDATE ke `vault.secrets` (permission
+    denied) atau raw INSERT (permission `_crypto_aead_det_noncegen`).
+  - **Nilai vault secret** = **Secret API key baru** format `sb_secret_*`
+    (bukan legacy service_role JWT format `eyJhbGci...`). Supabase project
+    RAOS sudah migrate ke new API keys system — `SUPABASE_SERVICE_ROLE_KEY`
+    env di Edge Function isinya `sb_secret_*`, jadi vault harus match.
+    Kalau paste JWT legacy → 401 "invalid_token: missing sub claim".
   - Pair public key di Vercel HARUS MATCH private key di Supabase Secrets.
     Kalau tidak match, push subscribe di client sukses tapi Edge Function
     signing fail (401 dari FCM/push service).
@@ -173,6 +180,17 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
 - Jangan pakai `pattern` HTML strict di input password/PIN — cegah admin
   manual dengan password alfanumerik terblokir. `inputMode="numeric"` OK
   (hanya hint keypad, tidak validasi).
+- **JANGAN pakai native `<select>` di dalam halaman yang punya `pushState`
+  dummy** (chat room, modal berbasis history, dsb). Native picker di
+  Android dismiss dengan back gesture → consume pushState entry → popstate
+  → parent state ter-reset (mis. `setActiveRoom(null)` di chat).
+  Ganti dengan chip button/tombol custom. **Bug sesi 15 di dropdown
+  Retensi Pesan chat** (`bf6672f`) — jangan diulang.
+- **JANGAN pakai `supabase.auth.getUser()` untuk client-side check
+  authenticated**. Fungsi ini query ke Auth server (bisa timeout/fail
+  meski session valid di localStorage). Pakai `getSession()` yang baca
+  storage lokal. **Bug sesi 15 di `lib/push.ts`** (`7112627`) — jangan
+  diulang. Konsisten dengan `lib/pushClient.ts`, `admin/page.tsx`.
 
 ### 5.3 Component conventions
 - Import `MenalaLogo` dari `@/components/MenalaLogo`. Prop `showText`
@@ -203,6 +221,51 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
 - SW push handler `showNotification` HARUS include: `requireInteraction:
   true` + `vibrate: [...]` + `tag` + `data: {url}` supaya konsisten dengan
   lock-screen behavior yang diharapkan user.
+
+### 5.5 Kategori push (sesi 15) — WAJIB pass `kategori`
+Setiap call site push notif WAJIB set field `kategori` supaya Edge
+Function `raos-send-push` bisa filter target berdasarkan
+`user_profiles.notification_prefs`. Kalau `kategori` tidak di-set,
+push kirim ke semua target tanpa filter (dipakai HANYA untuk test push
+admin — mis. tombol Test Push di `/admin`).
+
+| Key kategori | Konteks | Call site |
+|---|---|---|
+| `scan_berhasil` | Notif hasil scan (ke staff pemilik) | `/admin` validate scan |
+| `scan_pending` | Reserved | — |
+| `validasi_koordinator` | Notif ke koord/admin ada scan pending | GAS `notifyPendingScansKoordinator` |
+| `pengingat_absen` | Reminder masuk/pulang 6 waktu per shift | GAS `reminderMasuk/PulangShift_` |
+| `pengumuman` | Reserved (broadcast admin) | — |
+| `chat_room` | Pesan chat + broadcast absensi ke chat | DB trigger `raos_notify_new_chat_message` |
+| `master` | Toggle master di Settings — kalau false, SEMUA di-skip | otomatis di Edge Function |
+
+- **`invokePush` client (TypeScript)**: prop `kategori?: string` di
+  `SendPushOpts` (`lib/pushClient.ts`). Set explicit per call.
+- **`invokePushFromGas_` (GAS)**: param 6 opsional `kategori`. Set
+  explicit per call.
+- **RPC `raos_dispatch_push`**: param 6 `p_kategori text DEFAULT NULL`.
+- Kalau tambah kategori baru: (a) update array `VALID_KATEGORI` di
+  Edge Function, (b) update mapping di `settings/page.tsx`
+  `LABEL_TO_KEY`, (c) tambah label di `DEFAULT_PREFS.notifJenis`,
+  (d) update default JSON di migration `raos_033` (via ALTER COLUMN
+  atau data backfill), (e) update tabel ini.
+
+### 5.6 Dark mode — global override, bukan per-komponen
+Dark mode di-handle via **specificity override** di `globals.css`
+(`html.dark .bg-white`, `html.dark .text-gray-*`, `html.dark .border-*`,
+`html.dark .shadow-*`). Selector 2 class menang atas Tailwind default
+1 class. Efek: 66+ occurrence `bg-white` di 13 file otomatis fix.
+
+- Warna semantic (primary/secondary/red-*/green-*/amber-*) sengaja
+  TIDAK di-override — badge status tetap terbaca di dark mode.
+- Komponen dengan surface eksplisit yang butuh kontras spesifik
+  (mis. BottomNav `bg-white` overlay dengan ring-white FAB): tetap
+  pakai `dark:` variant inline sebagai tambal.
+- Kalau ada kombinasi warna khusus jadi jelek di dark mode, tambah
+  `dark:*` variant di komponen tersebut — jangan ubah override umum
+  di globals.css.
+- Ganti CSS override rgb() value HARUS di globals.css baris
+  `html.dark .xxx { ... }`, jangan tersebar di file lain.
 
 ---
 
@@ -264,7 +327,7 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
 
 - Prefix `raos_XXX_snake_case_description` (mis. `raos_022_staff_ssot_sync_columns`).
 - Nomor urut kontinyu — cek `list_migrations` sebelum pilih nomor baru.
-- Migration terakhir per sesi 14: `raos_024`.
+- Migration terakhir per sesi 15: `raos_034`.
 - Migration selalu idempotent (`CREATE OR REPLACE`, `DROP IF EXISTS`,
   `ADD COLUMN IF NOT EXISTS`).
 - Fungsi SECURITY DEFINER wajib `SET search_path = public` di body.

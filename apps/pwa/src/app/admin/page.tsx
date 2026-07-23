@@ -96,6 +96,7 @@ export default function AdminPage() {
             : `Scan ${scan.scan_id} untuk ${driverName} ditolak oleh ${user.full_name}. Cek riwayat untuk detail.`,
           url: '/riwayat',
           tag: `scan-${scan.scan_id}`,
+          kategori: 'scan_berhasil',
         })
       }
     }

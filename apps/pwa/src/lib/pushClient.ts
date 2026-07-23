@@ -6,6 +6,13 @@ interface SendPushOpts {
   body: string
   url?: string
   tag?: string
+  /**
+   * Kategori push untuk filter di Edge Function berdasarkan notification_prefs
+   * target user. Kalau kosong, semua target kena push (dipakai test push admin).
+   * Valid: 'scan_berhasil' | 'scan_pending' | 'validasi_koordinator' |
+   *        'pengingat_absen' | 'pengumuman' | 'chat_room'
+   */
+  kategori?: string
 }
 
 /**

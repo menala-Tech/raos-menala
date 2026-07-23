@@ -87,28 +87,78 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    setPrefs(loadPrefs())
+    const local = loadPrefs()
+    setPrefs(local)
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/'); return }
       const { data } = await supabase
         .from('user_profiles').select('*, branches(*)').eq('id', session.user.id).single()
       setUser(data ? { ...data, email: session.user.email } as any : data)
+      // Merge notification_prefs dari DB kalau ada — DB adalah source of truth
+      // untuk filter Edge Function. Local storage cache untuk UI cepat load.
+      const dbPrefs = (data as any)?.notification_prefs
+      if (dbPrefs && typeof dbPrefs === 'object') {
+        const merged: AppPrefs = {
+          ...local,
+          notifMaster: dbPrefs.master !== false,
+          notifJenis: {
+            'Scan Berhasil':        dbPrefs.scan_berhasil        !== false,
+            'Scan Pending':         dbPrefs.scan_pending         !== false,
+            'Validasi Koordinator': dbPrefs.validasi_koordinator !== false,
+            'Pengingat Absen':      dbPrefs.pengingat_absen      !== false,
+            'Pengumuman':           dbPrefs.pengumuman           !== false,
+            'Chat Room':            dbPrefs.chat_room            !== false,
+          },
+        }
+        setPrefs(merged)
+        localStorage.setItem('raos_prefs', JSON.stringify(merged))
+      }
     }
     init()
   }, [router])
 
+  // Mapping label UI (Indonesia) → key kategori snake_case di DB & Edge Function.
+  const LABEL_TO_KEY: Record<string, string> = {
+    'Scan Berhasil':        'scan_berhasil',
+    'Scan Pending':         'scan_pending',
+    'Validasi Koordinator': 'validasi_koordinator',
+    'Pengingat Absen':      'pengingat_absen',
+    'Pengumuman':           'pengumuman',
+    'Chat Room':            'chat_room',
+  }
+
+  // Sync notifMaster + notifJenis ke user_profiles.notification_prefs.
+  // Fire-and-forget: local storage sudah nyimpen dulu, DB dipush async.
+  const syncNotifPrefsToDB = useCallback(async (p: AppPrefs) => {
+    if (!user) return
+    const dbPrefs: Record<string, boolean> = { master: p.notifMaster }
+    for (const [label, on] of Object.entries(p.notifJenis)) {
+      const key = LABEL_TO_KEY[label]
+      if (key) dbPrefs[key] = on
+    }
+    await supabase.from('user_profiles')
+      .update({ notification_prefs: dbPrefs })
+      .eq('id', user.id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
   const savePrefs = useCallback((next: AppPrefs) => {
-    setPrefs(next)
+    setPrefs(prev => {
+      // Kalau notifMaster / notifJenis berubah → sync ke DB (fire-and-forget).
+      const notifChanged =
+        prev.notifMaster !== next.notifMaster ||
+        JSON.stringify(prev.notifJenis) !== JSON.stringify(next.notifJenis)
+      if (notifChanged) { void syncNotifPrefsToDB(next) }
+      return next
+    })
     localStorage.setItem('raos_prefs', JSON.stringify(next))
-    // Apply tema langsung ke <html> supaya toggle terlihat instan (tidak
-    // butuh reload). Inline script di layout.tsx handle first-paint.
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark', next.tema === 'gelap')
     }
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
-  }, [])
+  }, [syncNotifPrefsToDB])
 
   async function handleLogout() {
     setLoggingOut(true)

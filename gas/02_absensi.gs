@@ -157,7 +157,8 @@ function kirimReminderMasukShift_(shiftName) {
     `⏰ Reminder Masuk — Shift ${shiftName}`,
     `Sebentar lagi shift ${shiftName} mulai. Buka RAOS untuk check-in.`,
     '/absensi',
-    `reminder-masuk-${shiftName.toLowerCase()}-${today}`
+    `reminder-masuk-${shiftName.toLowerCase()}-${today}`,
+    'pengingat_absen'
   )
 
   logSistem('cron', `reminderMasuk${shiftName}`, 'success',
@@ -188,7 +189,8 @@ function kirimReminderPulangShift_(shiftName) {
     `🏁 Reminder Pulang — Shift ${shiftName}`,
     'Sudah waktunya check-out. Jangan lupa absen pulang di RAOS.',
     '/absensi',
-    `reminder-pulang-${shiftName.toLowerCase()}-${today}`
+    `reminder-pulang-${shiftName.toLowerCase()}-${today}`,
+    'pengingat_absen'
   )
 
   logSistem('cron', `reminderPulang${shiftName}`, 'success',
@@ -226,7 +228,8 @@ function notifyPendingScansKoordinator() {
     '⚠️ Scan Pending Perlu Validasi',
     `${pending.length} scan pending >15 menit. Buka Panel Admin untuk validasi.`,
     '/admin',
-    'pending-scans'
+    'pending-scans',
+    'validasi_koordinator'
   )
 
   logSistem('cron', 'notifyPendingScansKoordinator', 'success',
@@ -236,9 +239,11 @@ function notifyPendingScansKoordinator() {
 // Helper: invoke Edge Function raos-send-push dari GAS. Pakai SUPABASE_KEY
 // (service role) di Script Properties → Edge Function verify_jwt=true
 // bypass role check untuk service_role token.
-function invokePushFromGas_(userIds, title, body, url, tag) {
+function invokePushFromGas_(userIds, title, body, url, tag, kategori) {
   if (!userIds || userIds.length === 0) return { sent: 0, total: 0, failed: 0 }
   try {
+    const payloadObj = { user_ids: userIds, title, body, url, tag }
+    if (kategori) payloadObj.kategori = kategori
     const res = UrlFetchApp.fetch(
       `${CONFIG.SUPABASE_URL}/functions/v1/raos-send-push`,
       {
@@ -247,7 +252,7 @@ function invokePushFromGas_(userIds, title, body, url, tag) {
         headers: {
           'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`,
         },
-        payload: JSON.stringify({ user_ids: userIds, title, body, url, tag }),
+        payload: JSON.stringify(payloadObj),
         muteHttpExceptions: true,
       }
     )

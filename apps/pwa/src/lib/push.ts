@@ -58,11 +58,14 @@ export async function subscribePush(): Promise<{ ok: boolean; reason?: string }>
     })
     const json = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { ok: false, reason: 'not_authenticated' }
+    // Pakai getSession() (baca token dari client storage) bukan getUser()
+    // (query ke server, bisa timeout/fail meski session valid). Konsisten
+    // dengan pattern di lib/pushClient.ts + app/admin/page.tsx.
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { ok: false, reason: 'not_authenticated' }
 
     const { error } = await supabase.from('push_subscriptions').upsert({
-      user_id: user.id,
+      user_id: session.user.id,
       endpoint: json.endpoint,
       p256dh: json.keys.p256dh,
       auth: json.keys.auth,

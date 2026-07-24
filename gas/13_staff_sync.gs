@@ -24,7 +24,8 @@
 //   STAFF KONTER / PICKUP POINT → 'staff'
 //   KOORDINATOR                 → 'koordinator'
 //   ADMIN                       → 'admin'
-//   (DIREKSI belum ada di sheet — perlu ditambah kolom Jabatan di HRIS)
+//   MANAGEMENT                  → 'management'
+//   DIREKSI                     → 'direksi'
 
 const MASTER_STAFF_SHEET_ID =
   PropertiesService.getScriptProperties().getProperty('MASTER_STAFF_SHEET_ID')
@@ -74,7 +75,6 @@ function mapJabatanToRole_(jabatan) {
   if (j === 'MANAGEMENT') return 'management'
   if (j === 'KOORDINATOR') return 'koordinator'
   if (j === 'ADMIN') return 'admin'
-  if (j === 'DIREKSI') return 'direksi'
   if (j === 'STAFF KONTER' || j === 'PICKUP POINT') return 'staff'
   return null // jabatan tidak dikenal → skip baris
 }

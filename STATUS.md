@@ -1,7 +1,63 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-23 (sesi 15 sore — 2 partial kuning tuntas + 3 fix bonus)*
+*Diupdate: 2026-07-24 (sesi 16 — housekeeping pending sesi 15)*
 
-## SESI 15 (23 Juli 2026, sore) — 2 partial kuning + 3 fix bonus
+## SESI 16 (24 Juli 2026) — Housekeeping pending sesi 15
+
+Fokus: tuntaskan pending administratif sesi 15. Verifikasi state
+lebih baru dari yang tercatat di STATUS sebelumnya.
+
+### Yang di-verifikasi
+- ✅ **Sync SSoT sudah tarik 3 staff** (bukan cuma Hendro):
+  - Bobby Rahman (S001 → `staff_id=1`, **direksi**, branch_id=T1) — dari
+    "Head Office", `source=ssot_master_staff`
+  - Hendro (S001, staff, branch_id NULL)
+  - Henry (S0012, koordinator, branch_id NULL)
+  - Confirm sesi 14 pagi update `RAOS_ALLOWED_BRANCHES = ['ID Rifim
+    Airport Soeta', 'Head Office']` sudah aktif → Head Office (direksi/
+    management) ikut ke-sync.
+- ✅ **Password admin sudah diganti** (dari `Menala2026!`) — user report.
+- ✅ **PIN Hendro sudah diisi** di sheet MASTER DATA STAFF kolom H.
+- ✅ **Kolom Jabatan DIREKSI** sudah ada di MASTER DATA STAFF (Bobby).
+- ✅ **Vercel env vars `SUPABASE_SERVICE_ROLE_KEY` TIDAK ADA** di
+  production/preview/development (dicek via `vercel env ls` × 3).
+  Grep juga kode PWA: 0 hit. Bersih.
+- ✅ **`/admin` bisa edit `branch_id` staff SSoT** — trigger
+  `prevent_ssot_staff_column_edit` hanya blok `full_name`/`role`/`phone`/
+  `staff_id` (kolom SSoT). `branch_id`/`is_active` bebas. Confirmed
+  Bobby sudah `branch_id=T1` (via /admin sebelumnya).
+
+### Cleanup kode GAS
+- `gas/13_staff_sync.gs` `mapJabatanToRole_()`: hapus duplicate check
+  `if (j === 'DIREKSI') return 'direksi'` (double baris). Fungsi tetap
+  support: DIREKSI/MANAGEMENT/KOORDINATOR/ADMIN/STAFF KONTER/PICKUP POINT.
+- Update komentar header file — hapus `(DIREKSI belum ada di sheet)`
+  yang sudah obsolete.
+- Clasp push: 14 file ter-deploy.
+
+### State akhir sesi 16
+- Migration Supabase: tetap 34 (`raos_034`) — tidak ada migration baru.
+- Vercel: sinkron dengan `7112627` (belum ada commit baru dari sesi ini
+  sampai housekeeping ini di-commit).
+- `user_profiles`: 3 baris `ssot_master_staff` aktif + admin awal
+  (`manual`, tidak muncul di query tadi karena tidak ada di sheet).
+- Constraint `user_profiles.role`: `direksi|admin|management|koordinator|
+  staff` — sinkron dengan mapping GAS.
+
+### Pending sesi 17 (yang masih terbawa)
+- [ ] Set `branch_id` **Hendro** (T1/T2/T3) via /admin — masih NULL
+- [ ] Set `branch_id` **Henry** (T1/T2/T3) via /admin — masih NULL
+- [ ] User re-subscribe push di HP (Bobby subscription lama expired)
+- [ ] Aktifkan **Leaked Password Protection** di Supabase Auth Settings
+  (UI-only, 1 klik — tidak bisa dari SQL/MCP)
+- [ ] Hard-block scan/absensi di luar radius — butuh keputusan A/B/C
+- [ ] KPI pipeline REFACTOR BESAR (`kpi_targets: 0`)
+- [ ] Toggle Suara/Getaran (0.5 sesi), Bahasa i18n, Ukuran Teks,
+  Bantuan/FAQ
+- [ ] Offline mode penuh (IndexedDB queue), aktifasi `logActivity()`
+
+---
+
+## SESI 15 (23 Juli 2026, sore) — 2 partial kuning tuntas + 3 fix bonus
 
 Fokus: tuntas #7 Toggle jenis notif granular + #6 Dark mode dari
 audit sesi 14 pagi. Ketemu 3 bug tambahan saat verifikasi user.

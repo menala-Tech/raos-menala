@@ -8,3 +8,6 @@ Thumbs.db
 dist/
 .vercel/
 *.tsbuildinfo
+
+.vercel
+.env*

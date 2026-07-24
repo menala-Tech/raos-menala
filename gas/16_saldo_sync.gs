@@ -313,12 +313,26 @@ function reminderSaldoBelumDiisi() {
         `Mohon segera diisi di AIST, lalu centang "Sudah Diisi" di sheet.\n\n` +
         `-----------------------\nPT Rifim International Gemilang`
 
-      // Cari room "Pengisian Saldo" cabang (name ILIKE + branch_id match)
+      // Cari room "Pengisian Saldo" cabang — 3-tier fallback:
+      // 1. Room dengan branch_id = cabang saat ini (mis. Batam Airport)
+      // 2. Room dengan branch_id = parent cabang (mis. T1/T2/T3 → parent Soeta)
+      // 3. Room global (branch_id NULL)
       const rooms = callSupabase(
         `chat_rooms?is_active=eq.true&or=(name.ilike.*pengisian%20saldo*,name.ilike.*isi%20saldo*)&branch_id=eq.${g.branch.id}&select=id`
       ) || []
       let roomId = rooms[0]?.id
-      // Fallback ke room global "Pengisian Saldo"
+      // Fallback tier 2: parent branch
+      if (!roomId) {
+        const parentBranch = callSupabase(`branches?id=eq.${g.branch.id}&select=parent_branch_id`) || []
+        const parentId = parentBranch[0]?.parent_branch_id
+        if (parentId) {
+          const parentRooms = callSupabase(
+            `chat_rooms?is_active=eq.true&or=(name.ilike.*pengisian%20saldo*,name.ilike.*isi%20saldo*)&branch_id=eq.${parentId}&select=id`
+          ) || []
+          roomId = parentRooms[0]?.id
+        }
+      }
+      // Fallback tier 3: global room
       if (!roomId) {
         const globalRooms = callSupabase(
           `chat_rooms?is_active=eq.true&or=(name.ilike.*pengisian%20saldo*,name.ilike.*isi%20saldo*)&branch_id=is.null&select=id`
@@ -326,8 +340,10 @@ function reminderSaldoBelumDiisi() {
         roomId = globalRooms[0]?.id
       }
       if (!roomId) {
-        logSistem('warning', 'reminderSaldoBelumDiisi', 'warning',
-          `Room "Pengisian Saldo" tidak ditemukan untuk ${g.branch.name}`)
+        // Downgrade warning ke info — room belum di-setup untuk cabang ini
+        // adalah kondisi expected (admin belum bikin), bukan error kritis
+        logSistem('info', 'reminderSaldoBelumDiisi', 'skipped',
+          `Room "Pengisian Saldo" belum di-setup untuk ${g.branch.name} — skip reminder (buat room di /admin bulk-create)`)
         return
       }
 

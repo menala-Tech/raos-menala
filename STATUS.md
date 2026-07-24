@@ -118,11 +118,27 @@ multi-PWA — sync semua staff + driver.
   * Driver: `?role=driver`
 
 ### Pending sesi 19
-- P5 integrasi rifim-os (PWA pusat) — perlu baca `C:\Projects\menala\rifim-os\`
-- P6 Riwayat per role scope (1/7/30 hari) sudah ada di `/riwayat`, cukup enhance
-- P7 test end-to-end di HP: install per variant, cek ikon, test role gating
-- KPI Engine multi-cabang run untuk verify DASHBOARD STAFF 15 kolom
-- Storage Drive subfolder per cabang (poin 22b roadmap)
+- **P5 integrasi rifim-os** (PWA pusat) — baca `C:\Projects\menala\rifim-os\`,
+  RAOS jadi modul di rifim-os dashboard direksi (deep link + shared auth)
+- **P6 Riwayat per role** — enhance `/riwayat` filter scope (staff=own,
+  koord=cabang, admin=all) dengan 1/7/30 hari (sudah ada, tinggal polish)
+- **P7 test end-to-end di HP**:
+  - Install 5 variant PWA: staff (`raos-menala.vercel.app`), koord/mgmt/
+    direksi/driver (`?role=<variant>`) → verify icon home screen berbeda
+  - Test role gating: login staff → coba akses `/validasi-saldo` → redirect
+  - Test error boundary: trigger runtime error → fallback card muncul
+- **KPI Engine multi-cabang run** — user setup MASTER TARGET 9 cabang lalu
+  jalankan menu ▶️ Update KPI Bulan Ini → verify DASHBOARD STAFF 15 kolom
+- **Storage Drive subfolder per cabang** (poin 22b roadmap) — folder
+  induk `136ItduoAa_abdiYpOSJS1G3X7ti0YUrU` split per cabang
+- **User run manual sekali** (untuk populate data):
+  - 🛠️ RAOS System → 👥 Staff → 🔄 Sync Staff (untuk pull ~4 staff yg belum)
+  - 🚗 Driver → 🔄 Sync Driver Eksternal (belum pernah dijalankan)
+  - ⚙️ Sistem → Setup Semua Trigger (interval baru: staff 6h, driver 10m,
+    queue sheet 15m)
+- **User install PWA per role** di HP untuk verify variant icon
+- Bonus: baca hasil advisor Supabase — apakah 15+ warning SECURITY DEFINER
+  hilang setelah `raos_046` lockdown
 
 ---
 

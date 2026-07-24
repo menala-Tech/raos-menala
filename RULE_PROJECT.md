@@ -16,6 +16,16 @@ Update terakhir: **2026-07-23 (akhir sesi 15 sore — filter kategori push + fix
 Referensi lengkap: `C:\Projects\menala\SSOT_DATA_SOURCES.md`. Ringkasan
 untuk RAOS:
 
+### 1.0 Cakupan RAOS = HANYA cabang Soeta
+
+RIFIM punya 9 cabang aktif (Batam, Jambi, Balikpapan, Manado, Pekanbaru,
+Makassar, **Soeta** [T1/T2/T3], Batam non-airport, Jambi Luar). RAOS
+project = **HANYA cabang Soeta**, khusus **Order (jumlah scan valid)**.
+Cabang lain + Pengisian Saldo (Rp) di-handle project HRIS terpisah
+(`1sb8MznaH1GtbsR02zLhwML8Q_rOji2Ow6XjfNSJ3otOpwXmbG_D9wTbR`).
+
+Sesi berikutnya JANGAN campur data cabang lain ke sheet/DB RAOS.
+
 ### 1.1 Staff — MASTER DATA STAFF
 - Spreadsheet: `1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw`, tab
   **"MASTER DATA STAFF"**.

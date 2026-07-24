@@ -1,6 +1,27 @@
 # KPI Port Plan — RAOS Soeta
 
-*Draft: 2026-07-24 (sesi 16). Blueprint untuk implementasi sesi 17.*
+*Draft: 2026-07-24 (sesi 16). Implementasi landed di gas/14_kpi_config.gs
++ gas/15_kpi_engine.gs. Konteks target Order updated akhir sesi 16.*
+
+## Konteks target — RAOS Soeta ≠ cabang lain
+
+RIFIM punya 9 cabang aktif:
+1. ID Rifim Airport Batam
+2. ID Rifim Airport Jambi
+3. ID Rifim Airport Balikpapan
+4. ID Rifim Airport Manado
+5. ID Rifim Airport Pekanbaru
+6. ID Rifim Airport Makassar
+7. **ID Rifim Airport Soeta** — sub T1/T2/T3 — **KHUSUS ORDER**
+8. ID Rifim Batam
+9. ID Rifim Jambi Luar
+
+Target Pilar 1 ada 2 jenis:
+- **Order** (jumlah scan valid) → RAOS Soeta pakai ini
+- **Saldo** (nominal Rp) → 8 cabang lain, project HRIS terpisah
+
+RAOS = **hanya cabang Soeta**. Cabang lain + Pengisian Saldo di-handle
+oleh project HRIS (`1sb8MznaH1GtbsR02zLhwML8Q_rOji2Ow6XjfNSJ3otOpwXmbG_D9wTbR`).
 
 ## Konteks
 
@@ -22,27 +43,26 @@ TotalKPI = (Pilar1/50) × (Pilar2/30) × (Pilar3/20) × 100
 
 Perkalian murni → satu pilar 0 = Total 0.
 
-### Pilar 1 — Realisasi Operasional (max 50)
+### Pilar 1 — Order / Scan Valid (max 50)
 
-**HRIS**: Target Saldo. **RAOS**: **kombinasi scan_orders + attendance**
-(user confirm sesi 16).
+**HRIS**: Target Saldo Rp. **RAOS Soeta**: **jumlah scan_orders validated**
+(RAOS Soeta khusus Order, bukan Rp).
 
 Formula:
 ```
-Realisasi = SUM(scan_orders WHERE staff_id=X AND scanned_at IN periode
-                 AND status='validated') × BOBOT_SCAN
-          + SUM(raos_attendance WHERE staff_id=X AND date IN periode
-                 AND status IN ('hadir','terlambat'))   × BOBOT_HARI
+Realisasi = COUNT(scan_orders WHERE staff_id=X AND scanned_at IN periode
+                    AND status='validated')
+
+TargetStaff = TARGET_ORDER_SOETA / Jumlah Staff Aktif × Bobot Jabatan
+   KOORDINATOR 1.20 (Henry), STAFF 1.00 (Hendro), ADMIN 1.00
 
 Persen  = Realisasi / TargetStaff
 Nilai   = MIN(round(persen × 50), 50)
 ```
 
-Konstanta yang perlu ditetapkan Anda sebelum implementasi:
-- `BOBOT_SCAN` (harga per scan validated, mis. Rp 5.000)
-- `BOBOT_HARI` (bobot hari hadir, mis. Rp 100.000)
-- `TARGET_STAFF` derive dari `TARGET CABANG SOETA / 3 orang aktif × bobot_jabatan`
-  - KOORDINATOR 1.20 (Henry), STAFF 1.00 (Hendro, dst), ADMIN 1.00
+Konstanta yang perlu ditetapkan user di sheet:
+- **TARGET ORDER SOETA** (jumlah scan valid bulan berjalan, mis. 3000)
+  → set di tab MASTER TARGET kolom B
 
 ### Pilar 2 — Pembinaan Driver (max 30)
 
@@ -100,7 +120,7 @@ Spreadsheet: `1eYS2mM3Sy...` (spreadsheet RAOS).
 | Kolom | Isi |
 |---|---|
 | A: Cabang | "ID Rifim Airport Soeta" |
-| B: Target Cabang | mis. Rp 100.000.000 (target realisasi bulan) |
+| B: Target Order (Scan Valid) | mis. 3000 (jumlah scan validated bulan) |
 | C: Bulan Aktif | mis. "2026-07" |
 
 ### Tab baru: `DASHBOARD STAFF`
@@ -145,21 +165,14 @@ Atau tetap fetch on-demand dari sheet SSOT (lebih fresh, sedikit slower).
 Rekomendasi: tambah kolom `salary` di DB — sinkron dengan kolom SSoT
 lain (name/role/phone/staff_id).
 
-## Blocker sebelum mulai koding
+## Setup yang perlu user lakukan
 
-Anda perlu tetapkan:
-1. **`BOBOT_SCAN`** (harga per scan validated, Rp) — atau formula lain
-   untuk konversi scan → realisasi
-2. **`BOBOT_HARI`** (bobot Rp per hari hadir) — atau skip (Pilar 1 murni
-   dari scan saja?)
-3. **`TARGET CABANG SOETA`** bulan ini (nominal Rp)
-4. **Threshold `AKTIF_TINGGI`** untuk driver lama aktif (default HRIS: 8
-   isi saldo/bulan; untuk RAOS mungkin: 8 scan/bulan?)
-5. Isi awal `RAOS_KPI_MANUAL` sheet untuk 3 staff Soeta bulan berjalan
-   (Briefing/Edukasi/Problem Solving/Pelayanan/Kerapian/Pelanggaran)
-
-Setelah 1-4 ditetapkan, sesi 17 langsung eksekusi (est. 2-3 sesi kerja
-untuk full pipeline + testing).
+1. Buka spreadsheet RAOS → menu 🛠️ RAOS System → 📊 KPI RAOS → 🆕 Init Sheet
+2. Buka tab **MASTER TARGET** → isi kolom B (jumlah scan valid target
+   bulan berjalan, mis. `3000`)
+3. Buka tab **RAOS_KPI_MANUAL** → hapus baris contoh, isi entri per staff
+4. (opsional) Set Script Property `AKTIF_TINGGI_THRESHOLD` (default 8 scan/bulan)
+5. Jalankan menu ▶️ Update KPI Bulan Ini
 
 ## Referensi cepat
 

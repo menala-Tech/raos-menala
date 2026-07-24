@@ -2,14 +2,16 @@
 // 15_kpi_engine.gs — KPI 3-pilar RAOS Soeta (Supabase-backed)
 // ============================================================
 //
-// Beda dengan HRIS KPIEngine V1 (yang baca sheet ABSENSI/DB_DRIVER lokal),
-// engine ini ambil data langsung dari Supabase RAOS supaya konsisten dengan
-// operasional real-time PWA. Sumber:
-//   Pilar 1 (Realisasi):        scan_orders + raos_attendance
+// RAOS Soeta = cabang "Khusus Order" — target Pilar 1 = jumlah scan
+// validated, bukan Rp saldo. Cabang lain pakai target saldo Rp — itu
+// project HRIS terpisah.
+//
+// Sumber data:
+//   Pilar 1 (Order):            scan_orders (Supabase)
 //   Pilar 2 (Pembinaan Driver): raos_drivers + scan_orders + sheet RAOS_KPI_MANUAL
 //   Pilar 3 (Disiplin SOP):     raos_attendance + sheet RAOS_KPI_MANUAL
 //
-// Formula final (mengikuti HRIS): TotalKPI = (P1/50)×(P2/30)×(P3/20)×100
+// Formula final: TotalKPI = (P1/50)×(P2/30)×(P3/20)×100
 //   → satu pilar 0 → total 0.
 
 /**
@@ -74,15 +76,14 @@ function kpiGetManualEntries_() {
 }
 
 function kpiPilar1_(staffId, periode, targetStaff, tanggalStart, tanggalEnd) {
-  const MAX = KPI_CONFIG.SALDO.MAX_POIN
-  if (!targetStaff) return { nilai: 0, realisasi: 0, targetStaff: 0, persen: 0 }
+  const MAX = KPI_CONFIG.ORDER.MAX_POIN
+  if (!targetStaff) return { nilai: 0, realisasi: 0, targetStaff: 0, persen: 0, scanCount: 0 }
 
+  // Realisasi = jumlah scan_orders validated periode ini untuk staff ini.
   const scanCount = kpiCountScans_(staffId, tanggalStart, tanggalEnd)
-  const hariHadir = kpiCountHariHadir_(staffId, tanggalStart, tanggalEnd)
-  const realisasi = scanCount * KPI_CONFIG.BOBOT_SCAN + hariHadir * KPI_CONFIG.BOBOT_HARI
-  const persen = realisasi / targetStaff
+  const persen = scanCount / targetStaff
   const nilai = Math.min(Math.round(persen * MAX * 100) / 100, MAX)
-  return { nilai, realisasi, targetStaff, persen: Math.round(persen * 10000) / 100, scanCount, hariHadir }
+  return { nilai, realisasi: scanCount, targetStaff, persen: Math.round(persen * 10000) / 100, scanCount }
 }
 
 function kpiPilar2_(staffId, periode, tanggalStart, tanggalEnd, manual) {
@@ -181,8 +182,8 @@ function updateAllKpiRAOS() {
 
   if (!targetCabang) {
     logSistem('warning', 'updateAllKpiRAOS', 'skipped',
-      `Target Cabang Soeta = 0 di sheet MASTER TARGET. Set nominal Rp target dulu.`)
-    try { SpreadsheetApp.getUi().alert('⚠️ Set nilai "Target Cabang" untuk Soeta di sheet MASTER TARGET dulu.') } catch(e){}
+      `Target Order Soeta = 0 di sheet MASTER TARGET. Set jumlah target scan valid dulu.`)
+    try { SpreadsheetApp.getUi().alert('⚠️ Set nilai "Target Order (Scan Valid)" untuk Soeta di sheet MASTER TARGET dulu.') } catch(e){}
     return
   }
 
@@ -207,7 +208,7 @@ function updateAllKpiRAOS() {
     const p3 = kpiPilar3_(staff.id, periode, start, end, manual)
 
     const kpiScore = Math.round(
-      (p1.nilai / KPI_CONFIG.SALDO.MAX_POIN) *
+      (p1.nilai / KPI_CONFIG.ORDER.MAX_POIN) *
       (p2.nilai / KPI_CONFIG.DRIVER.MAX_POIN) *
       (p3.nilai / KPI_CONFIG.SOP.MAX_POIN) *
       100 * 100
@@ -249,19 +250,18 @@ function kpiWriteDashboard_(results, targetCabang, jumlahStaff, periode) {
   if (!sh) sh = ss.insertSheet(KPI_CONFIG.SHEET.DASHBOARD_STAFF)
   sh.clear()
 
-  const header = ['Nama', 'Role', 'Target', 'Realisasi', '%', 'KPI', 'Grade',
-    'Scan', 'Hari Hadir', 'Hari Alpha', 'P1 (Realisasi)', 'P2 (Driver)', 'P3 (SOP)', 'Periode']
+  const header = ['Nama', 'Role', 'Target Order', 'Realisasi (Scan Valid)', '%', 'KPI', 'Grade',
+    'Hari Hadir', 'Hari Alpha', 'P1 (Order)', 'P2 (Driver)', 'P3 (SOP)', 'Periode']
   sh.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold').setBackground('#F5A623').setFontColor('#000')
 
   const rows = results.map(r => [
     r.staff.full_name,
     r.staff.role,
-    r.targetStaff,
-    r.p1.realisasi,
+    Math.round(r.targetStaff * 100) / 100,
+    r.p1.scanCount,
     (r.p1.persen ?? 0),
     r.kpiScore,
     r.grade,
-    r.p1.scanCount,
     r.p3.hariHadir,
     r.p3.hariAlpha,
     r.p1.nilai,
@@ -269,9 +269,11 @@ function kpiWriteDashboard_(results, targetCabang, jumlahStaff, periode) {
     r.p3.nilai,
     periode,
   ])
-  if (rows.length > 0) sh.getRange(2, 1, rows.length, header.length).setValues(rows)
-  sh.getRange(2, 3, rows.length, 2).setNumberFormat('"Rp"#,##0')
-  sh.getRange(2, 5, rows.length, 1).setNumberFormat('0.0"%"')
+  if (rows.length > 0) {
+    sh.getRange(2, 1, rows.length, header.length).setValues(rows)
+    sh.getRange(2, 3, rows.length, 2).setNumberFormat('#,##0.##" scan"')
+    sh.getRange(2, 5, rows.length, 1).setNumberFormat('0.0"%"')
+  }
   sh.autoResizeColumns(1, header.length)
 }
 
@@ -289,11 +291,15 @@ function initKpiSheetsRAOS() {
   let sh = ss.getSheetByName(KPI_CONFIG.SHEET.MASTER_TARGET)
   if (!sh) {
     sh = ss.insertSheet(KPI_CONFIG.SHEET.MASTER_TARGET)
-    sh.getRange(1, 1, 1, 3).setValues([['Cabang', 'Target Cabang (Rp)', 'Bulan Aktif']]).setFontWeight('bold').setBackground('#F5A623')
+    sh.getRange(1, 1, 1, 3).setValues([['Cabang', 'Target Order (Scan Valid)', 'Bulan Aktif']]).setFontWeight('bold').setBackground('#F5A623')
     sh.getRange(2, 1, 1, 3).setValues([[KPI_CONFIG.CABANG_NAME, 0, kpiCurrentPeriode_()]])
-    sh.getRange(2, 2).setNumberFormat('"Rp"#,##0')
+    sh.getRange(2, 2).setNumberFormat('#,##0" scan"')
     created.push(KPI_CONFIG.SHEET.MASTER_TARGET)
   } else {
+    // Existing sheet — refresh header supaya konsisten kalau user Init ulang
+    // setelah refactor Rp → jumlah scan.
+    sh.getRange(1, 1, 1, 3).setValues([['Cabang', 'Target Order (Scan Valid)', 'Bulan Aktif']]).setFontWeight('bold').setBackground('#F5A623')
+    sh.getRange(2, 2).setNumberFormat('#,##0" scan"')
     existed.push(KPI_CONFIG.SHEET.MASTER_TARGET)
   }
 

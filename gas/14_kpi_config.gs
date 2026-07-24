@@ -1,16 +1,19 @@
 // ============================================================
-// 14_kpi_config.gs — KPI Config RAOS (adopsi dari HRIS KPIEngine V1)
+// 14_kpi_config.gs — KPI Config RAOS (Cabang Soeta = "Khusus Order")
 // ============================================================
 //
-// Konstanta bisa di-override via Script Property (biar tidak perlu redeploy):
-//   BOBOT_SCAN            — Rp per scan validated (default 5000)
-//   BOBOT_HARI            — Rp per hari hadir (default 100000)
+// PENTING (sesi 16 lanjutan, 24 Juli 2026):
+// RAOS Soeta berbeda dari cabang lain — target Pilar 1 = **jumlah Scan
+// Order valid**, bukan nominal Rp saldo. Cabang lain (Batam, Jambi,
+// Balikpapan, dst) pakai target Rp saldo — itu di-handle project HRIS
+// terpisah, bukan di RAOS.
+//
+// Konstanta bisa di-override via Script Property:
 //   AKTIF_TINGGI_THRESHOLD — jumlah scan/bulan supaya driver dianggap aktif tinggi (default 8)
 //   RAOS_KPI_PERIODE      — override periode 'yyyy-MM' (default: bulan berjalan)
 //
-// Target Cabang Soeta di-set di sheet spreadsheet RAOS: tab MASTER TARGET,
-// kolom Target Cabang. Bukan Script Property — supaya bisa diubah tanpa
-// akses developer.
+// Target Cabang Soeta di-set di sheet: tab MASTER TARGET kolom B
+// (Target Order = angka jumlah scan valid, bukan Rp).
 
 const KPI_CONFIG = {
   // ---- Sheet di spreadsheet RAOS (di file SPREADSHEET_ID) ----
@@ -22,13 +25,7 @@ const KPI_CONFIG = {
 
   CABANG_NAME: 'ID Rifim Airport Soeta', // literal match kolom Cabang di MASTER TARGET
 
-  // ---- Bobot Pilar 1 (Realisasi Operasional) ----
-  // Rp konversi: 1 scan validated = BOBOT_SCAN, 1 hari hadir = BOBOT_HARI.
-  // Realisasi (Rp) = scanCount × BOBOT_SCAN + hariHadir × BOBOT_HARI.
-  BOBOT_SCAN: parseFloat(PropertiesService.getScriptProperties().getProperty('BOBOT_SCAN')) || 5000,
-  BOBOT_HARI: parseFloat(PropertiesService.getScriptProperties().getProperty('BOBOT_HARI')) || 100000,
-
-  // ---- Bobot Jabatan (Target Staff = Target Cabang/Jumlah Staff × Bobot Jabatan) ----
+  // ---- Bobot Jabatan (Target Staff = Target Order Cabang/Jumlah Staff × Bobot Jabatan) ----
   BOBOT_JABATAN: {
     'KOORDINATOR': 1.20,
     'STAFF':       1.00,
@@ -38,8 +35,9 @@ const KPI_CONFIG = {
   },
   BOBOT_JABATAN_DEFAULT: 1.00,
 
-  // ---- Pilar 1 — Realisasi Operasional (max 50 poin) ----
-  SALDO: {
+  // ---- Pilar 1 — Order / Scan Valid (max 50 poin) ----
+  // Bukan Rp saldo — RAOS Soeta khusus track jumlah scan validated saja.
+  ORDER: {
     MAX_POIN: 50,
     BONUS_OVER_TARGET: [
       { minPersen: 1.25, bonus: 5 },

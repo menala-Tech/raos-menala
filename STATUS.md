@@ -88,12 +88,14 @@ Batch 3 landed sesi 16 (ekstensi):
 
 Terbawa ke sesi 17:
 - [ ] User klik ON toggle Suara/Getaran di HP untuk test SW respect flag
-- [ ] User set 5 konstanta KPI:
-  1. Buka spreadsheet RAOS → menu 🛠️ RAOS System → 📊 KPI RAOS → Init Sheet
-  2. Buka tab MASTER TARGET → isi kolom "Target Cabang (Rp)" untuk Soeta
+- [ ] User set target KPI (refactor akhir sesi 16 — Soeta khusus Order):
+  1. Buka spreadsheet RAOS → 🛠️ RAOS System → 📊 KPI RAOS → 🆕 Init Sheet
+     (jalankan ulang meski tab sudah ada — header MASTER TARGET otomatis
+     ke-refresh dari "Target Cabang (Rp)" ke "Target Order (Scan Valid)")
+  2. Buka tab MASTER TARGET → isi kolom B **jumlah scan valid target**
+     (bukan Rp), mis. `3000`
   3. Buka tab RAOS_KPI_MANUAL → isi entri manual per staff/periode
-  4. Set Script Property `BOBOT_SCAN`, `BOBOT_HARI` (opsional, default
-     5000 / 100000), `AKTIF_TINGGI_THRESHOLD` (default 8)
+  4. (opsional) Set Script Property `AKTIF_TINGGI_THRESHOLD` (default 8)
   5. Jalankan menu ▶️ Update KPI Bulan Ini
 - [ ] Test end-to-end di HP: airplane mode → absen masuk + scan + chat →
   back online → verifikasi sync drain semua

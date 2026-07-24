@@ -14,10 +14,14 @@ import { supabase } from './supabase'
  */
 export async function logActivity(action: string, detail?: string) {
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    // Pakai getSession() bukan getUser() — getSession baca localStorage
+    // langsung (fast, offline-friendly). getUser hit Auth server yang bisa
+    // timeout/fail meski session valid → activity_logs jarang terisi.
+    // Pattern sama seperti lib/push.ts (fix sesi 15) dan lib/pushClient.ts.
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
     const { error } = await supabase.from('activity_logs').insert({
-      user_id: user.id,
+      user_id: session.user.id,
       action,
       detail: detail ?? null,
     })

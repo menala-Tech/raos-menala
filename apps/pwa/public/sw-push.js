@@ -10,6 +10,11 @@ self.addEventListener('push', function (event) {
   let body = 'Notifikasi baru'
   let url = '/'
   let tag = 'raos-notif'
+  // silent + vibrate di-drive dari server berdasarkan user pref
+  // (notification_prefs.suara / notification_prefs.getaran).
+  // Default: suara ON (silent=false), getar ON (vibrate pattern default).
+  let silent = false
+  let vibrate = [200, 100, 200, 100, 500]
 
   try {
     const d = event.data ? event.data.json() : {}
@@ -17,6 +22,10 @@ self.addEventListener('push', function (event) {
     if (d.body) body = d.body
     if (d.url) url = d.url
     if (d.tag) tag = d.tag
+    if (typeof d.silent === 'boolean') silent = d.silent
+    // vibrate: false → matikan (empty array), true → default, array → custom
+    if (d.vibrate === false) vibrate = []
+    else if (Array.isArray(d.vibrate)) vibrate = d.vibrate
   } catch (e) {
     try { body = event.data ? event.data.text() : body } catch (e2) {}
   }
@@ -27,9 +36,10 @@ self.addEventListener('push', function (event) {
       icon: '/icons/icon-192x192.png',
       badge: '/icons/icon-192x192.png',
       tag: tag,
-      requireInteraction: true,   // Notif tetap di lock screen sampai user tap
-      renotify: true,             // Suara + getar ulang walau tag sama
-      vibrate: [200, 100, 200, 100, 500],
+      requireInteraction: true,
+      renotify: true,
+      silent: silent,
+      vibrate: vibrate,
       data: { url: url },
     })
   )

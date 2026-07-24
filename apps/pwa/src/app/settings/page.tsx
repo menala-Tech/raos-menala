@@ -102,6 +102,8 @@ export default function SettingsPage() {
         const merged: AppPrefs = {
           ...local,
           notifMaster: dbPrefs.master !== false,
+          suara:       dbPrefs.suara   !== false,
+          getaran:     dbPrefs.getaran !== false,
           notifJenis: {
             'Scan Berhasil':        dbPrefs.scan_berhasil        !== false,
             'Scan Pending':         dbPrefs.scan_pending         !== false,
@@ -132,7 +134,11 @@ export default function SettingsPage() {
   // Fire-and-forget: local storage sudah nyimpen dulu, DB dipush async.
   const syncNotifPrefsToDB = useCallback(async (p: AppPrefs) => {
     if (!user) return
-    const dbPrefs: Record<string, boolean> = { master: p.notifMaster }
+    const dbPrefs: Record<string, boolean> = {
+      master: p.notifMaster,
+      suara: p.suara,
+      getaran: p.getaran,
+    }
     for (const [label, on] of Object.entries(p.notifJenis)) {
       const key = LABEL_TO_KEY[label]
       if (key) dbPrefs[key] = on
@@ -148,6 +154,8 @@ export default function SettingsPage() {
       // Kalau notifMaster / notifJenis berubah → sync ke DB (fire-and-forget).
       const notifChanged =
         prev.notifMaster !== next.notifMaster ||
+        prev.suara !== next.suara ||
+        prev.getaran !== next.getaran ||
         JSON.stringify(prev.notifJenis) !== JSON.stringify(next.notifJenis)
       if (notifChanged) { void syncNotifPrefsToDB(next) }
       return next

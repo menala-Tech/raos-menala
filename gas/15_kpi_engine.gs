@@ -12,8 +12,21 @@
 // Formula final (mengikuti HRIS): TotalKPI = (P1/50)×(P2/30)×(P3/20)×100
 //   → satu pilar 0 → total 0.
 
+/**
+ * Ambil spreadsheet RAOS — coba container-bound dulu (menu invocation),
+ * fallback ke Script Property SPREADSHEET_ID (cron trigger context tidak
+ * punya active spreadsheet).
+ */
+function kpiGetSpreadsheet_() {
+  const active = SpreadsheetApp.getActiveSpreadsheet()
+  if (active) return active
+  const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')
+  if (!id) throw new Error('SPREADSHEET_ID Script Property belum diset (untuk cron context tanpa active spreadsheet)')
+  return SpreadsheetApp.openById(id)
+}
+
 function kpiGetTargetCabang_() {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KPI_CONFIG.SHEET.MASTER_TARGET)
+  const sh = kpiGetSpreadsheet_().getSheetByName(KPI_CONFIG.SHEET.MASTER_TARGET)
   if (!sh) return null
   const rows = sh.getDataRange().getValues().slice(1)
   const row = rows.find(r => String(r[0]).trim() === KPI_CONFIG.CABANG_NAME)
@@ -30,7 +43,7 @@ function kpiGetActiveStaff_() {
 }
 
 function kpiGetManualEntries_() {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(KPI_CONFIG.SHEET.RAOS_KPI_MANUAL)
+  const sh = kpiGetSpreadsheet_().getSheetByName(KPI_CONFIG.SHEET.RAOS_KPI_MANUAL)
   if (!sh) return {}
   const rows = sh.getDataRange().getValues()
   const header = rows[0].map(h => String(h).trim().toLowerCase())
@@ -231,7 +244,7 @@ function updateAllKpiRAOS() {
 }
 
 function kpiWriteDashboard_(results, targetCabang, jumlahStaff, periode) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const ss = kpiGetSpreadsheet_()
   let sh = ss.getSheetByName(KPI_CONFIG.SHEET.DASHBOARD_STAFF)
   if (!sh) sh = ss.insertSheet(KPI_CONFIG.SHEET.DASHBOARD_STAFF)
   sh.clear()
@@ -268,7 +281,7 @@ function kpiWriteDashboard_(results, targetCabang, jumlahStaff, periode) {
  *   RAOS_KPI_MANUAL.
  */
 function initKpiSheetsRAOS() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const ss = kpiGetSpreadsheet_()
   const created = []
   const existed = []
 

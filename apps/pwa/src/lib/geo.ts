@@ -30,12 +30,18 @@ export const GEOFENCE_TOLERANCE_METERS = 50
  * Role staff dihard-block kalau di luar (radius + 50m tolerance).
  * Direksi/koordinator/management/admin bypass hard-block, tapi
  * `is_location_valid` tetap direkam untuk audit.
+ *
+ * Staff dengan `is_geofence_exempt = true` (mis. Gusril, Hadityawarman S.E.
+ * per sesi 17 rifim-isi-saldo) juga bypass — mereka boleh absen/scan/
+ * isi saldo dari mana saja.
  */
 export function shouldBlockByGeofence(
   role: string | null | undefined,
   geo: GeofenceResult | null,
-  locationStatus: 'checking' | 'valid' | 'invalid' | 'unavailable' | 'done'
+  locationStatus: 'checking' | 'valid' | 'invalid' | 'unavailable' | 'done',
+  isExempt?: boolean | null,
 ): boolean {
+  if (isExempt) return false
   if (role !== 'staff') return false
   if (locationStatus === 'checking') return true
   if (locationStatus === 'unavailable') return true

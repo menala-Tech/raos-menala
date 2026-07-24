@@ -32,6 +32,19 @@ const MASTER_STAFF_SHEET_ID =
   || '1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw'
 
 const MASTER_STAFF_TAB_NAME = 'MASTER DATA STAFF'
+
+// Staff dikecualikan TOTAL dari absensi + geofence Isi Saldo.
+// Adopsi dari rifim-isi-saldo ABSEN_STAFF_DIKECUALIKAN. Match by full_name
+// (case-insensitive, prefix). Auto-set is_geofence_exempt=true saat sync.
+const GEOFENCE_EXEMPT_STAFF_PATTERNS = [
+  /^gusril/i,
+  /^hadityawarman/i,
+]
+
+function isStaffGeofenceExempt_(namaLengkap) {
+  const s = String(namaLengkap || '').trim()
+  return GEOFENCE_EXEMPT_STAFF_PATTERNS.some(re => re.test(s))
+}
 // Multi-cabang (P1.4, sesi 16 lanjutan) — RAOS sekarang menampung 9 cabang
 // aktif RIFIM + Head Office. Semua staff RIFIM di-sync ke user_profiles;
 // scope akses per cabang di-enforce oleh RLS `is_branch_in_scope()` (mig.
@@ -202,6 +215,7 @@ function syncStaffFromSSOT() {
             source: 'ssot_master_staff',
             ssot_synced_at: now,
             is_active: true,
+            is_geofence_exempt: isStaffGeofenceExempt_(nama),
           }
           // Hanya set branch_id kalau belum ada value spesifik (T1/T2/T3
           // yang di-set admin manual di /admin tidak boleh ditimpa cabang
@@ -224,6 +238,7 @@ function syncStaffFromSSOT() {
             source: 'ssot_master_staff',
             ssot_synced_at: now,
             is_active: true,
+            is_geofence_exempt: isStaffGeofenceExempt_(nama),
           })
           inserted++
         }

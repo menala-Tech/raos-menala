@@ -89,7 +89,7 @@ export default function AbsensiPage() {
 
   async function handleAbsensi(absenType: 'in' | 'out') {
     if (!user) return
-    if (shouldBlockByGeofence(user.role, geofence, locationStatus)) {
+    if (shouldBlockByGeofence(user.role, geofence, locationStatus, (user as any).is_geofence_exempt)) {
       const reason = locationStatus === 'unavailable'
         ? 'GPS tidak terdeteksi. Aktifkan lokasi HP lalu coba lagi.'
         : locationStatus === 'checking'

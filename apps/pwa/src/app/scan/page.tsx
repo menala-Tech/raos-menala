@@ -82,7 +82,7 @@ export default function ScanPage() {
   const handleScan = useCallback(async (barcode: string) => {
     if (!barcode.trim() || !user) return
 
-    if (shouldBlockByGeofence(user.role, geofence, locationStatus)) {
+    if (shouldBlockByGeofence(user.role, geofence, locationStatus, (user as any).is_geofence_exempt)) {
       setScanState('error')
       setLastScan({
         error: locationStatus === 'unavailable'

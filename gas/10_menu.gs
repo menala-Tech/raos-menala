@@ -60,7 +60,8 @@ function onOpen() {
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('⚙️ Sistem')
         .addItem('Setup Semua Trigger', 'setupAllTriggers')
-        .addItem('Init Konfigurasi Sistem', 'initSistemConfig')
+        .addItem('Init/Refresh Konfigurasi Sistem', 'initSistemConfig')
+        .addItem('🗑️ Tandai Sheet Deprecated (TARGET STAFF/DATABASE STAFF/DRIVER)', 'markDeprecatedSheets')
         .addItem('Backup Manual ke Drive', 'backupHarian')
         .addItem('Sync Foto Absensi ke Drive', 'syncSelfiePhotosToGDrive')
         .addItem('Test Koneksi Supabase', 'testSupabaseConnection')
@@ -79,22 +80,34 @@ function initSistemConfig() {
   const sh = getSheet(CONFIG.SHEETS.SISTEM_CONFIG)
   sh.clearContents()
 
+  // Entries multi-cabang + isi saldo + KPI refactor sesi 16-17.
   const configs = [
-    // Header
     ['KEY', 'VALUE', 'KETERANGAN'],
-    // KPI & Keuangan
-    ['KPI KEHADIRAN (%)',   '15',    'Bobot KPI kehadiran dalam perhitungan total'],
-    ['KPI ORDER (%)',       '40',    'Bobot KPI jumlah order'],
-    ['KPI GMV (%)',         '20',    'Bobot KPI total GMV'],
-    ['BONUS ORDER (%)',     '2',     'Persen bonus insentif dari GMV per order'],
-    // Email & Notifikasi
-    ['EMAIL_ADMIN',         'rifiminternationalgemilang@gmail.com', 'Email penerima laporan harian'],
-    // Sistem
-    ['data_retention_days', '30',   'Retensi log activity & sistem (hari)'],
-    ['attendance_tolerance','15',   'Toleransi keterlambatan absensi (menit)'],
-    ['auto_checkout_time',  '23:59','Waktu auto checkout jika staff lupa absen pulang'],
-    ['company_name',        'Menala Internasional Gemilang', 'Nama perusahaan'],
-    ['app_version',         '1.0.0','Versi aplikasi RAOS'],
+    // ── KPI ──
+    ['KPI_PILAR_1_ORDER_MAX',   '50',  'Poin max Pilar 1 mode Order (Soeta)'],
+    ['KPI_PILAR_1_SALDO_MAX',   '50',  'Poin max Pilar 1 mode Saldo (cabang lain)'],
+    ['KPI_PILAR_2_DRIVER_MAX',  '30',  'Poin max Pilar 2 pembinaan driver'],
+    ['KPI_PILAR_3_SOP_MAX',     '20',  'Poin max Pilar 3 disiplin & SOP'],
+    ['KPI_AKTIF_TINGGI_MIN',    '8',   'Threshold scan/bulan driver dianggap aktif tinggi (Pilar 2)'],
+    ['KPI_EXPECTED_WORKDAYS',   '26',  'Ekspektasi hari kerja per bulan (Pilar 3)'],
+    ['KPI_BOBOT_KOORDINATOR',   '1.2', 'Bobot jabatan koordinator target staff'],
+    ['KPI_BOBOT_STAFF',         '1.0', 'Bobot jabatan staff'],
+    // ── Isi Saldo ──
+    ['SALDO_REMINDER_MENIT',    '5',   'Menit sebelum reminder chat "Belum Diisi" dikirim'],
+    ['SALDO_SYNC_MENIT',        '5',   'Interval sync raos_saldo_requests → sheet Form Isi Saldo'],
+    // ── Absensi ──
+    ['ATTENDANCE_TOLERANCE_MIN','15',  'Toleransi keterlambatan absensi (menit)'],
+    ['GEOFENCE_TOLERANCE_METER','50',  'Toleransi hard-block scan/absen di luar radius (staff only)'],
+    ['AUTO_CHECKOUT_TIME',      '23:59','Waktu auto checkout jika staff lupa absen pulang'],
+    // ── Email & Sistem ──
+    ['EMAIL_ADMIN',             'rifiminternationalgemilang@gmail.com', 'Email penerima laporan harian'],
+    ['DATA_RETENTION_DAYS',     '30',  'Retensi log activity & sistem (hari)'],
+    ['COMPANY_NAME',            'PT. Rifim Internasional Gemilang', 'Nama perusahaan'],
+    ['APP_VERSION',             '2.0.0-multicabang', 'Versi aplikasi RAOS (P1-P3 multi-cabang)'],
+    // ── SSoT sources ──
+    ['SSOT_STAFF_SHEET_ID',     '1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw', 'Spreadsheet MASTER DATA STAFF'],
+    ['SSOT_DRIVER_SHEET_ID',    '1FEZxyHPx_GCQKw92hLSf6QxxkXgZn5R1sRswOYM_Tlc', 'Spreadsheet Database Driver Airport'],
+    ['SUPABASE_URL',            'https://vlievtojpmrbsmzlqswl.supabase.co', 'URL project Supabase RAOS'],
   ]
 
   sh.getRange(1, 1, configs.length, 3).setValues(configs)
@@ -108,6 +121,44 @@ function initSistemConfig() {
 
   sh.autoResizeColumns(1, 3)
   SpreadsheetApp.getUi().alert('✅ SISTEM CONFIG berhasil diisi!\n\nEdit nilai di sheet SISTEM CONFIG sesuai kebutuhan operasional.')
+}
+
+/**
+ * Kasih banner "DEPRECATED" di 3 sheet legacy yang sudah tidak dipakai
+ * post-refactor (SSoT staff + driver + KPI DASHBOARD STAFF).
+ * Idempotent — kalau banner sudah ada, tidak duplikat.
+ */
+function markDeprecatedSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const targets = [
+    { name: 'TARGET STAFF',    reason: 'Digantikan sheet DASHBOARD STAFF (dari 📊 KPI RAOS)' },
+    { name: 'DATABASE STAFF',  reason: 'Digantikan SSoT MASTER DATA STAFF (sync otomatis)' },
+    { name: 'DATABASE DRIVER', reason: 'Digantikan SSoT Database Driver Airport (sync otomatis)' },
+  ]
+  const marked = []
+  const skipped = []
+  targets.forEach(t => {
+    const sh = ss.getSheetByName(t.name)
+    if (!sh) { skipped.push(t.name + ' (tidak ada)'); return }
+    // Cek apakah baris 1 sudah punya banner
+    const firstCell = String(sh.getRange(1, 1).getValue() || '')
+    if (firstCell.indexOf('DEPRECATED') === 0) {
+      skipped.push(t.name + ' (sudah ada banner)')
+      return
+    }
+    sh.insertRowBefore(1)
+    sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 5)).merge()
+    sh.getRange(1, 1).setValue(`⚠️ DEPRECATED — ${t.reason}. Sheet ini disimpan hanya untuk histori, JANGAN diedit manual.`)
+      .setBackground('#DC2626').setFontColor('#fff').setFontWeight('bold')
+      .setHorizontalAlignment('center').setVerticalAlignment('middle')
+    sh.setRowHeight(1, 40)
+    marked.push(t.name)
+  })
+  SpreadsheetApp.getUi().alert(
+    '✅ Banner deprecated diapply\n\n' +
+    (marked.length ? 'Ditandai: ' + marked.join(', ') + '\n' : '') +
+    (skipped.length ? 'Dilewati:  ' + skipped.join(', ') : '')
+  )
 }
 
 function testSupabaseConnection() {

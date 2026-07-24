@@ -237,6 +237,19 @@ Yang selesai sebelum Phase 1 dimulai:
   (auto-create kalau belum ada), patch synced timestamp. Trigger 15 menit
   ditambah `09_trigger.gs`. Menu 💰 Isi Saldo → 🔄 Sync ke Sheet.
 
+**Refinement lanjutan sesi Isi Saldo (7 poin user)**:
+- P2.11: Docs rule sinkronisasi spreadsheet + wajib MCP masuk di
+  RULE_PROJECT §1.-1, §1.-2, CLAUDE.md aturan 0/0b, SESSION_PROMPT
+  aturan 0/0b
+- P2.12: MASTER TARGET seed 9 cabang dengan 2 kolom (Target Order
+  scan valid + Target Saldo Rp). Engine dual-mode: cabang Soeta pakai
+  Order, cabang lain pakai Saldo (dari `raos_saldo_requests` yang
+  `is_processed=true`). Staff group by cabang → Target Staff =
+  Target Cabang / jumlah staff cabang × bobot jabatan. DASHBOARD STAFF
+  header extend jadi 15 kolom (tambah Cabang + Mode Target)
+- P2.13: Menu `initSheetFormIsiSaldo` bikin tab Form Isi Saldo
+  idempotent
+
 **Next**: P3.1 — baca `C:\Projects\menala\radms-driver\` codebase untuk
 pahami model antrian driver + panggilan staff. Adaptasi jadi
 `raos_driver_queue` + chat command `/antri` (driver) + `/panggil <nomor>`
@@ -256,6 +269,14 @@ pahami model antrian driver + panggilan staff. Adaptasi jadi
 
 ## 📌 Aturan Wajib dari Roadmap
 
+0. **[BARU] Setiap upgrade WAJIB sinkron ke spreadsheet RAOS**
+   `1eYS2mM3Sy...`. Antar sheet (DASHBOARD STAFF, MASTER TARGET, Form
+   Isi Saldo, LOG SISTEM, DATABASE ORDER, SISTEM CONFIG) harus
+   terintegrasi. Tab baru auto-create via menu GAS 🛠️ RAOS System,
+   jangan suruh user bikin manual.
+0b. **[BARU] Wajib gunakan semua MCP** yang tersedia (Supabase, Vercel,
+   GitHub, Context7, dsb). Kalau operasi bisa dilakukan via MCP, JANGAN
+   fallback manual shell/copy-paste.
 1. **Poin 22**: SEMUA sync ke spreadsheet RAOS `1eYS2mM3Sy...` saja.
    Jangan bikin/pakai spreadsheet lain untuk data RAOS.
 2. **Poin 22b**: Storage terpusat di Google Drive folder

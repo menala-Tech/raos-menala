@@ -16,6 +16,47 @@ Update terakhir: **2026-07-23 (akhir sesi 15 sore — filter kategori push + fix
 Referensi lengkap: `C:\Projects\menala\SSOT_DATA_SOURCES.md`. Ringkasan
 untuk RAOS:
 
+### 1.-1 Sinkronisasi Spreadsheet RAOS — WAJIB tiap upgrade
+
+Spreadsheet RAOS `1eYS2mM3Sy-BNAVGfp8BUHtsZuLiGDetnJeGw-AWk__8` adalah
+**source of truth operasional** — semua data agregat RAOS (aktivitas
+harian, laporan bulanan, KPI, isi saldo, konfigurasi sistem) HARUS
+sinkron ke sini.
+
+**Aturan wajib setiap upgrade (fitur baru, migration, GAS, atau PWA)**:
+1. Cek apakah upgrade menghasilkan/mengubah data yang harusnya nyampak
+   di spreadsheet. Kalau ya, sertakan sheet-side implementation di
+   scope upgrade (JANGAN skip sheet karena "nanti aja").
+2. Kalau butuh tab baru → auto-create via GAS `init*()` function di
+   menu 🛠️ RAOS System, JANGAN suruh user bikin manual.
+3. Antar sheet WAJIB terintegrasi:
+   - `DASHBOARD STAFF` reference `MASTER TARGET` untuk target
+   - `Form Isi Saldo` sinkron dengan `raos_saldo_requests` Supabase
+   - `LOG SISTEM` catat semua exception GAS
+   - `DATABASE ORDER` fill dari hasil scan Supabase
+   - `SISTEM CONFIG` jadi source konfigurasi runtime (bobot KPI, dsb)
+4. Sheet deprecated (tidak dipakai lagi post-refactor) di-hidden atau
+   diberi banner "DEPRECATED — data dari <sumber baru>". Jangan biarkan
+   ambigu.
+5. Push ke GitHub semua perubahan GAS + PWA. Kalau tidak sinkron,
+   sesi berikutnya rusak.
+
+### 1.-2 Wajib pakai semua MCP yang tersedia
+
+Untuk mempercepat + akurasi, sesi Claude Code RAOS **wajib** gunakan
+MCP yang tersedia di environment:
+- **Supabase MCP** (`fe12f95e-...`) — migration, apply_migration,
+  execute_sql, deploy edge function, advisors
+- **Vercel MCP** (`e6d7f9ab-...`) — cek deployment status, env vars
+- **Google Workspace MCP** — spreadsheet read (kalau available)
+- **GitHub MCP** — push files, PR
+- **Sentry MCP** — kalau ada monitoring
+- **Context7** — docs library, framework, SDK terkini
+- Semua MCP lain di ambient context
+
+Kalau butuh operasi yang bisa dilakukan via MCP, JANGAN fallback ke
+manual shell/copy-paste. MCP tools lebih akurat + terkontrol.
+
 ### 1.0 Cakupan RAOS = HANYA cabang Soeta
 
 RIFIM punya 9 cabang aktif (Batam, Jambi, Balikpapan, Manado, Pekanbaru,

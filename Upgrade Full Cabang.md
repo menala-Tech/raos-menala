@@ -75,3 +75,26 @@ Nominal per cabang yaitu
 18. di Room Chat Pengisian saldo akan muncul chat Pemberitahuan saldo belum diisi  apabila dalam 5 menit belum diiisi seperti di gambar.
 19. Di halaman Validasi Koordinator ada Jumlah nominal seluruh pengisian saldo di Cabang tersebut yg sudah di isi oleh admin dengan Validasi centang di sheet Form isi saldo
 
+27\. spreadhseet harus dipudate seperti sheet  LOG ACTIVITY,LOG SISTEM,DATABASE ORDER(dari hasil scan),TARGET STAFF (tidak perlu lagi krna ada sheet dashboard staff) ,DATABASE STAFF (tidak Perlu krna Ssot),DATABASE DRIVER (tidak perlu krna udah ssot),SISTEM CONFIG (belum dipudate)
+28. File ssot 
+-. Database Driver Airport> https://docs.google.com/spreadsheets/d/1FEZxyHPx\_GCQKw92hLSf6QxxkXgZn5R1sRswOYM\_Tlc/edit?usp=sharing
+-. Database Driver External > https://docs.google.com/spreadsheets/d/1suoDC-RsWOgTHiLq4max6iIsWe39Ou-RMddRXl5DVJc/edit?usp=sharing
+-. DATABASE STAFF > https://docs.google.com/spreadsheets/d/1fcraq3QHqIaD-13Ebzt6stT9aA6j\_loTXeAtpNX12kw/edit?usp=sharing
+
+Geofencing Bandara : 
+'ID Rifim Airport Batam':      { lat: 1.1229474611566184,   lng: 104.11399999608159,  radius: 1000 },
+
+&#x20; 'ID Rifim Airport Jambi':      { lat: -1.6315198788190148,  lng: 103.6438881064391,   radius: 1000 },
+
+&#x20; 'ID Rifim Airport Balikpapan': { lat: -1.2613140099073543,  lng: 116.89823585376726,  radius: 1000 },
+
+&#x20; 'ID Rifim Airport Manado':     { lat: 1.5432943843910787,   lng: 124.92259315566997,  radius: 1000 },
+
+&#x20; 'ID Rifim Airport Pekanbaru':  { lat: 0.46502090112651967,  lng: 101.44852194619506,  radius: 1000 },
+
+&#x20; 'ID Rifim Batam':      null, // TODO: belum ada koordinat counter
+
+&#x20; 'ID Rifim Jambi Luar': null  // TODO: belum ada koordinat counter
+
+
+

@@ -32,6 +32,7 @@ function onOpen() {
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('💰 Isi Saldo')
+        .addItem('🆕 Init Sheet "Form Isi Saldo"', 'initSheetFormIsiSaldo')
         .addItem('🔄 Sync Pengajuan ke Sheet "Form Isi Saldo"', 'syncSaldoRequestsToSheet')
     )
     .addSubMenu(

@@ -27,21 +27,58 @@ function kpiGetSpreadsheet_() {
   return SpreadsheetApp.openById(id)
 }
 
-function kpiGetTargetCabang_() {
+/**
+ * Ambil target untuk cabang tertentu (slug match kolom A).
+ * Return { order, saldo, mode }:
+ *   mode = 'order' → RAOS Soeta (Pilar 1 = jumlah scan)
+ *   mode = 'saldo' → cabang lain (Pilar 1 = Rp saldo)
+ */
+function kpiGetTargetByCabang_(slug) {
   const sh = kpiGetSpreadsheet_().getSheetByName(KPI_CONFIG.SHEET.MASTER_TARGET)
-  if (!sh) return null
+  if (!sh) return { order: 0, saldo: 0, mode: 'order' }
   const rows = sh.getDataRange().getValues().slice(1)
-  const row = rows.find(r => String(r[0]).trim() === KPI_CONFIG.CABANG_NAME)
-  return row ? Number(row[1]) || 0 : 0
+  const row = rows.find(r => String(r[0]).trim() === slug)
+  if (!row) return { order: 0, saldo: 0, mode: slug === KPI_CONFIG.CABANG_NAME ? 'order' : 'saldo' }
+  const order = Number(row[1]) || 0
+  const saldo = Number(row[2]) || 0
+  // Soeta khusus Order. Cabang lain khusus Saldo.
+  const mode = slug === 'ID Rifim Airport Soeta' ? 'order' : 'saldo'
+  return { order, saldo, mode }
+}
+
+// Backward-compat untuk pemanggil lama (default cabang RAOS = Soeta)
+function kpiGetTargetCabang_() {
+  return kpiGetTargetByCabang_(KPI_CONFIG.CABANG_NAME).order
 }
 
 function kpiGetActiveStaff_() {
-  // Tarik semua staff Soeta yang aktif — role selain 'direksi' (non-operasional).
-  // Direksi bisa masuk KPI juga kalau perlu, ubah OR di URL param.
+  // Multi-cabang (P2.12) — tarik semua staff aktif dengan branch info.
+  // Direksi (Head Office) excluded — non-operasional.
   const rows = callSupabase(
-    "user_profiles?is_active=eq.true&role=in.(staff,koordinator,admin,management)&select=id,full_name,role"
+    "user_profiles?is_active=eq.true&role=in.(staff,koordinator,admin,management)" +
+    "&select=id,full_name,role,branch_id,branches(id,slug,name,parent_branch_id)"
   )
-  return (rows || []).filter(r => r.full_name) // guard
+  return (rows || []).filter(r => r.full_name)
+}
+
+/** Slug cabang top-level untuk staff (sub-terminal → parent slug). */
+function kpiResolveCabangSlug_(staff) {
+  if (!staff.branches) return null
+  // Terminal T1/T2/T3 → parent Soeta
+  if (staff.branches.parent_branch_id) {
+    // Ambil parent slug via inline query di batch — cache di map global
+    return _resolveParentSlug_(staff.branches.parent_branch_id)
+  }
+  return staff.branches.slug
+}
+
+const _parentSlugCache = {}
+function _resolveParentSlug_(parentId) {
+  if (_parentSlugCache[parentId]) return _parentSlugCache[parentId]
+  const rows = callSupabase(`branches?id=eq.${parentId}&select=slug`)
+  const slug = (rows && rows[0]) ? rows[0].slug : null
+  _parentSlugCache[parentId] = slug
+  return slug
 }
 
 function kpiGetManualEntries_() {
@@ -75,15 +112,30 @@ function kpiGetManualEntries_() {
   return out
 }
 
-function kpiPilar1_(staffId, periode, targetStaff, tanggalStart, tanggalEnd) {
+function kpiPilar1_(staffId, periode, targetStaff, tanggalStart, tanggalEnd, mode) {
   const MAX = KPI_CONFIG.ORDER.MAX_POIN
-  if (!targetStaff) return { nilai: 0, realisasi: 0, targetStaff: 0, persen: 0, scanCount: 0 }
+  if (!targetStaff) return { nilai: 0, realisasi: 0, targetStaff: 0, persen: 0, scanCount: 0, saldoTotal: 0, mode }
 
-  // Realisasi = jumlah scan_orders validated periode ini untuk staff ini.
+  let realisasi = 0
   const scanCount = kpiCountScans_(staffId, tanggalStart, tanggalEnd)
-  const persen = scanCount / targetStaff
+  const saldoTotal = kpiSumSaldo_(staffId, tanggalStart, tanggalEnd)
+
+  if (mode === 'saldo') {
+    realisasi = saldoTotal
+  } else {
+    realisasi = scanCount
+  }
+  const persen = realisasi / targetStaff
   const nilai = Math.min(Math.round(persen * MAX * 100) / 100, MAX)
-  return { nilai, realisasi: scanCount, targetStaff, persen: Math.round(persen * 10000) / 100, scanCount }
+  return { nilai, realisasi, targetStaff, persen: Math.round(persen * 10000) / 100, scanCount, saldoTotal, mode }
+}
+
+function kpiSumSaldo_(staffId, tanggalStart, tanggalEnd) {
+  const rows = callSupabase(
+    `raos_saldo_requests?staff_id=eq.${staffId}&is_processed=eq.true` +
+    `&processed_at=gte.${tanggalStart}&processed_at=lte.${tanggalEnd}&select=nominal`
+  )
+  return (rows || []).reduce((s, r) => s + (Number(r.nominal) || 0), 0)
 }
 
 function kpiPilar2_(staffId, periode, tanggalStart, tanggalEnd, manual) {
@@ -178,87 +230,104 @@ function kpiHitungPeriode_(periode) {
 function updateAllKpiRAOS() {
   const periode = kpiCurrentPeriode_()
   const { start, end } = kpiHitungPeriode_(periode)
-  const targetCabang = kpiGetTargetCabang_()
-
-  if (!targetCabang) {
-    logSistem('warning', 'updateAllKpiRAOS', 'skipped',
-      `Target Order Soeta = 0 di sheet MASTER TARGET. Set jumlah target scan valid dulu.`)
-    try { SpreadsheetApp.getUi().alert('⚠️ Set nilai "Target Order (Scan Valid)" untuk Soeta di sheet MASTER TARGET dulu.') } catch(e){}
-    return
-  }
 
   const staffList = kpiGetActiveStaff_()
   if (staffList.length === 0) {
-    logSistem('warning', 'updateAllKpiRAOS', 'skipped', 'Tidak ada staff aktif Soeta')
+    logSistem('warning', 'updateAllKpiRAOS', 'skipped', 'Tidak ada staff aktif')
     return
   }
 
+  // Group staff per cabang → hitung Target Staff per cabang.
+  const perCabang = {} // { slug: [staff...] }
+  staffList.forEach(s => {
+    const slug = kpiResolveCabangSlug_(s)
+    if (!slug) return
+    if (!perCabang[slug]) perCabang[slug] = []
+    perCabang[slug].push(s)
+  })
+
   const manualEntries = kpiGetManualEntries_()
-  const jumlahStaff = staffList.length
   const now = new Date().toISOString()
   const results = []
 
-  staffList.forEach(staff => {
-    const bobot = KPI_CONFIG.BOBOT_JABATAN[String(staff.role).toUpperCase()] || KPI_CONFIG.BOBOT_JABATAN_DEFAULT
-    const targetStaff = (targetCabang / jumlahStaff) * bobot
-    const manual = manualEntries[staff.full_name] || { briefing: 0, edukasi: 0, problem: 0, pelayanan: 0, kerapian: 0, pelanggaran: 0 }
+  Object.keys(perCabang).forEach(slug => {
+    const staffCabang = perCabang[slug]
+    const tgt = kpiGetTargetByCabang_(slug)
+    const targetCabang = tgt.mode === 'order' ? tgt.order : tgt.saldo
 
-    const p1 = kpiPilar1_(staff.id, periode, targetStaff, start, end)
-    const p2 = kpiPilar2_(staff.id, periode, start, end, manual)
-    const p3 = kpiPilar3_(staff.id, periode, start, end, manual)
-
-    const kpiScore = Math.round(
-      (p1.nilai / KPI_CONFIG.ORDER.MAX_POIN) *
-      (p2.nilai / KPI_CONFIG.DRIVER.MAX_POIN) *
-      (p3.nilai / KPI_CONFIG.SOP.MAX_POIN) *
-      100 * 100
-    ) / 100
-
-    const grade = kpiGetGrade_(kpiScore)
-    results.push({ staff, targetStaff, p1, p2, p3, kpiScore, grade })
-
-    // Upsert ke Supabase kpi_targets (staff_id UUID sekarang, bukan text)
-    try {
-      const [yr, mo] = periode.split('-').map(Number)
-      callSupabase('kpi_targets?on_conflict=staff_id,month,year', 'POST', {
-        staff_id: staff.id,
-        month: mo,
-        year: yr,
-        target_kpi_pct: 100,
-        actual_kpi_pct: kpiScore,
-        actual_scan: p1.scanCount,
-        actual_attendance_pct: p3.hariHadir > 0 ? Math.round(p3.hariHadir / KPI_CONFIG.SOP.EXPECTED_WORKDAYS_PER_MONTH * 100) : 0,
-      }, { headers: { Prefer: 'resolution=merge-duplicates' } })
-    } catch (e) {
-      logSistem('error', 'updateAllKpiRAOS', 'error', `${staff.full_name}: ${e.message}`)
+    if (!targetCabang) {
+      logSistem('warning', 'updateAllKpiRAOS', 'skipped',
+        `Target ${tgt.mode.toUpperCase()} cabang "${slug}" = 0 di MASTER TARGET — skip ${staffCabang.length} staff`)
+      return
     }
+    const jumlahStaff = staffCabang.length
+
+    staffCabang.forEach(staff => {
+      const bobot = KPI_CONFIG.BOBOT_JABATAN[String(staff.role).toUpperCase()] || KPI_CONFIG.BOBOT_JABATAN_DEFAULT
+      const targetStaff = (targetCabang / jumlahStaff) * bobot
+      const manual = manualEntries[staff.full_name] || { briefing: 0, edukasi: 0, problem: 0, pelayanan: 0, kerapian: 0, pelanggaran: 0 }
+
+      const p1 = kpiPilar1_(staff.id, periode, targetStaff, start, end, tgt.mode)
+      const p2 = kpiPilar2_(staff.id, periode, start, end, manual)
+      const p3 = kpiPilar3_(staff.id, periode, start, end, manual)
+
+      const kpiScore = Math.round(
+        (p1.nilai / KPI_CONFIG.ORDER.MAX_POIN) *
+        (p2.nilai / KPI_CONFIG.DRIVER.MAX_POIN) *
+        (p3.nilai / KPI_CONFIG.SOP.MAX_POIN) *
+        100 * 100
+      ) / 100
+
+      const grade = kpiGetGrade_(kpiScore)
+      results.push({ staff, cabangSlug: slug, targetMode: tgt.mode, targetStaff, p1, p2, p3, kpiScore, grade })
+
+      try {
+        const [yr, mo] = periode.split('-').map(Number)
+        callSupabase('kpi_targets?on_conflict=staff_id,month,year', 'POST', {
+          staff_id: staff.id,
+          month: mo,
+          year: yr,
+          target_kpi_pct: 100,
+          actual_kpi_pct: kpiScore,
+          actual_scan: p1.scanCount,
+          actual_attendance_pct: p3.hariHadir > 0 ? Math.round(p3.hariHadir / KPI_CONFIG.SOP.EXPECTED_WORKDAYS_PER_MONTH * 100) : 0,
+        }, { headers: { Prefer: 'resolution=merge-duplicates' } })
+      } catch (e) {
+        logSistem('error', 'updateAllKpiRAOS', 'error', `${staff.full_name}: ${e.message}`)
+      }
+    })
   })
 
-  // Tulis DASHBOARD STAFF
-  kpiWriteDashboard_(results, targetCabang, jumlahStaff, periode)
+  kpiWriteDashboard_(results, periode)
 
   logSistem('cron', 'updateAllKpiRAOS', 'success',
-    `${results.length} staff, periode ${periode}, target cabang Rp ${targetCabang.toLocaleString('id-ID')}`)
+    `${results.length} staff lintas ${Object.keys(perCabang).length} cabang, periode ${periode}`)
   try {
-    SpreadsheetApp.getUi().alert(`✅ KPI ${periode} update: ${results.length} staff Soeta`)
+    SpreadsheetApp.getUi().alert(`✅ KPI ${periode} update: ${results.length} staff lintas ${Object.keys(perCabang).length} cabang`)
   } catch(e) {}
 }
 
-function kpiWriteDashboard_(results, targetCabang, jumlahStaff, periode) {
+function kpiWriteDashboard_(results, periode) {
   const ss = kpiGetSpreadsheet_()
   let sh = ss.getSheetByName(KPI_CONFIG.SHEET.DASHBOARD_STAFF)
   if (!sh) sh = ss.insertSheet(KPI_CONFIG.SHEET.DASHBOARD_STAFF)
   sh.clear()
 
-  const header = ['Nama', 'Role', 'Target Order', 'Realisasi (Scan Valid)', '%', 'KPI', 'Grade',
-    'Hari Hadir', 'Hari Alpha', 'P1 (Order)', 'P2 (Driver)', 'P3 (SOP)', 'Periode']
+  const header = [
+    'Nama', 'Cabang', 'Role', 'Mode Target',
+    'Target Staff', 'Realisasi', '%', 'KPI', 'Grade',
+    'Hari Hadir', 'Hari Alpha',
+    'P1', 'P2 (Driver)', 'P3 (SOP)', 'Periode'
+  ]
   sh.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold').setBackground('#F5A623').setFontColor('#000')
 
   const rows = results.map(r => [
     r.staff.full_name,
+    r.cabangSlug,
     r.staff.role,
+    r.targetMode,
     Math.round(r.targetStaff * 100) / 100,
-    r.p1.scanCount,
+    r.p1.realisasi,
     (r.p1.persen ?? 0),
     r.kpiScore,
     r.grade,
@@ -271,9 +340,13 @@ function kpiWriteDashboard_(results, targetCabang, jumlahStaff, periode) {
   ])
   if (rows.length > 0) {
     sh.getRange(2, 1, rows.length, header.length).setValues(rows)
-    sh.getRange(2, 3, rows.length, 2).setNumberFormat('#,##0.##" scan"')
-    sh.getRange(2, 5, rows.length, 1).setNumberFormat('0.0"%"')
+    // Format kolom Target Staff + Realisasi tergantung mode:
+    // 'order' → 'scan', 'saldo' → Rp. Karena mix, pakai general format
+    // dengan separator ribuan.
+    sh.getRange(2, 5, rows.length, 2).setNumberFormat('#,##0.##')
+    sh.getRange(2, 7, rows.length, 1).setNumberFormat('0.0"%"')
   }
+  sh.setFrozenRows(1)
   sh.autoResizeColumns(1, header.length)
 }
 
@@ -288,20 +361,51 @@ function initKpiSheetsRAOS() {
   const existed = []
 
   // MASTER TARGET
+  // Multi-cabang (P2.12) — seed 9 cabang aktif dengan 2 kolom target.
+  // Kolom B = Target Order (untuk Soeta khusus).
+  // Kolom C = Target Saldo Rp (untuk cabang lain).
+  // Kolom D = Bulan Aktif.
+  const ALL_CABANG_SLUGS = [
+    'ID Rifim Airport Soeta',
+    'ID Rifim Airport Batam',
+    'ID Rifim Airport Jambi',
+    'ID Rifim Airport Balikpapan',
+    'ID Rifim Airport Manado',
+    'ID Rifim Airport Pekanbaru',
+    'ID Rifim Airport Makassar',
+    'ID Rifim Batam',
+    'ID Rifim Jambi Luar',
+  ]
+  const periode = kpiCurrentPeriode_()
+
   let sh = ss.getSheetByName(KPI_CONFIG.SHEET.MASTER_TARGET)
   if (!sh) {
     sh = ss.insertSheet(KPI_CONFIG.SHEET.MASTER_TARGET)
-    sh.getRange(1, 1, 1, 3).setValues([['Cabang', 'Target Order (Scan Valid)', 'Bulan Aktif']]).setFontWeight('bold').setBackground('#F5A623')
-    sh.getRange(2, 1, 1, 3).setValues([[KPI_CONFIG.CABANG_NAME, 0, kpiCurrentPeriode_()]])
-    sh.getRange(2, 2).setNumberFormat('#,##0" scan"')
     created.push(KPI_CONFIG.SHEET.MASTER_TARGET)
   } else {
-    // Existing sheet — refresh header supaya konsisten kalau user Init ulang
-    // setelah refactor Rp → jumlah scan.
-    sh.getRange(1, 1, 1, 3).setValues([['Cabang', 'Target Order (Scan Valid)', 'Bulan Aktif']]).setFontWeight('bold').setBackground('#F5A623')
-    sh.getRange(2, 2).setNumberFormat('#,##0" scan"')
     existed.push(KPI_CONFIG.SHEET.MASTER_TARGET)
   }
+  // Header dan skema selalu direfresh (idempotent)
+  sh.getRange(1, 1, 1, 4).setValues([[
+    'Cabang', 'Target Order (Scan Valid)', 'Target Saldo (Rp)', 'Bulan Aktif'
+  ]]).setFontWeight('bold').setBackground('#F5A623')
+
+  // Ambil existing rows (kolom A) untuk skip yang sudah ada
+  const existingCabang = sh.getLastRow() > 1
+    ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().flat().map(v => String(v).trim())
+    : []
+  let nextRow = sh.getLastRow() + 1
+  ALL_CABANG_SLUGS.forEach(slug => {
+    if (existingCabang.includes(slug)) return
+    // Nilai default: Soeta Order 30.000; cabang saldo 0 (isi manual)
+    const defaultOrder = slug === 'ID Rifim Airport Soeta' ? 30000 : 0
+    const defaultSaldo = slug === 'ID Rifim Airport Soeta' ? 0 : 0
+    sh.getRange(nextRow, 1, 1, 4).setValues([[slug, defaultOrder, defaultSaldo, periode]])
+    nextRow++
+  })
+  sh.getRange(2, 2, ALL_CABANG_SLUGS.length, 1).setNumberFormat('#,##0" scan"')
+  sh.getRange(2, 3, ALL_CABANG_SLUGS.length, 1).setNumberFormat('"Rp"#,##0')
+  sh.setFrozenRows(1)
 
   // DASHBOARD STAFF (header saja — isi dibuat updateAllKpiRAOS)
   if (!ss.getSheetByName(KPI_CONFIG.SHEET.DASHBOARD_STAFF)) {
@@ -332,9 +436,41 @@ function initKpiSheetsRAOS() {
       (created.length ? 'Dibuat baru: ' + created.join(', ') + '\n' : '') +
       (existed.length ? 'Sudah ada:   ' + existed.join(', ') + '\n\n' : '\n') +
       'Langkah berikutnya:\n' +
-      '1. Buka tab MASTER TARGET → isi kolom "Target Cabang (Rp)" untuk Soeta\n' +
+      '1. Buka tab MASTER TARGET → isi Target Order (Soeta) atau Target Saldo (cabang lain) per baris\n' +
       '2. Buka tab RAOS_KPI_MANUAL → hapus baris contoh, isi entri indikator manual per staff/periode\n' +
       '3. Jalankan menu 📊 KPI RAOS → Update KPI Bulan Ini'
+    )
+  } catch(e){}
+}
+
+/**
+ * P2.13 — bikin tab "Form Isi Saldo" kalau belum ada. Idempotent —
+ * kalau sudah ada dari `syncSaldoRequestsToSheet` skip.
+ */
+function initSheetFormIsiSaldo() {
+  const ss = kpiGetSpreadsheet_()
+  let sh = ss.getSheetByName('Form Isi Saldo')
+  if (sh) {
+    try { SpreadsheetApp.getUi().alert('✅ Tab "Form Isi Saldo" sudah ada.') } catch(e){}
+    return
+  }
+  sh = ss.insertSheet('Form Isi Saldo')
+  sh.getRange(1, 1, 1, 11).setValues([[
+    'No Request', 'Tanggal', 'Nama Staff', 'Cabang', 'Nominal',
+    'Status Validasi', 'Sudah Diisi', 'Waktu Diisi', 'Diisi Oleh',
+    'Alasan Tolak', 'Request ID'
+  ]]).setFontWeight('bold').setBackground('#F5A623').setFontColor('#000')
+  sh.getRange('E:E').setNumberFormat('"Rp"#,##0')
+  sh.getRange(2, 7, 1000, 1).insertCheckboxes()
+  sh.hideColumn(sh.getRange('K:K'))
+  sh.setFrozenRows(1)
+  try {
+    SpreadsheetApp.getUi().alert(
+      '✅ Tab "Form Isi Saldo" dibuat.\n\n' +
+      'Cara pakai:\n' +
+      '• Cron 5-menit auto-fill baris dari raos_saldo_requests\n' +
+      '• Admin centang kolom G "Sudah Diisi" → PATCH is_processed=true\n' +
+      '• Trigger DB dispatch push + auto-chat driver + update TARGET STAFF'
     )
   } catch(e){}
 }

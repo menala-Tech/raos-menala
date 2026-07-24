@@ -79,6 +79,12 @@ Backup Database/2026-07 Juli/      ← reserved untuk backup Supabase (belum dip
 ```
 
 ## Aturan Kerja
+0. **WAJIB sync ke spreadsheet RAOS** (`1eYS2mM3Sy...`) setiap upgrade
+   yang menghasilkan/mengubah data agregat. Antar sheet (DASHBOARD
+   STAFF, MASTER TARGET, Form Isi Saldo, LOG SISTEM, DATABASE ORDER,
+   SISTEM CONFIG) HARUS terintegrasi. Tab baru auto-create via menu GAS.
+0b. **WAJIB gunakan semua MCP** yang tersedia (Supabase, Vercel, GitHub,
+   Context7, dsb) — jangan fallback manual kalau MCP available.
 1. Selalu update STATUS.md setelah selesai sesi
 2. Jangan hardcode credential — pakai .env.local atau Supabase Secrets
 3. Semua tabel Supabase wajib punya RLS policy

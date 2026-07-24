@@ -449,28 +449,24 @@ function initKpiSheetsRAOS() {
  */
 function initSheetFormIsiSaldo() {
   const ss = kpiGetSpreadsheet_()
-  let sh = ss.getSheetByName('Form Isi Saldo')
-  if (sh) {
-    try { SpreadsheetApp.getUi().alert('✅ Tab "Form Isi Saldo" sudah ada.') } catch(e){}
-    return
-  }
-  sh = ss.insertSheet('Form Isi Saldo')
-  sh.getRange(1, 1, 1, 11).setValues([[
-    'No Request', 'Tanggal', 'Nama Staff', 'Cabang', 'Nominal',
-    'Status Validasi', 'Sudah Diisi', 'Waktu Diisi', 'Diisi Oleh',
-    'Alasan Tolak', 'Request ID'
-  ]]).setFontWeight('bold').setBackground('#F5A623').setFontColor('#000')
-  sh.getRange('E:E').setNumberFormat('"Rp"#,##0')
-  sh.getRange(2, 7, 1000, 1).insertCheckboxes()
-  sh.hideColumn(sh.getRange('K:K'))
-  sh.setFrozenRows(1)
+  // Delegate ke ensureSaldoSheet_ di 16_saldo_sync.gs supaya format
+  // header + kolom + checkbox konsisten dengan sync writer. Idempotent.
+  const sh = ensureSaldoSheet_(ss)
+  const existed = sh.getLastRow() > 1
   try {
     SpreadsheetApp.getUi().alert(
-      '✅ Tab "Form Isi Saldo" dibuat.\n\n' +
+      (existed ? '✅ Tab "Form Isi Saldo" di-refresh.\n' : '✅ Tab "Form Isi Saldo" dibuat.\n') + '\n' +
+      'Format kolom:\n' +
+      '  A No Request  B Tanggal  C Nama Staff  D Cabang  E Nominal\n' +
+      '  F ID Login Driver  G Nama Driver  H Status Validasi\n' +
+      '  I ☑ Sudah Diisi  J Waktu Diisi  K Diisi Oleh  L Alasan Tolak\n' +
+      '  M ☑ Alert Terkirim  N Alert Terakhir  O Request ID (hidden)\n\n' +
       'Cara pakai:\n' +
       '• Cron 5-menit auto-fill baris dari raos_saldo_requests\n' +
-      '• Admin centang kolom G "Sudah Diisi" → PATCH is_processed=true\n' +
-      '• Trigger DB dispatch push + auto-chat driver + update TARGET STAFF'
+      '• Admin isi kolom F+G (ID/Nama Driver) manual saat proses\n' +
+      '• Admin centang kolom I "Sudah Diisi" → PATCH is_processed=true\n' +
+      '  → trigger DB dispatch push + auto-chat driver + update TARGET STAFF\n' +
+      '• Kolom M+N otomatis di-set kalau reminder 5-menit fire ke chat'
     )
   } catch(e){}
 }

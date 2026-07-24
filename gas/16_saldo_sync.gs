@@ -23,22 +23,50 @@ function getSaldoSpreadsheet_() {
   return SpreadsheetApp.openById(id)
 }
 
+// Kolom index (0-based) untuk match onEdit. Hemat magic number.
+// A  B        C          D       E        F                G             H                I              J              K            L               M              N
+// 1  2        3          4       5        6                7             8                9              10             11           12              13             14
+// No Tanggal  Nama Staff Cabang  Nominal  ID Login Driver  Nama Driver   Status Validasi Sudah Diisi    Waktu Diisi    Diisi Oleh   Alasan Tolak    Alert Terkirim Alert Terakhir + O(15) Request ID hidden
+const SALDO_COL = {
+  NO_REQ:       1,
+  TANGGAL:      2,
+  NAMA_STAFF:   3,
+  CABANG:       4,
+  NOMINAL:      5,
+  ID_DRIVER:    6,
+  NAMA_DRIVER:  7,
+  STATUS:       8,
+  SUDAH_DIISI:  9,
+  WAKTU_DIISI:  10,
+  DIISI_OLEH:   11,
+  ALASAN:       12,
+  ALERT_SENT:   13,
+  ALERT_LAST:   14,
+  REQ_ID:       15,
+}
+const SALDO_HEADER = [
+  'No Request', 'Tanggal', 'Nama Staff', 'Cabang', 'Nominal',
+  'ID Login Driver', 'Nama Driver',
+  'Status Validasi', 'Sudah Diisi', 'Waktu Diisi', 'Diisi Oleh',
+  'Alasan Tolak', 'Alert Terkirim', 'Alert Terakhir',
+  'Request ID'
+]
+
 function ensureSaldoSheet_(ss) {
   let sh = ss.getSheetByName(SALDO_SHEET_NAME)
   if (!sh) {
     sh = ss.insertSheet(SALDO_SHEET_NAME)
-    sh.getRange(1, 1, 1, 11).setValues([[
-      'No Request', 'Tanggal', 'Nama Staff', 'Cabang', 'Nominal',
-      'Status Validasi', 'Sudah Diisi', 'Waktu Diisi', 'Diisi Oleh',
-      'Alasan Tolak', 'Request ID'
-    ]]).setFontWeight('bold').setBackground('#F5A623').setFontColor('#000')
-    sh.getRange('E:E').setNumberFormat('"Rp"#,##0')
-    // Kolom G "Sudah Diisi" — checkbox
-    sh.getRange(2, 7, 1000, 1).insertCheckboxes()
-    // Kolom K "Request ID" — sembunyi, dipakai onEdit untuk match ke Supabase
-    sh.hideColumn(sh.getRange('K:K'))
-    sh.setFrozenRows(1)
   }
+  // Refresh header (idempotent — kalau format berubah, header baru overwrite)
+  sh.getRange(1, 1, 1, SALDO_HEADER.length).setValues([SALDO_HEADER])
+    .setFontWeight('bold').setBackground('#F5A623').setFontColor('#000')
+  // Kolom "Alert Terakhir" (header aksen)
+  sh.getRange(1, SALDO_COL.ALERT_LAST).setBackground('#DC2626').setFontColor('#fff')
+  sh.getRange('E:E').setNumberFormat('"Rp"#,##0')
+  sh.getRange(2, SALDO_COL.SUDAH_DIISI, 1000, 1).insertCheckboxes()
+  sh.getRange(2, SALDO_COL.ALERT_SENT, 1000, 1).insertCheckboxes()
+  sh.hideColumn(sh.getRange(1, SALDO_COL.REQ_ID))
+  sh.setFrozenRows(1)
   return sh
 }
 
@@ -63,25 +91,31 @@ function syncSaldoRequestsToSheet() {
     const sh = ensureSaldoSheet_(ss)
 
     const values = rows.map(r => [
-      r.request_no,
-      r.requested_at ? new Date(r.requested_at) : '',
-      r.staff ? r.staff.full_name : '(unknown)',
-      r.branch ? r.branch.name : '(unknown)',
-      Number(r.nominal) || 0,
-      r.status,
-      !!r.is_processed,
-      r.processed_at ? new Date(r.processed_at) : '',
-      r.processor ? r.processor.full_name : '',
-      r.rejection_reason || '',
-      r.id, // hidden, dipakai onEdit
+      r.request_no,                                     // A No Request
+      r.requested_at ? new Date(r.requested_at) : '',   // B Tanggal
+      r.staff ? r.staff.full_name : '(unknown)',        // C Nama Staff
+      r.branch ? r.branch.name : '(unknown)',           // D Cabang
+      Number(r.nominal) || 0,                           // E Nominal
+      '',                                               // F ID Login Driver (admin isi manual saat proses)
+      '',                                               // G Nama Driver (admin isi manual)
+      r.status,                                         // H Status Validasi
+      !!r.is_processed,                                 // I Sudah Diisi (checkbox)
+      r.processed_at ? new Date(r.processed_at) : '',   // J Waktu Diisi
+      r.processor ? r.processor.full_name : '',         // K Diisi Oleh
+      r.rejection_reason || '',                         // L Alasan Tolak
+      false,                                            // M Alert Terkirim (checkbox)
+      '',                                               // N Alert Terakhir (timestamp)
+      r.id,                                             // O Request ID (hidden)
     ])
 
     const startRow = sh.getLastRow() + 1
-    sh.getRange(startRow, 1, values.length, 11).setValues(values)
-    sh.getRange(startRow, 2, values.length, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss')
-    sh.getRange(startRow, 8, values.length, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss')
+    sh.getRange(startRow, 1, values.length, SALDO_HEADER.length).setValues(values)
+    sh.getRange(startRow, SALDO_COL.TANGGAL, values.length, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss')
+    sh.getRange(startRow, SALDO_COL.WAKTU_DIISI, values.length, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss')
+    sh.getRange(startRow, SALDO_COL.ALERT_LAST, values.length, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss')
     // Pastikan checkbox tetap tampil untuk baris baru
-    sh.getRange(startRow, 7, values.length, 1).insertCheckboxes()
+    sh.getRange(startRow, SALDO_COL.SUDAH_DIISI, values.length, 1).insertCheckboxes()
+    sh.getRange(startRow, SALDO_COL.ALERT_SENT, values.length, 1).insertCheckboxes()
 
     const now = new Date().toISOString()
     rows.forEach(r => {
@@ -119,38 +153,34 @@ function handleSaldoCheckboxEdit_(e) {
   try {
     const sheet = e.range.getSheet()
     if (sheet.getName() !== SALDO_SHEET_NAME) return
-    if (e.range.getColumn() !== 7) return  // kolom G "Sudah Diisi"
-    if (e.range.getRow() === 1) return     // header
+    if (e.range.getColumn() !== SALDO_COL.SUDAH_DIISI) return
+    if (e.range.getRow() === 1) return
 
     const newValue = e.range.getValue()
-    if (newValue !== true) return          // hanya react kalau di-centang
+    if (newValue !== true) return
 
-    const requestId = sheet.getRange(e.range.getRow(), 11).getValue() // kolom K
+    const rowNum = e.range.getRow()
+    const requestId = sheet.getRange(rowNum, SALDO_COL.REQ_ID).getValue()
     if (!requestId) {
-      logSistem('warning', 'handleSaldoCheckboxEdit_', 'warning', `Baris ${e.range.getRow()}: request ID kosong`)
+      logSistem('warning', 'handleSaldoCheckboxEdit_', 'warning', `Baris ${rowNum}: request ID kosong`)
       return
     }
 
     const adminEmail = Session.getActiveUser().getEmail() || ''
-    // Lookup admin user_id via email (opsional — kalau tidak ketemu, biarkan null)
     let adminId = null
     if (adminEmail) {
       try {
         adminId = callSupabase(`rpc/get_auth_user_id_by_email`, 'POST', { p_email: adminEmail })
-      } catch (err) { /* silent — trigger tetap fire tanpa processed_by */ }
+      } catch (err) { /* silent */ }
     }
 
-    const patch = {
-      is_processed: true,
-      processed_at: new Date().toISOString(),
-    }
+    const patch = { is_processed: true, processed_at: new Date().toISOString() }
     if (adminId) patch.processed_by = adminId
 
     callSupabase(`raos_saldo_requests?id=eq.${requestId}`, 'PATCH', patch)
-    sheet.getRange(e.range.getRow(), 8).setValue(new Date())
-    if (adminEmail) sheet.getRange(e.range.getRow(), 9).setValue(adminEmail)
+    sheet.getRange(rowNum, SALDO_COL.WAKTU_DIISI).setValue(new Date())
+    if (adminEmail) sheet.getRange(rowNum, SALDO_COL.DIISI_OLEH).setValue(adminEmail)
 
-    // Update TARGET STAFF sheet — nominal tercapai untuk staff+bulan.
     updateTargetStaffPencapaian_(requestId)
 
     logSistem('sync', 'handleSaldoCheckboxEdit_', 'success',
@@ -227,6 +257,18 @@ function reminderSaldoBelumDiisi() {
       '&order=requested_at.asc'
     ) || []
 
+    // Ambil sheet Form Isi Saldo untuk update Alert Terkirim + Alert Terakhir per baris
+    let saldoSheet = null
+    let saldoIdMap = {}
+    try {
+      const ss = getSaldoSpreadsheet_()
+      saldoSheet = ss.getSheetByName(SALDO_SHEET_NAME)
+      if (saldoSheet && saldoSheet.getLastRow() > 1) {
+        const idCol = saldoSheet.getRange(2, SALDO_COL.REQ_ID, saldoSheet.getLastRow() - 1, 1).getValues().flat()
+        idCol.forEach((id, i) => { if (id) saldoIdMap[id] = i + 2 }) // rowNum
+      }
+    } catch (e) { /* sheet belum ada, skip mark */ }
+
     const now = new Date()
     const groupedByBranch = {}
 
@@ -282,11 +324,29 @@ function reminderSaldoBelumDiisi() {
         return
       }
 
-      callSupabase('chat_messages', 'POST', {
-        room_id: roomId, type: 'text', content,
-        // sender_id NULL akan gagal FK — pakai account service placeholder
-        // atau skip. Untuk sekarang, gunakan admin awal.
-      })
+      const botUserId = PropertiesService.getScriptProperties().getProperty('RAOS_BOT_USER_ID')
+      const msgPayload = { room_id: roomId, type: 'text', content }
+      if (botUserId) msgPayload.sender_id = botUserId
+      try {
+        callSupabase('chat_messages', 'POST', msgPayload)
+      } catch (postErr) {
+        logSistem('warning', 'reminderSaldoBelumDiisi', 'warning',
+          `Gagal post reminder ${g.branch.name}: ${postErr.message}`)
+        return
+      }
+
+      // Mark Alert Terkirim + Alert Terakhir di sheet Form Isi Saldo
+      if (saldoSheet) {
+        const nowDate = new Date()
+        items.forEach(it => {
+          const requestId = rows.find(r => r.request_no === it.request_no)?.id
+          if (!requestId) return
+          const rowNum = saldoIdMap[requestId]
+          if (!rowNum) return
+          saldoSheet.getRange(rowNum, SALDO_COL.ALERT_SENT).setValue(true)
+          saldoSheet.getRange(rowNum, SALDO_COL.ALERT_LAST).setValue(nowDate)
+        })
+      }
     })
 
     logSistem('cron', 'reminderSaldoBelumDiisi', 'success',

@@ -147,10 +147,10 @@ Legenda: ⬜ pending · 🟨 in progress · ✅ done · ⚠️ blocked
 | P2.3 | Chat command `/isisaldo` | ✅ | pending-p2 |
 | P2.4 | Approval flow in-chat | ✅ | pending-p2 |
 | P2.5 | Sync ke tab "Form Isi Saldo" spreadsheet RAOS | ✅ | pending-p2 |
-| P3.1 | Baca `radms-driver` codebase | ⬜ | — |
-| P3.2 | Tabel `raos_driver_queue` + RLS | ⬜ | — |
-| P3.3 | Chat command `/antri` + `/panggil` | ⬜ | — |
-| P3.4 | Monitoring `/queue-status` | ⬜ | — |
+| P3.1 | Baca `radms-driver` codebase | ✅ | — |
+| P3.2 | Tabel `raos_driver_queue` + RLS + 4 RPC | ✅ | mig raos_043 |
+| P3.3 | Chat command `/antri` `/panggil` `/selesai` `/keluar` | ✅ | pending-p3 |
+| P3.4 | Monitoring `/antrian-driver` real-time | ✅ | pending-p3 |
 | P4.1 | Arsitektur split (monorepo vs multi-repo) — VALIDASI | ⬜ | — |
 | P4.2 | Split `apps/pwa` → `apps/pwa-staff` | ⬜ | — |
 | P4.3 | 4 PWA lain (koord/mgmt/direksi/driver) | ⬜ | — |

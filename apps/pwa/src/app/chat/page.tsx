@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import { parseIsiSaldoCommand, submitIsiSaldo } from '@/lib/saldoRequest'
 import SaldoRequestCard from '@/components/SaldoRequestCard'
+import { parseDriverQueueCommand, dispatchDriverQueue } from '@/lib/driverQueue'
+import DriverQueueCard from '@/components/DriverQueueCard'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
@@ -347,6 +349,31 @@ function ChatPageInner() {
     setSending(true)
     const content = text.trim(); setText('')
     const clientId = crypto.randomUUID()
+
+    // Chat command: /antri /panggil /selesai /keluar — driver queue (P3.3)
+    const queueCmd = parseDriverQueueCommand(content)
+    if (queueCmd) {
+      const roomBranchId = (activeRoom as any).branch_id as string | null
+      if (!roomBranchId) {
+        alert('Command antrian hanya bisa di room dengan cabang spesifik. Buat room di /admin dengan pilih cabang.')
+        setSending(false)
+        setText(content)
+        return
+      }
+      const result = await dispatchDriverQueue({
+        userId: user.id,
+        roomId: activeRoom.id,
+        branchId: roomBranchId,
+        clientMsgId: clientId,
+        parsed: queueCmd,
+      })
+      setSending(false)
+      if (!result.ok) {
+        alert(result.error ?? 'Gagal proses command antrian')
+        setText(content)
+      }
+      return
+    }
 
     // Chat command: /isisaldo <nominal> — pengajuan isi saldo (P2.3)
     const cmd = parseIsiSaldoCommand(content)
@@ -1486,6 +1513,11 @@ function ChatPageInner() {
                         currentUserId={user!.id}
                         currentUserRole={user!.role}
                       />
+                    )}
+
+                    {/* DRIVER QUEUE (P3.3) */}
+                    {msg.type === 'driver_queue' && (
+                      <DriverQueueCard raw={msg.content ?? ''} />
                     )}
 
                     <p className={clsx('text-[9px] mt-1', isMe ? 'text-white/50' : 'text-gray-300')}>

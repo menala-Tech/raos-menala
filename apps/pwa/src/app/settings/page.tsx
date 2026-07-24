@@ -163,6 +163,7 @@ export default function SettingsPage() {
     localStorage.setItem('raos_prefs', JSON.stringify(next))
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark', next.tema === 'gelap')
+      document.documentElement.setAttribute('data-text-size', next.ukuranTeks)
     }
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
@@ -309,23 +310,15 @@ export default function SettingsPage() {
         <div className="card space-y-0.5">
           <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Bantuan &amp; Panduan</p>
           {[
-            { icon: Info,          label: 'Tentang Aplikasi',   href: null },
-            { icon: HelpCircle,    label: 'Panduan Penggunaan', href: null },
+            { icon: Info,          label: 'Tentang Aplikasi',   href: '/settings/bantuan' },
+            { icon: HelpCircle,    label: 'Panduan Penggunaan', href: '/settings/bantuan' },
             { icon: MessageCircle, label: 'Hubungi Admin',      href: '/chat?room=umum' },
           ].map(({ icon: Icon, label, href }) => (
-            href ? (
-              <Link key={label} href={href} className="flex items-center gap-3 py-2.5 border-b border-gray-100 last:border-0">
-                <Icon size={17} className="text-gray-500" />
-                <span className="text-sm text-gray-700 font-medium flex-1">{label}</span>
-                <ChevronRight size={14} className="text-gray-300" />
-              </Link>
-            ) : (
-              <button key={label} className="flex items-center gap-3 py-2.5 border-b border-gray-100 last:border-0 w-full text-left">
-                <Icon size={17} className="text-gray-500" />
-                <span className="text-sm text-gray-700 font-medium flex-1">{label}</span>
-                <ChevronRight size={14} className="text-gray-300" />
-              </button>
-            )
+            <Link key={label} href={href} className="flex items-center gap-3 py-2.5 border-b border-gray-100 last:border-0">
+              <Icon size={17} className="text-gray-500" />
+              <span className="text-sm text-gray-700 font-medium flex-1">{label}</span>
+              <ChevronRight size={14} className="text-gray-300" />
+            </Link>
           ))}
         </div>
 

@@ -40,8 +40,10 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: `
           try {
             var raw = localStorage.getItem('raos_prefs');
-            var tema = raw ? (JSON.parse(raw).tema || 'terang') : 'terang';
-            if (tema === 'gelap') document.documentElement.classList.add('dark');
+            var prefs = raw ? JSON.parse(raw) : {};
+            if ((prefs.tema || 'terang') === 'gelap') document.documentElement.classList.add('dark');
+            var uk = prefs.ukuranTeks || 'sedang';
+            document.documentElement.setAttribute('data-text-size', uk);
           } catch(e) {}
         `}} />
       </head>

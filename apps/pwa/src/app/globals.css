@@ -11,6 +11,15 @@
   html { @apply h-full; }
   body { @apply h-full bg-gray-50 font-sans antialiased; }
 
+  /* Ukuran Teks — global scale via root font-size. Semua text yang pakai
+     rem/em (Tailwind default text-xs/sm/base/lg/xl) auto rescale. Px-based
+     unit (border, padding fixed) tetap absolute. Sync dari Settings >
+     Aplikasi > Ukuran Teks (kecil/sedang/besar). Default 100%. */
+  html                       { font-size: 100%; }
+  html[data-text-size="kecil"]  { font-size: 87.5%; }
+  html[data-text-size="sedang"] { font-size: 100%; }
+  html[data-text-size="besar"]  { font-size: 112.5%; }
+
   /* Dark mode — baseline + sweep umum via specificity override.
      Selector `html.dark .bg-white` menang atas `.bg-white` (2 class vs 1),
      jadi kita bisa flip surface & typography default tanpa harus tambah

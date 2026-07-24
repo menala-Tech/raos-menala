@@ -53,9 +53,13 @@ Tuntas selama sesi 16 lanjutan:
   block staff kalau jarak > radius + 50m, atau GPS unavailable/checking.
   Direksi/koord/mgmt/admin bypass. Banner status tiga warna (hijau/
   kuning/merah). Alert di absensi dengan alasan konkret.
-- ✅ Leaked Password Protection lokasi: **Attack Protection → Configure
-  in email provider → toggle Prevent leaked passwords** (user tinggal
-  klik Save di UI, 1 klik)
+- ✅ **Leaked Password Protection — DECIDED SKIP** (bukan pending lagi).
+  Coba enable di UI → 403 "Pro Plans and up". Free tier tidak support.
+  Keputusan: skip, TIDAK upgrade Pro cuma untuk fitur ini. Alasan:
+  RAOS login pakai **PIN 6-digit numerik** (sync dari kolom H sheet
+  SSoT MASTER DATA STAFF), bukan password user-picked → HIBP database
+  isinya password kompleks, tidak overlap dengan PIN numerik pendek →
+  cek leaked tidak menambah proteksi meaningful.
 - ✅ Blueprint **KPI_PORT_PLAN.md** ditulis (root repo) — formula
   3-pilar dari HRIS KPIEngine V1 diadopsi + sumber data ganti ke
   Supabase (scan_orders + raos_attendance + raos_drivers). Butuh input
@@ -63,7 +67,6 @@ Tuntas selama sesi 16 lanjutan:
   sebelum sesi 17 mulai koding.
 
 Terbawa ke sesi 17:
-- [ ] User klik ON Leaked Password Protection di Supabase UI
 - [ ] User set 5 konstanta di KPI_PORT_PLAN.md → sesi 17 eksekusi
 - [ ] Toggle Suara/Getaran (0.5 sesi), Bahasa i18n, Ukuran Teks,
   Bantuan/FAQ

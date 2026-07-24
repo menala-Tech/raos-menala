@@ -116,8 +116,12 @@ GAS `getOrCreateSubfolder()` buat otomatis, jangan manual.
   jangan commit.
 - **`.env.local`** wajib di `.gitignore`. Hanya boleh berisi:
   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-- **Password admin awal `Menala2026!`** = HARUS diganti setelah login
-  pertama (pending sesi 15).
+- **Password admin awal `Menala2026!`** = sudah diganti sesi 16.
+- **Leaked Password Protection (HaveIBeenPwned) — SENGAJA DINONAKTIFKAN**
+  (keputusan sesi 16). Fitur Pro-only, tidak worth upgrade. Login RAOS
+  pakai PIN 6-digit numerik dari sheet SSoT, bukan password
+  user-picked → HIBP tidak relevan (basis data mereka isinya password
+  kompleks). Jangan pending list lagi di sesi berikutnya.
 - **SMTP Gmail** aktif untuk magic link + reset PIN. App Password
   disimpan di Supabase Auth Settings (bukan di repo).
 - **VAPID keypair Web Push** (sesi 14 dinihari 23 Juli):

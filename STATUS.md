@@ -1,6 +1,21 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
 *Diupdate: 2026-07-25 (sesi 18 — Opsi C role gating + advisors lockdown + hub multi-PWA)*
 
+## COLLABORATION LOG
+
+Format: `[YYYY-MM-DD HH:MM AI_name] <commit_sha_short> <ringkas>`
+
+Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
+context terkini sebelum edit file. Baca panduan lengkap di
+[docs/COLLABORATION.md](docs/COLLABORATION.md).
+
+- [2026-07-25 22:00 Claude] docs(collab) create docs/COLLABORATION.md + template
+  Owner tracker di SESSION_PROMPT + template COLLABORATION LOG di STATUS.md
+- [2026-07-25 20:30 Claude] ed43184 docs(status) pending sesi 19 refined
+- [2026-07-25 18:00 Claude] 5d9af27 feat sesi 18 advisor lockdown + 5 icon variant
+
+---
+
 ## SESI 18 (25 Juli 2026) — Opsi C role gating + P4 + P7 audit
 
 Fokus: (1) validasi arsitektur split PWA → pilih Opsi C, implementasi

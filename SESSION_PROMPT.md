@@ -136,9 +136,17 @@ Sumber: `Upgrade Full Cabang.md`. Tiap poin dikelompokkan ke phase.
 
 Legenda: ⬜ pending · 🟨 in progress · ✅ done · ⚠️ blocked
 
-| Phase | Poin | Status | Commit terakhir |
-|---|---|---|---|
-| P1.1 | Extend branches schema + seed 9 cabang | ✅ | mig raos_037 + `pending-p1` |
+Kolom `Owner` (baru sesi 18) — pilih AI yang eksekusi:
+- `Claude` — Claude Code (frontend PWA default per Model A)
+- `Codex` — Codex atau AI lain (backend GAS + Supabase default per Model A)
+- `User` — task yang butuh user manual (test HP, run menu, dst)
+- `Both` — pair programming Model D
+
+Baca panduan lengkap di [docs/COLLABORATION.md](docs/COLLABORATION.md).
+
+| Phase | Poin | Owner | Status | Commit terakhir |
+|---|---|---|---|---|
+| P1.1 | Extend branches schema + seed 9 cabang | Claude | ✅ | mig raos_037 + `pending-p1` |
 | P1.2 | RLS scope per cabang + is_branch_in_scope | ✅ | mig raos_038 + `pending-p1` |
 | P1.3 | Seed 9 branches (merged ke P1.1) | ✅ | mig raos_037 |
 | P1.4 | Sync SSoT auto-map branch_id (staff + driver) | ✅ | `pending-p1` |

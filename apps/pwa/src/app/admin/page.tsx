@@ -152,6 +152,34 @@ export default function AdminPage() {
             </button>
             <button
               onClick={async () => {
+                if (!confirm('Buat room "Pengisian Saldo" untuk semua 9 cabang aktif? (skip yang sudah ada)')) return
+                const { data, error } = await supabase.rpc('seed_room_per_branch', { p_room_name: 'Pengisian Saldo' })
+                if (error) { alert('Gagal: ' + error.message); return }
+                const rows = data as { branch_slug: string; created: boolean }[]
+                const created = rows.filter(r => r.created).length
+                alert(`✅ Selesai — ${created} room baru, ${rows.length - created} sudah ada.`)
+              }}
+              className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-primary/10 rounded-lg text-left"
+            >
+              <MessageCirclePlus size={16} className="text-primary" />
+              Bulk-create Room "Pengisian Saldo" per Cabang
+            </button>
+            <button
+              onClick={async () => {
+                if (!confirm('Buat room "Driver" untuk semua 9 cabang aktif? (skip yang sudah ada)')) return
+                const { data, error } = await supabase.rpc('seed_room_per_branch', { p_room_name: 'Driver' })
+                if (error) { alert('Gagal: ' + error.message); return }
+                const rows = data as { branch_slug: string; created: boolean }[]
+                const created = rows.filter(r => r.created).length
+                alert(`✅ Selesai — ${created} room baru, ${rows.length - created} sudah ada.`)
+              }}
+              className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-primary/10 rounded-lg text-left"
+            >
+              <MessageCirclePlus size={16} className="text-primary" />
+              Bulk-create Room "Driver" per Cabang
+            </button>
+            <button
+              onClick={async () => {
                 if (!user) return
                 if (!confirm('Kirim test push notification ke akun Anda sendiri sekarang?')) return
                 const { data: { session } } = await supabase.auth.getSession()
@@ -349,12 +377,19 @@ function CreateProyekRoomModal({
 }: { me: string; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [branchId, setBranchId] = useState<string>('') // '' = global (semua cabang)
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; slug: string }>>([])
   const [search, setSearch] = useState('')
   const [staffList, setStaffList] = useState<Array<{ id: string; full_name: string; staff_id: string; role: string }>>([])
   const [loadingStaff, setLoadingStaff] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    supabase.from('branches').select('id, name, slug').eq('is_active', true)
+      .order('name').then(({ data }) => setBranches(data ?? []))
+  }, [])
 
   useEffect(() => {
     supabase.from('user_profiles')
@@ -384,6 +419,7 @@ function CreateProyekRoomModal({
       p_name: name.trim(),
       p_description: description.trim(),
       p_member_ids: Array.from(selected),
+      p_branch_id: branchId || null,
     })
     setSaving(false)
     if (error) { setError('Gagal buat room: ' + error.message); return }
@@ -427,6 +463,26 @@ function CreateProyekRoomModal({
             rows={2}
             className="input resize-none"
           />
+
+          {/* Branch selector — global (semua cabang) atau cabang spesifik */}
+          <div>
+            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+              Cabang
+            </label>
+            <select
+              value={branchId}
+              onChange={e => setBranchId(e.target.value)}
+              className="input">
+              <option value="">Semua Cabang (Global)</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-1">
+              Global = anggota lintas cabang (mis. room Umum, Pengumuman).
+              Cabang spesifik = hanya staff/koordinator cabang tersebut yang bisa akses.
+            </p>
+          </div>
 
           <div>
             <div className="flex items-center justify-between mb-1.5">

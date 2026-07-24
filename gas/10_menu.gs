@@ -26,8 +26,12 @@ function onOpen() {
         .addItem('🔄 Sync Staff Soeta (SSOT MASTER DATA STAFF)', 'syncStaffFromSSOT')
     )
     .addSubMenu(
-      SpreadsheetApp.getUi().createMenu('📊 KPI & Laporan')
-        .addItem('Update KPI Semua Staff (Bulan Ini)', 'updateAllKpiThisMonth')
+      SpreadsheetApp.getUi().createMenu('📊 KPI RAOS')
+        .addItem('🆕 Init Sheet KPI (MASTER TARGET + RAOS_KPI_MANUAL)', 'initKpiSheetsRAOS')
+        .addItem('▶️ Update KPI Bulan Ini (semua staff Soeta)', 'updateAllKpiRAOS')
+    )
+    .addSubMenu(
+      SpreadsheetApp.getUi().createMenu('📋 Laporan')
         .addItem('Kirim Laporan Harian ke Admin', 'kirimLaporanHarianAdmin')
         .addItem('Export Laporan Bulanan ke Drive', 'exportLaporanBulanIni')
     )

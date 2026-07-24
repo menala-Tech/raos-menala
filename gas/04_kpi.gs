@@ -1,8 +1,22 @@
 // ============================================================
-// 04_kpi.gs — Perhitungan KPI Staff
+// 04_kpi.gs — LEGACY (deprecated sesi 16 lanjutan)
 // ============================================================
+//
+// Pipeline lama pakai sheet DB_STAFF (sudah tidak dipakai post-SSoT sesi 14)
+// dan staff_id TEXT (mismatch dengan kpi_targets.staff_id UUID) — insert
+// selalu gagal.
+//
+// Pengganti: 15_kpi_engine.gs (`updateAllKpiRAOS`) — 3-pilar Supabase-backed
+// mengikuti struktur HRIS KPIEngine V1. Trigger `updateAllKpiThisMonth`
+// sekarang forward ke pipeline baru supaya cron 22:00 tidak break.
 
-function hitungKpiStaff(staffId, bulan, tahun) {
+function updateAllKpiThisMonth() {
+  // Forward ke pipeline baru — pertahankan nama fungsi supaya trigger cron
+  // di 09_trigger.gs tidak perlu diubah.
+  return updateAllKpiRAOS()
+}
+
+function hitungKpiStaff_LEGACY(staffId, bulan, tahun) {
   const cfg = getSistemConfig()
   const bobotKehadiran = parseFloat(cfg['KPI KEHADIRAN (%)'] ?? '15') / 100
   const bobotOrder     = parseFloat(cfg['KPI ORDER (%)']    ?? '40') / 100
@@ -48,8 +62,8 @@ function hitungKpiStaff(staffId, bulan, tahun) {
   }
 }
 
-function updateKpiToSupabase(staffId, bulan, tahun) {
-  const kpi = hitungKpiStaff(staffId, bulan, tahun)
+function updateKpiToSupabase_LEGACY(staffId, bulan, tahun) {
+  const kpi = hitungKpiStaff_LEGACY(staffId, bulan, tahun)
   if (!kpi) return
 
   callSupabase('kpi_targets?on_conflict=staff_id,month,year', 'POST', {
@@ -63,19 +77,9 @@ function updateKpiToSupabase(staffId, bulan, tahun) {
   logActivity(staffId, 'update_kpi', `KPI ${bulan}/${tahun}: ${kpi.kpiTotal}%`)
 }
 
-function updateAllKpiThisMonth() {
-  const now = new Date()
-  const bulan = now.getMonth() + 1
-  const tahun = now.getFullYear()
-  const sh = getSheet(CONFIG.SHEETS.DB_STAFF)
-  const staff = sh.getDataRange().getValues().slice(1)
-
-  staff.forEach(row => {
-    if (row[6] !== 'Aktif') return
-    try { updateKpiToSupabase(row[0], bulan, tahun) }
-    catch (e) { Logger.log(`KPI error ${row[0]}: ${e.message}`) }
-  })
-  logSistem('cron', 'updateAllKpiThisMonth', 'success', `KPI diperbarui untuk ${staff.length} staff`)
+function updateAllKpiThisMonth_LEGACY() {
+  // Sengaja tidak dipanggil — biarkan sebagai referensi struktur lama.
+  Logger.log('LEGACY function — pakai updateAllKpiRAOS')
 }
 
 function getHariKerja(bulan, tahun) {

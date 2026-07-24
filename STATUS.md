@@ -73,14 +73,30 @@ kick off Offline mode (MVP untuk absensi).
 - Baru: route `/settings/bantuan` (8 FAQ), IndexedDB store `raos_offline`
   (kalau ada queue)
 
-### Pending sesi 17
+### Pending sesi 17 — dilanjutkan sesi 16 batch 3
+
+Batch 3 landed sesi 16 (ekstensi):
+- ✅ Offline extend ke scan + chat + selfie blob (commit `0a9c3a4`,
+  migration `raos_036_chat_client_id_idempotency`)
+- ✅ Conflict resolver: attendance server-timestamp guard, scan_id UNIQUE
+  cek dulu, chat client_id UNIQUE cek dulu. Idempotent replay
+- ✅ KPI infra: `gas/14_kpi_config.gs` + `gas/15_kpi_engine.gs` port dari
+  HRIS KPIEngine V1 adapted ke Supabase. Menu 📊 KPI RAOS di spreadsheet:
+  Init Sheet + Update KPI Bulan Ini. `04_kpi.gs` legacy forward ke pipeline
+  baru supaya cron trigger tidak break
+- ✅ Bahasa i18n **dihapus dari pending** — user putuskan skip permanent
+
+Terbawa ke sesi 17:
 - [ ] User klik ON toggle Suara/Getaran di HP untuk test SW respect flag
-- [ ] KPI konstanta di [KPI_PORT_PLAN.md](KPI_PORT_PLAN.md) — 5 nilai perlu ditetapkan
-- [ ] Bahasa i18n (skip sesi 16, ke sesi 17 kalau prioritas)
-- [ ] Offline mode extend ke scan_orders + chat_messages + selfie blob
-  upload chain
-- [ ] Conflict resolver (2 device edit sama)
-- [ ] Test end-to-end di HP: airplane mode → absen masuk → back online → verifikasi sync
+- [ ] User set 5 konstanta KPI:
+  1. Buka spreadsheet RAOS → menu 🛠️ RAOS System → 📊 KPI RAOS → Init Sheet
+  2. Buka tab MASTER TARGET → isi kolom "Target Cabang (Rp)" untuk Soeta
+  3. Buka tab RAOS_KPI_MANUAL → isi entri manual per staff/periode
+  4. Set Script Property `BOBOT_SCAN`, `BOBOT_HARI` (opsional, default
+     5000 / 100000), `AKTIF_TINGGI_THRESHOLD` (default 8)
+  5. Jalankan menu ▶️ Update KPI Bulan Ini
+- [ ] Test end-to-end di HP: airplane mode → absen masuk + scan + chat →
+  back online → verifikasi sync drain semua
 
 ---
 

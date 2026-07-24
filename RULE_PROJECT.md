@@ -7,7 +7,7 @@ Berbeda dari `STATUS.md` (kronologi per sesi) dan `CLAUDE.md` (panduan
 teknis + state fitur). File ini murni **rule book**: aturan yang tidak
 berubah lintas sesi, hanya bertambah kalau ada policy baru.
 
-Update terakhir: **2026-07-23 (akhir sesi 15 sore — filter kategori push + fix chat retensi)**
+Update terakhir: **2026-07-25 (akhir sesi 17 — multi-cabang foundation + Isi Saldo + Antrian Driver)**
 
 ---
 
@@ -396,7 +396,9 @@ Dark mode di-handle via **specificity override** di `globals.css`
 ## 9. Boundary Fitur Antar-Halaman
 
 - `/admin` = validasi scan pending + edit staff (branch_id/is_active saja)
-  + link ke `/admin/barcodes`.
+  + link ke `/admin/barcodes`. CreateProyekRoomModal branch dropdown +
+  2 tombol bulk-create room "Pengisian Saldo" + "Driver" per cabang
+  (RPC `seed_room_per_branch`, hanya admin/mgmt/direksi).
 - `/admin/barcodes` = generator QR code driver (jangan pindah ke `/drivers`,
   tetap sub-route admin karena role-gated).
 - `/drivers` = view daftar driver + edit kolom RAOS-only (phone, vehicle,
@@ -406,7 +408,49 @@ Dark mode di-handle via **specificity override** di `globals.css`
 - `/chat` room view (activeRoom truthy) = TIDAK wrapped AppShell (chat
   full screen, BottomNav hilang). Swipe back kembali ke list, bukan
   dashboard.
+- `/chat` mendukung 5 slash command: `/isisaldo <nominal>` (semua staff),
+  `/antri <id_driver>` (di room dengan branch_id spesifik), `/panggil <nomor>`,
+  `/selesai <nomor>`, `/keluar <id_driver>`. Command antrian tolak di
+  global room (branch_id NULL).
+- `/validasi-saldo` = koord+/admin approve/reject Isi Saldo — RLS scope
+  by cabang. Approve/reject TIDAK mempengaruhi pengiriman ke sheet
+  (hanya admin centang "Sudah Diisi" yang menentukan status final).
+- `/antrian-driver` = real-time monitor queue driver per cabang.
+  Realtime subscribe `raos_driver_queue`. Tombol PANGGIL/SELESAI/Keluar
+  inline. RLS scope enforce.
+- `/riwayat` = tab **Isi Saldo** ditambah sesi 17 dengan pin
+  kuning/hijau/merah per status. Filter 1/7/30 hari (semua tab).
+- `/settings/bantuan` = 8 FAQ collapsible + info app.
 - `/kpi`, `/laporan`, `/status` = role-gated (admin/koordinator/direksi).
+
+## 9.1 Slash Command chat
+
+Semua slash command dispatched di `chat/page.tsx sendMessage` sebelum
+insert text biasa (short-circuit). Kalau tidak match, jatuh ke text
+insert. Parse via `lib/*.ts` helper — tidak boleh inline.
+
+| Command | Handler | Guard | Post message type |
+|---|---|---|---|
+| `/isisaldo <nominal>` | `lib/saldoRequest.ts` | user punya `branch_id`, nominal in `saldo_nominal_options` | `saldo_request` |
+| `/antri <id/barcode>` | `lib/driverQueue.ts` | room `branch_id` spesifik + driver aktif + belum di queue | `driver_queue` |
+| `/panggil <nomor>` | `lib/driverQueue.ts` | room `branch_id` + posisi status='waiting' | `driver_queue` |
+| `/selesai <nomor>` | `lib/driverQueue.ts` | room `branch_id` + posisi status='called' | `driver_queue` |
+| `/keluar <id/barcode>` | `lib/driverQueue.ts` | room `branch_id` + driver in active queue | `driver_queue` |
+
+Kalau tambah command baru sesi berikutnya, tambah baris di sini.
+
+## 9.2 Multi-cabang & RLS scope
+
+- `is_branch_in_scope(uuid)` — helper Supabase SECURITY DEFINER.
+  Admin/mgmt/direksi bypass. Staff/koord scoped ke branch sendiri +
+  descendant (sub-terminal) + parent.
+- Kalau tambah tabel RAOS baru dengan `branch_id` FK, WAJIB pakai
+  `is_branch_in_scope` di RLS policy. Jangan bikin logic scope sendiri.
+- `chat_rooms.branch_id` NULL = global (Umum/Pengumuman/Absensi) — semua
+  cabang bisa akses. UUID = per-cabang (member di RLS filter).
+- Room bulk-create per cabang via `seed_room_per_branch(text)` — auto-add
+  semua staff cabang + admin/mgmt/direksi sebagai member. Idempotent
+  (skip kalau nama+branch match).
 
 ---
 

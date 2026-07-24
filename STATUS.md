@@ -1,5 +1,114 @@
-# STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-24 (sesi 16 lanjutan — Settings audit + offline MVP)*
+# STATUS.md — RAOS (Menala Multi-Cabang PWA)
+*Diupdate: 2026-07-25 (sesi 17 — Multi-cabang foundation + Isi Saldo + Antrian Driver)*
+
+## SESI 17 (24-25 Juli 2026) — Multi-cabang lengkap 3 phase
+
+Fokus: eksekusi roadmap `Upgrade Full Cabang.md` (25 poin) — Phase 1
+foundation multi-cabang, Phase 2 Isi Saldo, Phase 3 Antrian Driver.
+
+### Ringkas commit sesi 17 (17 commit)
+
+| Commit | Ringkas |
+|---|---|
+| `5fe134d` | feat(multi-cabang): Phase 1 foundation — schema + RLS + GAS sync |
+| `071bd8f` | feat(saldo): Phase 2 Isi Saldo via chat room + GAS sync sheet |
+| `043ed4d` | feat(saldo): refinement 12 poin — is_processed flow + reminder + validasi |
+| `5a166b4` | feat(admin): UI branch dropdown + bulk-create room per cabang |
+| `54fcb20` | feat(kpi+docs): MASTER TARGET multi-cabang dual-mode + rules sync spreadsheet |
+| `66b2640` | feat(saldo): Form Isi Saldo format gabungan — 14 kolom + Request ID hidden |
+| `666b4fa` | fix(saldo): ensureSaldoSheet_ clear stray checkbox dari layout lama |
+| `68630dc` | feat: SISTEM CONFIG refresh + deprecate banner 3 sheet + bot user fallback |
+| `04c9de9` | fix(lint): escape quotes di label tombol bulk-create room |
+| `8d60507` | feat(driver-queue): Phase 3 lengkap — chat command + realtime monitor |
+
+### Migration Supabase sesi 17 (11 migration)
+
+- `raos_037_branches_multi_cabang` — extend branches (slug/timezone/lat/lng/radius/parent_branch_id/branch_type) + seed 9 cabang
+- `raos_038_rls_multi_cabang_scope` — `is_branch_in_scope(uuid)` helper + updated RLS 4 tabel
+- `raos_039_saldo_requests` — tabel `raos_saldo_requests` + RLS + `saldo_nominal_options` JSONB per cabang
+- `raos_040_saldo_processing` — is_processed + trigger dispatch push + auto-chat driver
+- `raos_041_create_proyek_room_branch` — RPC extend p_branch_id (bug column name)
+- `raos_042_fix_room_rpc_column` — fix `category` (bukan kategori) + `seed_room_per_branch`
+- `raos_043_driver_queue` — tabel + 4 RPC (join/call/complete/leave) + RLS scope + realtime
+- `raos_044_system_bot_fallback` — `raos_get_system_bot_id()` helper untuk trigger sender_id NULL fallback
+
+### Edge Function state
+- `raos-send-push` v8 ACTIVE
+- `send-admin-push` v4 ACTIVE
+
+### Fitur landed sesi 17
+
+**Phase 1 — Foundation Multi-Cabang** (poin 4, 5, 6, 10-13):
+- Extend `branches` dengan slug/timezone/lat/lng/radius/parent + seed 9 cabang aktif RIFIM (Soeta hub + T1/T2/T3 sub + Batam/Jambi/Balikpapan/Manado/Pekanbaru/Makassar + Batam non-airport + Jambi Luar) dengan koordinat bandara real
+- `is_branch_in_scope(uuid)` SECURITY DEFINER — admin/mgmt/direksi bypass, staff/koord scoped
+- Updated RLS: `raos_attendance_koord_select`, `scan_orders_staff_select`, `raos_drivers_read_scoped`, `rooms_read_member`
+- `chat_rooms.branch_id` nullable (NULL = global room Umum/Pengumuman/Absensi)
+- GAS 13 tarik 10 cabang (9 + Head Office) + auto-map slug → branch_id
+- GAS 12 loop 7 tab airport SSOT + auto-map per tab
+
+**Phase 2 — Isi Saldo via Chat Room** (poin 1):
+- Tabel `raos_saldo_requests` + RLS scope + `branches.saldo_nominal_options` JSONB (4 opsi Balikpapan/Pekanbaru/Makassar, 2 opsi cabang lain, Soeta kosong)
+- Chat command `/isisaldo <nominal>` (support suffix `k`) di `lib/saldoRequest.ts`
+- `SaldoRequestCard` render bubble dengan chip status + tombol Setujui/Tolak (RLS scope by cabang)
+- `is_processed` flow: admin centang checkbox kolom I di sheet → PATCH → trigger DB dispatch push staff + auto-chat "Terima kasih..." ke room driver cabang + update TARGET STAFF pencapaian
+- Reminder 5-menit chat WA-style di room "Pengisian Saldo" per cabang
+- `/validasi-saldo` page koord/admin — total per status + filter tab + tombol Setujui/Tolak
+- GAS `syncSaldoRequestsToSheet` cron 5-menit ke tab **Form Isi Saldo** (15 kolom gabungan: No Request/Tanggal/Nama Staff/Cabang/Nominal/ID Login Driver/Nama Driver/Status Validasi/☑ Sudah Diisi/Waktu Diisi/Diisi Oleh/Alasan Tolak/☑ Alert Terkirim/Alert Terakhir + Request ID hidden)
+- Extend `chat_messages.type` dengan `'saldo_request'`
+- Riwayat `/riwayat` tab **Isi Saldo** dengan pin kuning/hijau/merah
+
+**Phase 3 — Antrian Driver via Chat Room** (poin 15):
+- Tabel `raos_driver_queue` (position/status/joined_at/called_at/completed_at) + UNIQUE index active driver per cabang
+- 4 RPC SECURITY DEFINER: `raos_join_queue`, `raos_call_driver`, `raos_complete_queue`, `raos_leave_queue`
+- Chat command `/antri <driver_id>` `/panggil <nomor>` `/selesai <nomor>` `/keluar <driver_id>` di room cabang spesifik
+- `DriverQueueCard` bubble dengan chip event per warna (amber joined, blue called, green completed, gray left) + box posisi
+- `/antrian-driver` page real-time monitor per cabang dengan tombol PANGGIL/SELESAI/Keluar inline + realtime auto-refresh
+- Extend `chat_messages.type` dengan `'driver_queue'`
+- Realtime publication: `ALTER PUBLICATION supabase_realtime ADD TABLE raos_driver_queue`
+
+**Auxiliary sesi 17**:
+- `SESSION_PROMPT.md` — master resumable prompt (25 poin roadmap + progress tracker + checkpoint). Paste `🚀 PROMPT UNTUK PASTE` untuk resume sesi.
+- Rules sinkron spreadsheet + wajib MCP di RULE_PROJECT.md §1.-1, §1.-2 + CLAUDE.md aturan 0/0b
+- GAS `initSistemConfig` refresh — 20 entries baru (KPI multi-cabang, isi saldo, geofence, SSoT sources)
+- GAS `markDeprecatedSheets` — banner merah di TARGET STAFF/DATABASE STAFF/DATABASE DRIVER
+- GAS `initSheetFormIsiSaldo` idempotent + `clearDataValidations` fix stray checkbox
+- `raos_get_system_bot_id()` helper — admin/direksi pertama sebagai fallback sender_id trigger chat
+- Bulk-create room per cabang di `/admin` — 2 tombol untuk "Pengisian Saldo" + "Driver" (9 room/click, idempotent)
+- CreateProyekRoomModal branch dropdown
+
+### State akhir sesi 17
+
+- **Migration Supabase**: 44 (`raos_044_system_bot_fallback`)
+- **Edge Function**: `raos-send-push v8`, `send-admin-push v4` ACTIVE
+- **Vercel**: sinkron dengan commit `8d60507` (auto-deploy)
+- **GitHub**: commit terakhir `8d60507` push main
+- **GAS**: 17 file ter-clasp-push, semua trigger aktif (10 total: import/sync/reminder/backup/KPI/saldo)
+- **Data**:
+  - `branches` 12 (9 top-level + T1/T2/T3 sub)
+  - `user_profiles` 27 (semua `source=ssot_master_staff`)
+  - `raos_drivers` 233 (semua `source=ssot_driver_airport`)
+  - `chat_messages` 46, `chat_rooms` 9
+  - `raos_attendance` 3, `scan_orders` 0
+  - `raos_saldo_requests` 0, `raos_driver_queue` 0
+  - `kpi_targets` 26 (KPI pernah run untuk 26 staff — belum multi-cabang mode)
+- **Sheet spreadsheet RAOS**: MASTER TARGET/DASHBOARD STAFF/RAOS_KPI_MANUAL/Form Isi Saldo siap di-init user via menu
+
+### Route PWA baru sesi 17
+- `/validasi-saldo` — koord/admin approve/reject pengajuan Isi Saldo
+- `/antrian-driver` — staff monitor antrian driver real-time
+
+### Pending sesi 18
+- Test end-to-end di HP: login staff cabang lain (Batam/Jambi/dst) → chat cabang → `/isisaldo` → admin centang di sheet → verify push + auto-chat + TARGET STAFF update
+- Test antrian: `/antri` → `/panggil` → `/selesai` di room chat cabang
+- User run menu spreadsheet: **Init/Refresh SISTEM CONFIG**, **Tandai Sheet Deprecated**, **📊 KPI RAOS → Init Sheet**, **💰 Isi Saldo → Init Sheet**
+- P4.1 arsitektur split 5 PWA — butuh validasi Anda: monorepo vs multi-repo vs role-based UI
+- P5 integrasi rifim-os (PWA pusat)
+- P6 riwayat per role scope (1/7/30 hari)
+- P7 KPI Engine multi-cabang test + Storage Drive subfolder per cabang
+
+---
+
+
 
 ## SESI 16 (24 Juli 2026, lanjutan) — Settings audit sisa + Offline queue MVP
 

@@ -43,14 +43,28 @@ lebih baru dari yang tercatat di STATUS sebelumnya.
 - Constraint `user_profiles.role`: `direksi|admin|management|koordinator|
   staff` — sinkron dengan mapping GAS.
 
-### Pending sesi 17 (yang masih terbawa)
-- [ ] Set `branch_id` **Hendro** (T1/T2/T3) via /admin — masih NULL
-- [ ] Set `branch_id` **Henry** (T1/T2/T3) via /admin — masih NULL
-- [ ] User re-subscribe push di HP (Bobby subscription lama expired)
-- [ ] Aktifkan **Leaked Password Protection** di Supabase Auth Settings
-  (UI-only, 1 klik — tidak bisa dari SQL/MCP)
-- [ ] Hard-block scan/absensi di luar radius — butuh keputusan A/B/C
-- [ ] KPI pipeline REFACTOR BESAR (`kpi_targets: 0`)
+### Update pending (yang tuntas + terbawa)
+
+Tuntas selama sesi 16 lanjutan:
+- ✅ `branch_id` Hendro & Henry di-set via /admin (user report)
+- ✅ Push re-subscribe di HP — Bobby subscription baru muncul di
+  `push_subscriptions` (2026-07-24 08:49:21)
+- ✅ **Hard-block Opsi A implemented** — commit `7f657ac` (feat/geo):
+  block staff kalau jarak > radius + 50m, atau GPS unavailable/checking.
+  Direksi/koord/mgmt/admin bypass. Banner status tiga warna (hijau/
+  kuning/merah). Alert di absensi dengan alasan konkret.
+- ✅ Leaked Password Protection lokasi: **Attack Protection → Configure
+  in email provider → toggle Prevent leaked passwords** (user tinggal
+  klik Save di UI, 1 klik)
+- ✅ Blueprint **KPI_PORT_PLAN.md** ditulis (root repo) — formula
+  3-pilar dari HRIS KPIEngine V1 diadopsi + sumber data ganti ke
+  Supabase (scan_orders + raos_attendance + raos_drivers). Butuh input
+  5 konstanta dari user (BOBOT_SCAN, BOBOT_HARI, TARGET CABANG, dst)
+  sebelum sesi 17 mulai koding.
+
+Terbawa ke sesi 17:
+- [ ] User klik ON Leaked Password Protection di Supabase UI
+- [ ] User set 5 konstanta di KPI_PORT_PLAN.md → sesi 17 eksekusi
 - [ ] Toggle Suara/Getaran (0.5 sesi), Bahasa i18n, Ukuran Teks,
   Bantuan/FAQ
 - [ ] Offline mode penuh (IndexedDB queue), aktifasi `logActivity()`

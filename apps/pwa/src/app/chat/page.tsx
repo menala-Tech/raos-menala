@@ -4,6 +4,8 @@ import { Suspense, useCallback, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
+import { parseIsiSaldoCommand, submitIsiSaldo } from '@/lib/saldoRequest'
+import SaldoRequestCard from '@/components/SaldoRequestCard'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
@@ -344,8 +346,34 @@ function ChatPageInner() {
     if (!text.trim() || !activeRoom || !user) return
     setSending(true)
     const content = text.trim(); setText('')
-    // client_id UUID untuk idempotency saat offline replay (migration raos_036).
     const clientId = crypto.randomUUID()
+
+    // Chat command: /isisaldo <nominal> — pengajuan isi saldo (P2.3)
+    const cmd = parseIsiSaldoCommand(content)
+    if (cmd) {
+      const branches = (user as any).branches
+      const allowed: number[] = Array.isArray(branches?.saldo_nominal_options)
+        ? branches.saldo_nominal_options
+        : []
+      const result = await submitIsiSaldo({
+        userId: user.id,
+        branchId: user.branch_id,
+        branchSlug: branches?.slug ?? null,
+        branchName: branches?.name ?? null,
+        fullName: (user as any).full_name ?? 'Staff',
+        roomId: activeRoom.id,
+        clientMsgId: clientId,
+        nominal: cmd.nominal,
+        allowedNominals: allowed,
+      })
+      setSending(false)
+      if (!result.ok) {
+        alert(result.error ?? 'Gagal ajukan isi saldo')
+        setText(content)
+      }
+      return
+    }
+
     const payload = {
       room_id: activeRoom.id, sender_id: user.id, type: 'text', content, client_id: clientId,
     }
@@ -1450,6 +1478,15 @@ function ChatPageInner() {
 
                     {/* TEXT */}
                     {msg.type === 'text' && <p className="leading-relaxed">{msg.content}</p>}
+
+                    {/* SALDO REQUEST (P2.3) */}
+                    {msg.type === 'saldo_request' && (
+                      <SaldoRequestCard
+                        raw={msg.content ?? ''}
+                        currentUserId={user!.id}
+                        currentUserRole={user!.role}
+                      />
+                    )}
 
                     <p className={clsx('text-[9px] mt-1', isMe ? 'text-white/50' : 'text-gray-300')}>
                       {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}

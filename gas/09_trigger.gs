@@ -60,6 +60,11 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncStaffFromSSOT')
     .timeBased().everyHours(1).create()
 
+  // Sync pengajuan isi saldo ke tab "Form Isi Saldo" setiap 15 menit —
+  // koordinator butuh data fresh untuk approval review + laporan bulanan.
+  ScriptApp.newTrigger('syncSaldoRequestsToSheet')
+    .timeBased().everyMinutes(15).create()
+
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
 }

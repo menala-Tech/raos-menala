@@ -142,11 +142,11 @@ Legenda: ⬜ pending · 🟨 in progress · ✅ done · ⚠️ blocked
 | P1.2 | RLS scope per cabang + is_branch_in_scope | ✅ | mig raos_038 + `pending-p1` |
 | P1.3 | Seed 9 branches (merged ke P1.1) | ✅ | mig raos_037 |
 | P1.4 | Sync SSoT auto-map branch_id (staff + driver) | ✅ | `pending-p1` |
-| P2.1 | Baca `rifim-isi-saldo` codebase | ⬜ | — |
-| P2.2 | Tabel `raos_saldo_requests` + RLS | ⬜ | — |
-| P2.3 | Chat command `/isisaldo` | ⬜ | — |
-| P2.4 | Approval flow in-chat | ⬜ | — |
-| P2.5 | Sync ke tab "Form Isi Saldo" spreadsheet RAOS | ⬜ | — |
+| P2.1 | Baca `rifim-isi-saldo` codebase | ✅ | — |
+| P2.2 | Tabel `raos_saldo_requests` + RLS | ✅ | mig raos_039 |
+| P2.3 | Chat command `/isisaldo` | ✅ | pending-p2 |
+| P2.4 | Approval flow in-chat | ✅ | pending-p2 |
+| P2.5 | Sync ke tab "Form Isi Saldo" spreadsheet RAOS | ✅ | pending-p2 |
 | P3.1 | Baca `radms-driver` codebase | ⬜ | — |
 | P3.2 | Tabel `raos_driver_queue` + RLS | ⬜ | — |
 | P3.3 | Chat command `/antri` + `/panggil` | ⬜ | — |
@@ -194,10 +194,29 @@ Yang selesai sebelum Phase 1 dimulai:
   `kpiBranchMap_()` helper. GAS `12_driver_airport_sync.gs` — extend loop
   ke 7 tab airport, auto-set branch_id per driver dari mapping tab-slug.
 
-**Next**: P2.1 — baca `C:\Projects\menala\rifim-isi-saldo\` codebase untuk
-pahami model Form Isi Saldo. Rekomendasi ambil (a) schema request, (b)
-UI flow ajuan, (c) approval logic. Adaptasi jadi tabel `raos_saldo_requests`
-di Supabase + `/isisaldo` command di chat room khusus staff.
+**Phase 2 (Isi Saldo) FULLY DONE**:
+- P2.1: `rifim-isi-saldo` codebase pattern: sheet-based, nominal
+  45k/95k/145k/195k (Balikpapan/Pekanbaru) atau 45k/95k (cabang lain).
+  Adaptasi RAOS: chat command + Supabase + sync ke sheet Form Isi Saldo.
+- P2.2: Migration `raos_039_saldo_requests` — tabel + RLS scope cabang
+  (staff insert own, koord+/admin approve scope). Kolom
+  `branches.saldo_nominal_options` JSONB default per cabang.
+  `chat_messages.type` diperluas dengan `'saldo_request'`.
+- P2.3: `lib/saldoRequest.ts` parse `/isisaldo <nominal>` (support `45k`
+  suffix), submit dengan validasi allowedNominals branch. Wire di
+  `chat/page.tsx sendMessage` sebagai short-circuit sebelum text insert.
+- P2.4: `components/SaldoRequestCard.tsx` render bubble type
+  `saldo_request` dengan chip status + tombol Setujui/Tolak (koord/admin
+  scope by RLS). Rejection reason inline input.
+- P2.5: `gas/16_saldo_sync.gs` `syncSaldoRequestsToSheet()` — pull
+  request `synced_to_sheet_at IS NULL`, tulis ke tab "Form Isi Saldo"
+  (auto-create kalau belum ada), patch synced timestamp. Trigger 15 menit
+  ditambah `09_trigger.gs`. Menu 💰 Isi Saldo → 🔄 Sync ke Sheet.
+
+**Next**: P3.1 — baca `C:\Projects\menala\radms-driver\` codebase untuk
+pahami model antrian driver + panggilan staff. Adaptasi jadi
+`raos_driver_queue` + chat command `/antri` (driver) + `/panggil <nomor>`
+(staff) di Room Driver cabang.
 
 ---
 

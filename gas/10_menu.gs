@@ -31,6 +31,10 @@ function onOpen() {
         .addItem('▶️ Update KPI Bulan Ini (semua staff Soeta)', 'updateAllKpiRAOS')
     )
     .addSubMenu(
+      SpreadsheetApp.getUi().createMenu('💰 Isi Saldo')
+        .addItem('🔄 Sync Pengajuan ke Sheet "Form Isi Saldo"', 'syncSaldoRequestsToSheet')
+    )
+    .addSubMenu(
       SpreadsheetApp.getUi().createMenu('📋 Laporan')
         .addItem('Kirim Laporan Harian ke Admin', 'kirimLaporanHarianAdmin')
         .addItem('Export Laporan Bulanan ke Drive', 'exportLaporanBulanIni')

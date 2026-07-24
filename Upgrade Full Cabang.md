@@ -98,3 +98,17 @@ Geofencing Bandara :
 
 
 
+Room chat pengisian saldo :
+
+1. Bikin room "Pengisian Saldo" per cabang  > Harusnya buat nama Cabang nya Di Room Pengisian saldo dan Driver
+
+2\. Card Pengajuan Isi saldo harusnya ada 5 komponen Peenting :  Id Login dan Nama driver (Otomatis di Tag nama driver yg terdaftar di Cabang) , Nominal, nama staff,Cabang, tanggal dan Waktu,Id Cabang
+
+3\. sebaiknya ada Toggle Card Pengajuan isi saldo seperti Toggle Polling dengan Kolom : Nominal,Nama  driver,Id driver (Otomatis terisi ketika dipilih Nama driver),Nama staff Otomatis 
+
+4\. Auto Bots memberi Balasan ke chat pribadi staff Pencapaian Target Saldo/order : Nominal Target,Realisasi,Persentase dan Pengingat Untuk kejar Target (pin Hijau,Kuning,Merah)sesuai dengan Target dan realisasinya
+
+5\. WAJIB AKTIFKAN NOTIFIKASI untuk semua fungsi itu
+
+
+

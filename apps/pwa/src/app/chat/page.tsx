@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import { parseIsiSaldoCommand, submitIsiSaldo } from '@/lib/saldoRequest'
 import SaldoRequestCard from '@/components/SaldoRequestCard'
+import IsiSaldoBottomSheet from '@/components/IsiSaldoBottomSheet'
 import { parseDriverQueueCommand, dispatchDriverQueue } from '@/lib/driverQueue'
 import DriverQueueCard from '@/components/DriverQueueCard'
 import AppShell from '@/components/layout/AppShell'
@@ -18,7 +19,7 @@ import {
   Info, Settings, ChevronRight, LogOut, Pin, PinOff,
   Copy, SmilePlus, MapPin, Navigation,
   BarChart2, CheckSquare, Square, Plus, Trash2, Lock,
-  Mic, Trash, StopCircle,
+  Mic, Trash, StopCircle, Wallet,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatPollOption, UserProfile } from '@/types'
@@ -129,6 +130,7 @@ function ChatPageInner() {
   // Fase 7 – polling
   const [polls, setPolls]               = useState<Record<string, { poll: ChatPoll; votes: ChatPollVote[] }>>({})
   const [pollSheet, setPollSheet]       = useState(false)
+  const [isiSaldoSheet, setIsiSaldoSheet] = useState(false)
   const [pollQuestion, setPollQuestion] = useState('')
   const [pollOptions, setPollOptions]   = useState(['', ''])
   const [pollMultiple, setPollMultiple] = useState(false)
@@ -937,6 +939,21 @@ function ChatPageInner() {
             </div>
           )}
 
+          {/* ── Isi Saldo BottomSheet ─────────────────────────────────────── */}
+          {isiSaldoSheet && activeRoom && user && (
+            <IsiSaldoBottomSheet
+              userId={user.id}
+              userFullName={(user as any).full_name ?? 'Staff'}
+              branchId={user.branch_id}
+              branchSlug={(user as any).branches?.slug ?? null}
+              branchName={(user as any).branches?.name ?? null}
+              branchNominalOptions={(user as any).branches?.saldo_nominal_options ?? []}
+              roomId={activeRoom.id}
+              onClose={() => setIsiSaldoSheet(false)}
+              onSubmitted={() => { setIsiSaldoSheet(false) }}
+            />
+          )}
+
           {/* ── Poll Sheet ───────────────────────────────────────────────── */}
           {pollSheet && (
             <div className="fixed inset-0 z-40 flex flex-col justify-end"
@@ -1625,6 +1642,15 @@ function ChatPageInner() {
                 title="Buat polling">
                 <BarChart2 size={20} />
               </button>
+              {(activeRoom as any).branch_id && Array.isArray((user as any).branches?.saldo_nominal_options) &&
+                (user as any).branches.saldo_nominal_options.length > 0 && (
+                <button onClick={() => setIsiSaldoSheet(true)}
+                  disabled={uploading || sendingLocation || pollSending || uploadingAudio}
+                  className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
+                  title="Pengajuan Isi Saldo">
+                  <Wallet size={20} />
+                </button>
+              )}
               <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
                 className="hidden" onChange={handleFileSelect} />
               <input

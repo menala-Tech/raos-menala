@@ -106,8 +106,10 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
     staff_name: fullName,
     branch_slug: branchSlug ?? null,
     branch_name: branchName ?? null,
+    branch_id: branchId,
     nominal,
     status: 'pending',
+    requested_at: new Date().toISOString(),
   })
 
   const { data: msg, error: msgErr } = await supabase

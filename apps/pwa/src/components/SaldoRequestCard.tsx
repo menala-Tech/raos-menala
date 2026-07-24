@@ -10,9 +10,13 @@ interface SaldoContent {
   staff_name: string
   branch_slug?: string | null
   branch_name?: string | null
+  branch_id?: string | null       // baru — ID Cabang UUID
   nominal: number
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
   is_processed?: boolean
+  driver_login_id?: string | null // baru — ID Login (mis. 200878173)
+  driver_name?: string | null     // baru — Nama Driver
+  requested_at?: string | null    // baru — Tanggal + Waktu ISO
 }
 
 interface Props {
@@ -93,6 +97,20 @@ export default function SaldoRequestCard({ raw, currentUserId, currentUserRole, 
         <div className="flex justify-between"><span className="text-gray-500">Staff</span><span className="font-medium">{data.staff_name}</span></div>
         {data.branch_name && (
           <div className="flex justify-between"><span className="text-gray-500">Cabang</span><span className="font-medium truncate max-w-[160px] text-right">{data.branch_name}</span></div>
+        )}
+        {data.driver_name && (
+          <div className="flex justify-between"><span className="text-gray-500">Driver</span><span className="font-medium truncate max-w-[160px] text-right">{data.driver_name}</span></div>
+        )}
+        {data.driver_login_id && (
+          <div className="flex justify-between"><span className="text-gray-500">ID Login</span><span className="font-mono text-[11px]">{data.driver_login_id}</span></div>
+        )}
+        {data.requested_at && (
+          <div className="flex justify-between">
+            <span className="text-gray-500">Waktu</span>
+            <span className="text-[11px]">{new Date(data.requested_at).toLocaleString('id-ID', {
+              day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+            })}</span>
+          </div>
         )}
         <div className="flex justify-between items-center pt-1 border-t border-gray-100">
           <span className="text-gray-500">Nominal</span>

@@ -10,6 +10,18 @@ type FaqItem = { q: string; a: string }
 
 const FAQ: FaqItem[] = [
   {
+    q: 'Bagaimana cara install PWA sesuai role saya (Staff/Koord/Mgmt/Direksi/Driver)?',
+    a: 'RAOS adalah 1 aplikasi dengan 5 variant install per role. Setelah login, buka Chrome/Safari lalu tap menu "Install app" atau "Tambahkan ke Layar Utama". Ikon aplikasi akan otomatis pakai variant yang cocok dengan role Anda. Untuk mengganti variant, uninstall dulu yang lama, lalu install ulang dari URL berikut:\n\n• Staff: raos-menala.vercel.app\n• Koord: raos-menala.vercel.app/?role=koord\n• Mgmt: raos-menala.vercel.app/?role=mgmt\n• Direksi: raos-menala.vercel.app/?role=direksi\n• Driver: raos-menala.vercel.app/?role=driver\n\nSemua share codebase yang sama — bug fix + fitur baru otomatis update di 5 variant.',
+  },
+  {
+    q: 'Kenapa saya tidak bisa akses halaman validasi/laporan/kelola driver?',
+    a: 'Route tertentu hanya untuk role Koordinator ke atas (Admin/Mgmt/Direksi). Kalau Anda staff biasa dan coba buka /validasi-saldo atau /kpi, akan di-redirect ke Beranda. Kalau Anda seharusnya punya akses tapi tetap ke-redirect, hubungi admin — mungkin role Anda di sheet MASTER DATA STAFF belum di-update.',
+  },
+  {
+    q: 'Aplikasi crash / halaman tidak load — apa yang harus saya lakukan?',
+    a: 'Kalau muncul pesan "Ada masalah teknis di halaman ini", tap tombol "Coba lagi" atau "Beranda". Fitur lain masih normal — masalah hanya di route tersebut. Kalau berulang, screenshot digit error di bawah (5-8 karakter) + kirim ke admin lewat chat.',
+  },
+  {
     q: 'Kenapa saya tidak bisa scan / absen padahal sudah di lokasi?',
     a: 'Untuk role Staff, RAOS block scan/absen kalau posisi Anda lebih dari 50 meter di luar radius pickup point. Aktifkan lokasi HP (Setting → Lokasi → RAOS → Izinkan) dan pastikan berada dekat titik pickup. Jarak & titik terdekat ditampilkan di banner atas layar scan/absen.',
   },

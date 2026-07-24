@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 import MenalaLogo, { MenalaMark } from '@/components/MenalaLogo'
 import { Eye, EyeOff, Lock, Mail, ShieldCheck, Send, ArrowLeft, Loader2 } from 'lucide-react'
+import { defaultLandingForRole } from '@/lib/roleGuard'
 
 type Mode = 'password' | 'magic-link' | 'forgot-password'
 
@@ -22,9 +23,11 @@ export default function LoginPage() {
   const [info, setInfo] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.replace('/dashboard')
-      else setCheckingSession(false)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { setCheckingSession(false); return }
+      const { data: profile } = await supabase.from('user_profiles')
+        .select('role').eq('id', session.user.id).single()
+      router.replace(defaultLandingForRole(profile?.role))
     })
   }, [router])
 

@@ -1,5 +1,88 @@
 # STATUS.md — RAOS (Menala Soeta PWA)
-*Diupdate: 2026-07-24 (sesi 16 — housekeeping pending sesi 15)*
+*Diupdate: 2026-07-24 (sesi 16 lanjutan — Settings audit + offline MVP)*
+
+## SESI 16 (24 Juli 2026, lanjutan) — Settings audit sisa + Offline queue MVP
+
+Fokus: bereskan pending Settings audit sesi 14 pagi yang masih kuning +
+kick off Offline mode (MVP untuk absensi).
+
+### Ringkas commit sesi 16 lanjutan
+
+| Commit | Ringkas |
+|---|---|
+| `7f657ac` | feat(geo): hard-block scan+absensi Opsi A untuk role staff (+50m tolerance) |
+| `eb0d84a` | docs(kpi): blueprint port HRIS KPI Engine V1 → RAOS Soeta |
+| `9ce28ee` | docs: catat keputusan skip Leaked Password Protection (Pro-only) |
+| `037d22c` | feat(notif): wire Toggle Suara/Getaran ke pipeline push + fix logActivity |
+| `fab6889` | feat(settings): Bantuan/FAQ page + Ukuran Teks global scale |
+| (next) | feat(offline): IndexedDB mutation queue MVP untuk absensi |
+
+### Migration Supabase sesi 16
+- `raos_035_notif_prefs_add_audio` — extend `user_profiles.notification_prefs`
+  jsonb dengan `suara` + `getaran` (default true, backfill 3 baris existing)
+
+### Edge Function
+- `raos-send-push` **v7 ACTIVE** — per-user payload: `silent=!suara`,
+  `vibrate=false kalau getaran off`. Ambil prefs sekali, dipakai untuk
+  filter kategori + per-user payload tweak
+
+### 5 Fitur landed sesi 16 lanjutan
+
+1. **Hard-block geofence Opsi A** — staff di-block kalau `jarak > radius + 50m`,
+   direksi/koord/mgmt/admin bypass. Banner status 3-warna (hijau/kuning/merah).
+   Alert absensi dengan alasan konkret.
+2. **KPI blueprint** — `KPI_PORT_PLAN.md` di root repo, adopsi 3-pilar dari
+   HRIS KPIEngine V1. Sumber data ganti ke Supabase (scan_orders +
+   raos_attendance + raos_drivers). Butuh 5 konstanta dari user sebelum
+   koding.
+3. **Toggle Suara/Getaran wire** — client sync ke DB, Edge Function pass
+   silent/vibrate ke SW, SW respect. Per-user preference.
+4. **Bantuan/FAQ** — route `/settings/bantuan` dengan 8 FAQ collapsible +
+   info app + CTA chat admin. Rewire 2 button placeholder di /settings.
+5. **Ukuran Teks** — `globals.css` root font-size 87.5/100/112.5% via
+   `html[data-text-size]`. Inline script layout.tsx cegah FOUC. Apply
+   saat save prefs.
+6. **Offline queue MVP** — `lib/offlineQueue.ts` (idb wrapper) +
+   `lib/offlineSyncer.ts` (flushAll + online listener). Wire ke
+   `/absensi submitAbsensi`: kalau network error, enqueue payload
+   → banner header tampilkan "N data menunggu sync". Auto-drain saat
+   online. **Scope MVP**: absensi in/out saja. Scan + chat + selfie
+   blob → sesi 18.
+
+### Fix bonus
+- `lib/activity.ts` — ganti `getUser()` → `getSession()` (bug pattern
+  sama seperti push sesi 15). `activity_logs` sebelumnya sering skip
+  karena getUser bisa timeout meski session valid.
+
+### Keputusan sesi 16
+- **Skip Leaked Password Protection** — Pro-only, tidak worth upgrade.
+  Login RAOS pakai PIN 6-digit numerik dari SSoT sheet, bukan password
+  user-picked. Catat di RULE_PROJECT.md § 4 supaya sesi berikutnya
+  tidak revisit.
+- **Skip Bahasa i18n** — user pilih 3 dari 4 opsi (Bantuan + Ukuran
+  Teks + Offline), skip i18n untuk sesi 16.
+
+### State akhir sesi 16
+- Migration Supabase: 35 (`raos_035`)
+- Edge Function `raos-send-push`: v7 ACTIVE
+- GAS: 14 file, `13_staff_sync.gs` cleanup mapping direksi
+- Vercel: commit terbaru auto-deployed
+- `user_profiles`: 3 staff SSoT + admin manual, `notification_prefs`
+  sekarang punya 9 field (7 kategori + master + suara + getaran)
+- `push_subscriptions`: 1 (Bobby)
+- Baru: route `/settings/bantuan` (8 FAQ), IndexedDB store `raos_offline`
+  (kalau ada queue)
+
+### Pending sesi 17
+- [ ] User klik ON toggle Suara/Getaran di HP untuk test SW respect flag
+- [ ] KPI konstanta di [KPI_PORT_PLAN.md](KPI_PORT_PLAN.md) — 5 nilai perlu ditetapkan
+- [ ] Bahasa i18n (skip sesi 16, ke sesi 17 kalau prioritas)
+- [ ] Offline mode extend ke scan_orders + chat_messages + selfie blob
+  upload chain
+- [ ] Conflict resolver (2 device edit sama)
+- [ ] Test end-to-end di HP: airplane mode → absen masuk → back online → verifikasi sync
+
+---
 
 ## SESI 16 (24 Juli 2026) — Housekeeping pending sesi 15
 

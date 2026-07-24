@@ -15,6 +15,7 @@ import SelfieCapture from '@/components/SelfieCapture'
 import { checkGeofence, shouldBlockByGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
 import { logActivity } from '@/lib/activity'
+import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import { detectCurrentShift, formatShiftTime, isLate, type Shift } from '@/lib/shift'
 import type { UserProfile, Attendance } from '@/types'
 
@@ -114,29 +115,45 @@ export default function AbsensiPage() {
     setLoading(true)
     const dateStr = new Date().toISOString().split('T')[0]
     const now = new Date().toISOString()
+    // Selfie upload — kalau offline, path akan null (bucket Storage butuh network).
+    // Row absensi tetap direkam ke queue supaya jam masuk tercatat.
     const selfiePath = await uploadSelfie(selfieBlob)
 
     if (type === 'in') {
-      // Status otomatis: terlambat jika melewati start shift + toleransi (spec Absensi.md)
       const status = shift && isLate(shift, new Date()) ? 'terlambat' : 'hadir'
-      const { data } = await supabase.from('raos_attendance').upsert({
+      const payload = {
         staff_id: user.id, branch_id: user.branch_id, date: dateStr,
         shift_id: shift?.id ?? null,
         check_in_at: now,
         check_in_lat: location?.lat ?? null, check_in_lng: location?.lng ?? null,
         pickup_point_id: geofence?.nearestPointId ?? null,
         selfie_in_url: selfiePath, is_location_valid: locationValid, status,
-      }, { onConflict: 'staff_id,date' }).select().single()
-      setToday(data)
-      logActivity('absensi_masuk', `${status} @ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
+      }
+      const { data, error } = await supabase.from('raos_attendance')
+        .upsert(payload, { onConflict: 'staff_id,date' })
+        .select().single()
+      if (error && isNetworkError(error)) {
+        await enqueue('raos_attendance_in', payload)
+        logActivity('absensi_masuk_offline', `queued ${status} @ ${geofence?.nearestPointName ?? '-'}`)
+      } else {
+        setToday(data)
+        logActivity('absensi_masuk', `${status} @ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
+      }
     } else {
-      const { data } = await supabase.from('raos_attendance').update({
+      const updates = {
         check_out_at: now,
         check_out_lat: location?.lat ?? null, check_out_lng: location?.lng ?? null,
         selfie_out_url: selfiePath,
-      }).eq('staff_id', user.id).eq('date', dateStr).select().single()
-      setToday(data)
-      logActivity('absensi_pulang', `@ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
+      }
+      const { data, error } = await supabase.from('raos_attendance')
+        .update(updates).eq('staff_id', user.id).eq('date', dateStr).select().single()
+      if (error && isNetworkError(error)) {
+        await enqueue('raos_attendance_out', { staff_id: user.id, date: dateStr, ...updates })
+        logActivity('absensi_pulang_offline', `queued @ ${geofence?.nearestPointName ?? '-'}`)
+      } else {
+        setToday(data)
+        logActivity('absensi_pulang', `@ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
+      }
     }
     setLoading(false)
     setSelfieBlob(null)

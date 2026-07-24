@@ -23,12 +23,18 @@ import { openDB, type IDBPDatabase } from 'idb'
 const DB_NAME = 'raos_offline'
 const DB_VERSION = 1
 
-export type QueueKind = 'raos_attendance_in' | 'raos_attendance_out'
+export type QueueKind =
+  | 'raos_attendance_in'
+  | 'raos_attendance_out'
+  | 'scan_order'
+  | 'chat_message'
 
 export interface QueuedItem {
   id?: number
   kind: QueueKind
   payload: Record<string, unknown>
+  /** Blob assets untuk upload — mis. selfie / chat foto. Key = kolom target, value = Blob. */
+  blobs?: Record<string, { blob: Blob; contentType: string; targetBucket: string; pathHint: string }>
   createdAt: number
   lastTriedAt?: number
   attempts: number
@@ -57,11 +63,16 @@ function getDB(): Promise<IDBPDatabase> {
   return dbPromise
 }
 
-export async function enqueue(kind: QueueKind, payload: Record<string, unknown>): Promise<number> {
+export async function enqueue(
+  kind: QueueKind,
+  payload: Record<string, unknown>,
+  blobs?: QueuedItem['blobs'],
+): Promise<number> {
   const db = await getDB()
   const item: QueuedItem = {
     kind,
     payload,
+    blobs,
     createdAt: Date.now(),
     attempts: 0,
   }

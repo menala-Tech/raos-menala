@@ -102,12 +102,12 @@ export default function AbsensiPage() {
     setStep('camera')
   }
 
-  async function uploadSelfie(blob: Blob): Promise<string | null> {
-    if (!user) return null
+  async function uploadSelfie(blob: Blob): Promise<{ path: string | null; err?: unknown }> {
+    if (!user) return { path: null }
     const path = `${user.id}/${type}-${Date.now()}.jpg`
     const { error } = await supabase.storage.from('selfies').upload(path, blob, { contentType: 'image/jpeg' })
-    if (error) return null
-    return path
+    if (error) return { path: null, err: error }
+    return { path }
   }
 
   async function submitAbsensi() {
@@ -115,9 +115,14 @@ export default function AbsensiPage() {
     setLoading(true)
     const dateStr = new Date().toISOString().split('T')[0]
     const now = new Date().toISOString()
-    // Selfie upload — kalau offline, path akan null (bucket Storage butuh network).
-    // Row absensi tetap direkam ke queue supaya jam masuk tercatat.
-    const selfiePath = await uploadSelfie(selfieBlob)
+    // Selfie upload — kalau gagal karena network, selfie blob ikut dienqueue
+    // (syncer akan upload saat online + inject path ke row sebelum insert).
+    const upload = await uploadSelfie(selfieBlob)
+    const selfiePath = upload.path
+    const selfieOffline = !upload.path && !!upload.err && isNetworkError(upload.err)
+    // Path hint kalau selfie masih pending upload — sama dengan format uploadSelfie
+    // supaya konsisten dengan bucket policy per-user folder.
+    const pendingPath = `${user.id}/${type}-${Date.now()}.jpg`
 
     if (type === 'in') {
       const status = shift && isLate(shift, new Date()) ? 'terlambat' : 'hadir'
@@ -132,8 +137,11 @@ export default function AbsensiPage() {
       const { data, error } = await supabase.from('raos_attendance')
         .upsert(payload, { onConflict: 'staff_id,date' })
         .select().single()
-      if (error && isNetworkError(error)) {
-        await enqueue('raos_attendance_in', payload)
+      if ((error && isNetworkError(error)) || selfieOffline) {
+        const blobs = selfieOffline
+          ? { selfie_in_url: { blob: selfieBlob, contentType: 'image/jpeg', targetBucket: 'selfies', pathHint: pendingPath } }
+          : undefined
+        await enqueue('raos_attendance_in', payload, blobs)
         logActivity('absensi_masuk_offline', `queued ${status} @ ${geofence?.nearestPointName ?? '-'}`)
       } else {
         setToday(data)
@@ -147,8 +155,11 @@ export default function AbsensiPage() {
       }
       const { data, error } = await supabase.from('raos_attendance')
         .update(updates).eq('staff_id', user.id).eq('date', dateStr).select().single()
-      if (error && isNetworkError(error)) {
-        await enqueue('raos_attendance_out', { staff_id: user.id, date: dateStr, ...updates })
+      if ((error && isNetworkError(error)) || selfieOffline) {
+        const blobs = selfieOffline
+          ? { selfie_out_url: { blob: selfieBlob, contentType: 'image/jpeg', targetBucket: 'selfies', pathHint: pendingPath } }
+          : undefined
+        await enqueue('raos_attendance_out', { staff_id: user.id, date: dateStr, ...updates }, blobs)
         logActivity('absensi_pulang_offline', `queued @ ${geofence?.nearestPointName ?? '-'}`)
       } else {
         setToday(data)

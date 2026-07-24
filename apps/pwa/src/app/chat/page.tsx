@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
@@ -343,10 +344,25 @@ function ChatPageInner() {
     if (!text.trim() || !activeRoom || !user) return
     setSending(true)
     const content = text.trim(); setText('')
-    const { data, error } = await supabase.from('chat_messages').insert({
-      room_id: activeRoom.id, sender_id: user.id, type: 'text', content,
-    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+    // client_id UUID untuk idempotency saat offline replay (migration raos_036).
+    const clientId = crypto.randomUUID()
+    const payload = {
+      room_id: activeRoom.id, sender_id: user.id, type: 'text', content, client_id: clientId,
+    }
+    const { data, error } = await supabase.from('chat_messages').insert(payload)
+      .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     setSending(false)
+    if (error && isNetworkError(error)) {
+      await enqueue('chat_message', payload)
+      // Optimistic append supaya user lihat message-nya langsung (dedup by
+      // client_id kalau realtime insert nyampe duluan setelah re-online).
+      setMessages(prev => prev.some((m: any) => m.client_id === clientId) ? prev : [
+        ...prev,
+        { ...payload, id: `local-${clientId}`, created_at: new Date().toISOString(), user_profiles: { full_name: (user as any).full_name, role: user.role } } as any,
+      ])
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+      return
+    }
     if (error) { alert('Gagal kirim: ' + error.message); setText(content); return }
     if (data) {
       setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])

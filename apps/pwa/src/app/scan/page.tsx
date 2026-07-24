@@ -8,6 +8,7 @@ import BarcodeScanner from '@/components/BarcodeScanner'
 import { checkGeofence, shouldBlockByGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
 import { logActivity } from '@/lib/activity'
+import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
@@ -95,13 +96,35 @@ export default function ScanPage() {
 
     setScanState('scanning')
 
-    // Cari driver via barcode ATAU driver_id (tabel raos_drivers milik RAOS sendiri)
-    const { data: driver } = await supabase
+    // Cari driver dari cache Supabase (butuh network).
+    const { data: driver, error: driverErr } = await supabase
       .from('raos_drivers')
       .select('id, driver_id, name, vehicle_plate, vehicle_type, barcode')
       .or(`barcode.eq.${barcode.trim()},driver_id.eq.${barcode.trim()}`)
       .eq('is_active', true)
       .single()
+
+    // Kalau offline saat lookup driver → queue by driver_id/barcode string,
+    // syncer akan resolve driver saat replay dan skip kalau driver tidak ada.
+    if (driverErr && isNetworkError(driverErr)) {
+      const scanId = `SCN-${Date.now()}`
+      await enqueue('scan_order', {
+        scan_id: scanId,
+        driver_id_or_barcode: barcode.trim(),
+        staff_id: user.id,
+        pickup_point_id: geofence?.nearestPointId ?? null,
+        scanned_at: new Date().toISOString(),
+        latitude: location?.lat ?? null,
+        longitude: location?.lng ?? null,
+        status: 'pending',
+        _needs_driver_lookup: true,
+      })
+      setScanState('success')
+      setLastScan({ scan_id: scanId, queued: true, driver_hint: barcode.trim() })
+      logActivity('scan_offline', `queued ${scanId} for ${barcode.trim()}`)
+      if (inputRef.current) inputRef.current.value = ''
+      return
+    }
 
     if (!driver) {
       setScanState('error')
@@ -110,22 +133,28 @@ export default function ScanPage() {
     }
 
     const scanId = `SCN-${Date.now()}`
+    const payload = {
+      scan_id: scanId,
+      driver_id: driver.id,
+      staff_id: user.id,
+      pickup_point_id: geofence?.nearestPointId ?? null,
+      scanned_at: new Date().toISOString(),
+      latitude: location?.lat,
+      longitude: location?.lng,
+      status: 'pending',
+    }
     const { data: scan, error } = await supabase
       .from('scan_orders')
-      .insert({
-        scan_id: scanId,
-        driver_id: driver.id,
-        staff_id: user.id,
-        pickup_point_id: geofence?.nearestPointId ?? null,
-        scanned_at: new Date().toISOString(),
-        latitude: location?.lat,
-        longitude: location?.lng,
-        status: 'pending',
-      })
+      .insert(payload)
       .select('*, raos_drivers(id, driver_id, name, vehicle_plate, vehicle_type)')
       .single()
 
-    if (error) {
+    if (error && isNetworkError(error)) {
+      await enqueue('scan_order', payload)
+      setScanState('success')
+      setLastScan({ ...payload, queued: true, raos_drivers: driver })
+      logActivity('scan_offline', `queued ${scanId} — ${driver.name}`)
+    } else if (error) {
       setScanState('error')
       setLastScan({ error: 'Gagal menyimpan scan. Coba lagi.' })
     } else {

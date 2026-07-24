@@ -7,92 +7,104 @@
 // airport untuk SEMUA cabang RIFIM, dipakai bersama oleh semua PWA.
 // RAOS HANYA boleh membaca (read-only), tidak pernah menulis balik ke sheet.
 //
-// RAOS = Bandara Soekarno-Hatta ("Soeta") → hanya tarik tab
-// "ID Rifim Airport Soeta" dari spreadsheet itu, BUKAN cabang lain.
+// Multi-cabang (P1.4, sesi 16 lanjutan) — RAOS sekarang tarik SEMUA tab
+// airport aktif di spreadsheet SSOT. Setiap tab = 1 cabang → mapping
+// tab-slug ke branch_id lewat kolom slug branches.
 //
 // Arah sync: Google Sheets → Supabase (satu arah). Kolom SSOT (driver_id,
-// name, is_active) di-refresh tiap sync; kolom milik RAOS sendiri (phone,
-// vehicle_type, vehicle_plate, barcode, branch_id — diisi manual via
-// /admin) TIDAK PERNAH ditimpa oleh sync ini.
+// name, is_active) di-refresh; kolom RAOS (phone, vehicle_*, barcode,
+// branch_id) di-set otomatis pertama kali dari tab, tapi tidak akan ditimpa
+// kalau admin sudah refine manual.
 
 const DRIVER_AIRPORT_SHEET_ID =
   PropertiesService.getScriptProperties().getProperty('DRIVER_AIRPORT_SHEET_ID')
   || '1FEZxyHPx_GCQKw92hLSf6QxxkXgZn5R1sRswOYM_Tlc'
 
-const DRIVER_AIRPORT_TAB_NAME = 'ID Rifim Airport Soeta'
-
 // Kolom tab SSOT (0-based): 0:No  1:ID Driver  2:Nama Driver  3:Cabang
 
-function getDriverAirportSheet_() {
-  const ss = SpreadsheetApp.openById(DRIVER_AIRPORT_SHEET_ID)
-  let sh = ss.getSheetByName(DRIVER_AIRPORT_TAB_NAME)
+/** Semua tab airport aktif — nama tab = slug branches. */
+const DRIVER_AIRPORT_TABS = [
+  'ID Rifim Airport Soeta',
+  'ID Rifim Airport Batam',
+  'ID Rifim Airport Jambi',
+  'ID Rifim Airport Balikpapan',
+  'ID Rifim Airport Manado',
+  'ID Rifim Airport Pekanbaru',
+  'ID Rifim Airport Makassar',
+]
 
-  if (!sh) {
-    // Fallback: cari tab yang namanya mengandung "Soeta" kalau nama persis
-    // berubah di spreadsheet SSOT (mis. spasi/kapitalisasi beda)
-    const fallback = ss.getSheets().find(s => /soeta/i.test(s.getName()))
-    if (fallback) {
-      logSistem('warning', 'getDriverAirportSheet_', 'warning',
-        `Tab "${DRIVER_AIRPORT_TAB_NAME}" tidak ditemukan, pakai fallback "${fallback.getName()}"`)
-      sh = fallback
-    }
-  }
-
-  if (!sh) {
-    const allNames = ss.getSheets().map(s => s.getName()).join(', ')
-    throw new Error(`Tab driver Soeta tidak ditemukan di spreadsheet SSOT. Tab tersedia: ${allNames}`)
-  }
-  return sh
+function getDriverAirportSpreadsheet_() {
+  return SpreadsheetApp.openById(DRIVER_AIRPORT_SHEET_ID)
 }
 
 function syncDriverAirportFromSSOT() {
   let inserted = 0, updated = 0, deactivated = 0, errors = 0
 
   try {
-    const sh = getDriverAirportSheet_()
-    const rows = sh.getDataRange().getValues().slice(1) // skip header
+    const ss = getDriverAirportSpreadsheet_()
+    const branchMap = kpiBranchMap_() // dari 13_staff_sync.gs — slug → branch_id
     const seenDriverIds = []
+    const availableTabNames = ss.getSheets().map(s => s.getName())
 
-    rows.forEach((row, i) => {
-      const [, driverId, namaDriver] = row
-      if (!driverId) return
-
-      const idStr = String(driverId).trim()
-      seenDriverIds.push(idStr)
-
-      try {
-        const existing = callSupabase(
-          `raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}&select=id,source`
-        )
-
-        if (existing && existing.length > 0) {
-          if (existing[0].source !== 'ssot_driver_airport') {
-            // Driver sudah ada tapi diinput manual sebelumnya — jangan
-            // timpa, cukup log supaya kelihatan ada duplikat potensial.
-            logSistem('warning', 'syncDriverAirportFromSSOT', 'warning',
-              `Driver ${idStr} sudah ada dengan source=manual, dilewati (tidak ditimpa)`)
-            return
-          }
-          callSupabase(`raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}`, 'PATCH', {
-            name: String(namaDriver).trim(),
-            is_active: true,
-            ssot_synced_at: new Date().toISOString(),
-          })
-          updated++
-        } else {
-          callSupabase('raos_drivers', 'POST', {
-            driver_id: idStr,
-            name: String(namaDriver).trim(),
-            source: 'ssot_driver_airport',
-            is_active: true,
-            ssot_synced_at: new Date().toISOString(),
-          })
-          inserted++
-        }
-      } catch (e) {
-        errors++
-        logSistem('error', 'syncDriverAirportFromSSOT', 'error', `Baris ${i + 2} (${idStr}): ${e.message}`)
+    DRIVER_AIRPORT_TABS.forEach(tabName => {
+      const sh = ss.getSheetByName(tabName)
+      if (!sh) {
+        logSistem('warning', 'syncDriverAirportFromSSOT', 'warning',
+          `Tab "${tabName}" tidak ditemukan di SSOT (tersedia: ${availableTabNames.join(', ')})`)
+        return
       }
+      const branchId = branchMap[tabName] || null
+      if (!branchId) {
+        logSistem('warning', 'syncDriverAirportFromSSOT', 'warning',
+          `Branch untuk slug "${tabName}" tidak ditemukan di tabel branches — driver akan di-set branch_id NULL`)
+      }
+      const rows = sh.getDataRange().getValues().slice(1) // skip header
+
+      rows.forEach((row, i) => {
+        const [, driverId, namaDriver] = row
+        if (!driverId) return
+
+        const idStr = String(driverId).trim()
+        seenDriverIds.push(idStr)
+
+        try {
+          const existing = callSupabase(
+            `raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}&select=id,source,branch_id`
+          )
+
+          if (existing && existing.length > 0) {
+            if (existing[0].source !== 'ssot_driver_airport') {
+              logSistem('warning', 'syncDriverAirportFromSSOT', 'warning',
+                `Driver ${idStr} sudah ada dengan source=manual, dilewati (tidak ditimpa)`)
+              return
+            }
+            const patch = {
+              name: String(namaDriver).trim(),
+              is_active: true,
+              ssot_synced_at: new Date().toISOString(),
+            }
+            // Set branch_id kalau belum ada nilai eksplisit — jangan timpa
+            // kalau admin sudah pindahkan driver ke cabang lain manual.
+            if (branchId && !existing[0].branch_id) patch.branch_id = branchId
+            callSupabase(`raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}`, 'PATCH', patch)
+            updated++
+          } else {
+            callSupabase('raos_drivers', 'POST', {
+              driver_id: idStr,
+              name: String(namaDriver).trim(),
+              branch_id: branchId,
+              source: 'ssot_driver_airport',
+              is_active: true,
+              ssot_synced_at: new Date().toISOString(),
+            })
+            inserted++
+          }
+        } catch (e) {
+          errors++
+          logSistem('error', 'syncDriverAirportFromSSOT', 'error',
+            `${tabName} baris ${i + 2} (${idStr}): ${e.message}`)
+        }
+      })
     })
 
     // Nonaktifkan driver ssot_driver_airport yang sudah tidak ada di sheet

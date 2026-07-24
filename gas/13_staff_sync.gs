@@ -32,11 +32,22 @@ const MASTER_STAFF_SHEET_ID =
   || '1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw'
 
 const MASTER_STAFF_TAB_NAME = 'MASTER DATA STAFF'
-// RAOS tarik staff dari 2 cabang di sheet:
-// 1. 'ID Rifim Airport Soeta' → staff operasional Soeta
-// 2. 'Head Office' → Direksi/Management yang mengurus lintas cabang
-//    (mereka perlu akses RAOS untuk monitoring)
-const RAOS_ALLOWED_BRANCHES = ['ID Rifim Airport Soeta', 'Head Office']
+// Multi-cabang (P1.4, sesi 16 lanjutan) — RAOS sekarang menampung 9 cabang
+// aktif RIFIM + Head Office. Semua staff RIFIM di-sync ke user_profiles;
+// scope akses per cabang di-enforce oleh RLS `is_branch_in_scope()` (mig.
+// raos_038). Head Office masuk sebagai direksi/management (tidak scoped).
+const RAOS_ALLOWED_BRANCHES = [
+  'ID Rifim Airport Soeta',
+  'ID Rifim Airport Batam',
+  'ID Rifim Airport Jambi',
+  'ID Rifim Airport Balikpapan',
+  'ID Rifim Airport Manado',
+  'ID Rifim Airport Pekanbaru',
+  'ID Rifim Airport Makassar',
+  'ID Rifim Batam',
+  'ID Rifim Jambi Luar',
+  'Head Office',
+]
 
 function getMasterStaffSheet_() {
   const ss = SpreadsheetApp.openById(MASTER_STAFF_SHEET_ID)
@@ -87,6 +98,14 @@ function normalizePin_(rawPin) {
   return { valid: true, value: s }
 }
 
+/** Ambil map slug → branch_id dari Supabase supaya sync bisa auto-set branch_id staff. */
+function kpiBranchMap_() {
+  const rows = callSupabase('branches?select=id,slug') || []
+  const map = {}
+  rows.forEach(r => { if (r.slug) map[r.slug] = r.id })
+  return map
+}
+
 function syncStaffFromSSOT() {
   let inserted = 0, updated = 0, deactivated = 0, skipped = 0, errors = 0
   const warnings = []
@@ -96,13 +115,19 @@ function syncStaffFromSSOT() {
     const rows = sh.getDataRange().getValues().slice(1) // skip header
     const seenStaffIds = []
     const now = new Date().toISOString()
+    const branchMap = kpiBranchMap_()
+    // Head Office tidak punya branch entry — direksi/management bebas cabang
+    // (branch_id NULL, is_branch_in_scope bypass via role).
 
     rows.forEach((row, i) => {
       const rowNum = i + 2 // sheet row (1-based, +1 for skipped header)
       const [emailRaw, namaRaw, /* gaji */, idCabangRaw, staffIdRaw, jabatanRaw, phoneRaw, pinRaw] = row
 
       const idCabang = String(idCabangRaw || '').trim()
-      if (RAOS_ALLOWED_BRANCHES.indexOf(idCabang) < 0) return // bukan Soeta/HO — lewati
+      if (RAOS_ALLOWED_BRANCHES.indexOf(idCabang) < 0) return // bukan cabang aktif — lewati
+
+      // Auto-map slug ID CABANG → branches.id (P1.4). Head Office → NULL (bebas cabang).
+      const branchId = branchMap[idCabang] || null
 
       const email = String(emailRaw || '').trim().toLowerCase()
       const nama = String(namaRaw || '').replace(/⁠/g, '').trim() // buang word joiner
@@ -155,7 +180,7 @@ function syncStaffFromSSOT() {
 
         // 4) Upsert user_profiles
         const existingProfile = callSupabase(
-          `user_profiles?id=eq.${authId}&select=id,source,staff_id`
+          `user_profiles?id=eq.${authId}&select=id,source,staff_id,branch_id`
         )
 
         if (existingProfile && existingProfile.length > 0) {
@@ -166,8 +191,10 @@ function syncStaffFromSSOT() {
             skipped++
             return
           }
-          // Update kolom SSoT (branch_id tidak disentuh sync — biarkan admin yang set)
-          callSupabase(`user_profiles?id=eq.${authId}`, 'PATCH', {
+          // Update kolom SSoT + branch_id (auto-map dari slug ID CABANG, P1.4).
+          // Sub-terminal Soeta (T1/T2/T3) tetap di-set admin manual dari /admin
+          // — sheet SSOT tidak punya info terminal, hanya cabang top-level.
+          const patch = {
             staff_id: staffId,
             full_name: nama,
             role: role,
@@ -175,16 +202,25 @@ function syncStaffFromSSOT() {
             source: 'ssot_master_staff',
             ssot_synced_at: now,
             is_active: true,
-          })
+          }
+          // Hanya set branch_id kalau belum ada value spesifik (T1/T2/T3
+          // yang di-set admin manual di /admin tidak boleh ditimpa cabang
+          // top-level). Kalau existing NULL atau parent Soeta, isi.
+          if (branchId && (!existing.branch_id || existing.branch_id === branchId)) {
+            patch.branch_id = branchId
+          }
+          callSupabase(`user_profiles?id=eq.${authId}`, 'PATCH', patch)
           updated++
         } else {
-          // Insert baru (branch_id sengaja null — admin yang set T1/T2/T3 via /admin)
+          // Insert baru — branch_id auto-set dari slug SSOT.
+          // Untuk staff Soeta, admin masih perlu refine ke T1/T2/T3 via /admin.
           callSupabase('user_profiles', 'POST', {
             id: authId,
             staff_id: staffId,
             full_name: nama,
             role: role,
             phone: phone,
+            branch_id: branchId,
             source: 'ssot_master_staff',
             ssot_synced_at: now,
             is_active: true,

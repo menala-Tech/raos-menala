@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import SelfieCapture from '@/components/SelfieCapture'
-import { checkGeofence, type GeofenceResult } from '@/lib/geo'
+import { checkGeofence, shouldBlockByGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
 import { logActivity } from '@/lib/activity'
 import { detectCurrentShift, formatShiftTime, isLate, type Shift } from '@/lib/shift'
@@ -88,6 +88,15 @@ export default function AbsensiPage() {
 
   async function handleAbsensi(absenType: 'in' | 'out') {
     if (!user) return
+    if (shouldBlockByGeofence(user.role, geofence, locationStatus)) {
+      const reason = locationStatus === 'unavailable'
+        ? 'GPS tidak terdeteksi. Aktifkan lokasi HP lalu coba lagi.'
+        : locationStatus === 'checking'
+          ? 'Menunggu lokasi terdeteksi. Coba beberapa detik lagi.'
+          : `Anda ${geofence?.overshootMeters}m di luar radius ${geofence?.nearestPointName ?? ''}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m — absensi dibatalkan.`
+      alert(reason)
+      return
+    }
     setType(absenType)
     setStep('camera')
   }
@@ -208,10 +217,15 @@ export default function AbsensiPage() {
                 </div>
                 {locationStatus === 'done' && geofence && (
                   <div className={`text-center text-xs font-bold py-1.5 rounded-lg
-                    ${geofence.isValid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                    ${geofence.isValid ? 'bg-green-100 text-green-700'
+                      : (geofence.overshootMeters ?? 0) > GEOFENCE_TOLERANCE_METERS && user?.role === 'staff'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-yellow-100 text-yellow-700'}`}>
                     {geofence.isValid
                       ? `✓ DALAM AREA — ${geofence.nearestPointName}`
-                      : `⚠ ${geofence.nearestPointName} — ${geofence.distanceMeters}m dari titik`}
+                      : (geofence.overshootMeters ?? 0) > GEOFENCE_TOLERANCE_METERS && user?.role === 'staff'
+                        ? `✕ DILUAR RADIUS — ${geofence.nearestPointName} (+${geofence.overshootMeters}m, batas ${GEOFENCE_TOLERANCE_METERS}m)`
+                        : `⚠ ${geofence.nearestPointName} — ${geofence.distanceMeters}m dari titik`}
                   </div>
                 )}
                 <button

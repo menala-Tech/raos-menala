@@ -18,6 +18,29 @@ export interface GeofenceResult {
   nearestPointId: string | null
   nearestPointName: string | null
   distanceMeters: number | null
+  radiusMeters: number | null
+  overshootMeters: number | null
+}
+
+// Tolerance GPS drift indoor terminal Soeta (atap struktur baja bikin GPS
+// meleset 10-30m). Kalau jarak > radius + tolerance → hard-block staff.
+export const GEOFENCE_TOLERANCE_METERS = 50
+
+/**
+ * Role staff dihard-block kalau di luar (radius + 50m tolerance).
+ * Direksi/koordinator/management/admin bypass hard-block, tapi
+ * `is_location_valid` tetap direkam untuk audit.
+ */
+export function shouldBlockByGeofence(
+  role: string | null | undefined,
+  geo: GeofenceResult | null,
+  locationStatus: 'checking' | 'valid' | 'invalid' | 'unavailable' | 'done'
+): boolean {
+  if (role !== 'staff') return false
+  if (locationStatus === 'checking') return true
+  if (locationStatus === 'unavailable') return true
+  if (!geo || geo.overshootMeters === null) return true
+  return geo.overshootMeters > GEOFENCE_TOLERANCE_METERS
 }
 
 /**
@@ -45,7 +68,7 @@ export async function checkGeofence(
   const { data: points } = await query
 
   if (!points || points.length === 0) {
-    return { isValid: false, nearestPointId: null, nearestPointName: null, distanceMeters: null }
+    return { isValid: false, nearestPointId: null, nearestPointName: null, distanceMeters: null, radiusMeters: null, overshootMeters: null }
   }
 
   let nearest = points[0]
@@ -56,10 +79,13 @@ export async function checkGeofence(
     if (d < nearestDist) { nearest = p; nearestDist = d }
   }
 
+  const dist = Math.round(nearestDist)
   return {
     isValid: nearestDist <= nearest.radius_meters,
     nearestPointId: nearest.id,
     nearestPointName: nearest.name,
-    distanceMeters: Math.round(nearestDist),
+    distanceMeters: dist,
+    radiusMeters: nearest.radius_meters,
+    overshootMeters: Math.max(0, dist - nearest.radius_meters),
   }
 }

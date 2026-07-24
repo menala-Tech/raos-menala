@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import BarcodeScanner from '@/components/BarcodeScanner'
-import { checkGeofence, type GeofenceResult } from '@/lib/geo'
+import { checkGeofence, shouldBlockByGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
 import { logActivity } from '@/lib/activity'
 import MenalaLogo from '@/components/MenalaLogo'
@@ -80,6 +80,19 @@ export default function ScanPage() {
 
   const handleScan = useCallback(async (barcode: string) => {
     if (!barcode.trim() || !user) return
+
+    if (shouldBlockByGeofence(user.role, geofence, locationStatus)) {
+      setScanState('error')
+      setLastScan({
+        error: locationStatus === 'unavailable'
+          ? 'GPS tidak terdeteksi. Scan dibatalkan — aktifkan lokasi HP lalu coba lagi.'
+          : locationStatus === 'checking'
+            ? 'Menunggu lokasi terdeteksi. Coba beberapa detik lagi.'
+            : `Anda berada ${geofence?.overshootMeters}m di luar radius pickup point ${geofence?.nearestPointName ?? ''}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m. Scan dibatalkan.`,
+      })
+      return
+    }
+
     setScanState('scanning')
 
     // Cari driver via barcode ATAU driver_id (tabel raos_drivers milik RAOS sendiri)
@@ -122,7 +135,7 @@ export default function ScanPage() {
     }
 
     if (inputRef.current) inputRef.current.value = ''
-  }, [user, location, geofence])
+  }, [user, location, geofence, locationStatus])
 
   function reset() {
     setScanState('idle')
@@ -155,9 +168,12 @@ export default function ScanPage() {
           {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
           {locationStatus === 'valid' && geofence &&
             `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`}
-          {locationStatus === 'invalid' && geofence &&
-            `Di luar radius geo-fence — ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Scan tetap bisa dilakukan.`}
-          {locationStatus === 'unavailable' && 'GPS tidak terdeteksi — scan tetap bisa dilakukan'}
+          {locationStatus === 'invalid' && geofence && user?.role === 'staff' &&
+            `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${GEOFENCE_TOLERANCE_METERS}m — scan akan diblok kalau lewat.`}
+          {locationStatus === 'invalid' && geofence && user?.role !== 'staff' &&
+            `Di luar radius ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Scan tetap bisa (bypass role).`}
+          {locationStatus === 'unavailable' && user?.role === 'staff' && 'GPS tidak terdeteksi — scan diblok. Aktifkan lokasi HP.'}
+          {locationStatus === 'unavailable' && user?.role !== 'staff' && 'GPS tidak terdeteksi — scan tetap bisa (bypass role).'}
         </div>
 
         {/* Scanner Area — kamera langsung tampil saat buka tab, manual jadi FAB pojok */}

@@ -13,7 +13,8 @@ function onOpen() {
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('🚗 Driver')
-        .addItem('🔄 Sync Driver Airport Soeta (SSOT)', 'syncDriverAirportFromSSOT')
+        .addItem('🔄 Sync Driver Airport (SSOT — 7 tab)', 'syncDriverAirportFromSSOT')
+        .addItem('🔄 Sync Driver Eksternal (SSOT — Batam + Jambi Luar)', 'syncDriverExternalFromSSOT')
         // initMockDriverData & importDriverFromSheet dihapus dari menu sejak sesi
         // 14 — dua fungsi itu era pre-SSOT (pakai sheet DATABASE DRIVER lokal),
         // sekarang driver Soeta harus dari sync SSOT. Fungsinya masih ada di

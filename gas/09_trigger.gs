@@ -54,6 +54,10 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncDriverAirportFromSSOT')
     .timeBased().everyHours(6).create()
 
+  // Sync driver eksternal (Batam + Jambi Luar) — jarang berubah, 6 jam OK
+  ScriptApp.newTrigger('syncDriverExternalFromSSOT')
+    .timeBased().everyHours(6).create()
+
   // Sync staff Soeta dari SSOT MASTER DATA STAFF setiap 1 jam — perubahan
   // roster/PIN staff perlu propagate cepat (staff bisa berubah shift/PIN
   // di HRIS dan langsung login tanpa nunggu lama)

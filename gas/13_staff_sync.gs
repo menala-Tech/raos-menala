@@ -33,6 +33,13 @@ const MASTER_STAFF_SHEET_ID =
 
 const MASTER_STAFF_TAB_NAME = 'MASTER DATA STAFF'
 
+// Post sesi 17 lanjutan: RAOS jadi hub multi-PWA — sync SEMUA staff RIFIM
+// dari MASTER DATA STAFF (bukan cuma cabang RAOS). PWA lain (isi-saldo,
+// radms-driver, rifim-os) baca dari user_profiles yang sama.
+// Staff di cabang yang belum di-seed di RAOS branches → branch_id NULL,
+// warning ke LOG SISTEM, tapi TETAP insert supaya PWA lain punya data.
+const SKIP_CABANG_SYNC = [] // kosong = tarik semua
+
 // Staff dikecualikan TOTAL dari absensi + geofence Isi Saldo.
 // Adopsi dari rifim-isi-saldo ABSEN_STAFF_DIKECUALIKAN. Match by full_name
 // (case-insensitive, prefix). Auto-set is_geofence_exempt=true saat sync.
@@ -45,21 +52,14 @@ function isStaffGeofenceExempt_(namaLengkap) {
   const s = String(namaLengkap || '').trim()
   return GEOFENCE_EXEMPT_STAFF_PATTERNS.some(re => re.test(s))
 }
-// Multi-cabang (P1.4, sesi 16 lanjutan) — RAOS sekarang menampung 9 cabang
-// aktif RIFIM + Head Office. Semua staff RIFIM di-sync ke user_profiles;
-// scope akses per cabang di-enforce oleh RLS `is_branch_in_scope()` (mig.
-// raos_038). Head Office masuk sebagai direksi/management (tidak scoped).
-const RAOS_ALLOWED_BRANCHES = [
-  'ID Rifim Airport Soeta',
-  'ID Rifim Airport Batam',
-  'ID Rifim Airport Jambi',
-  'ID Rifim Airport Balikpapan',
-  'ID Rifim Airport Manado',
-  'ID Rifim Airport Pekanbaru',
-  'ID Rifim Airport Makassar',
-  'ID Rifim Batam',
-  'ID Rifim Jambi Luar',
-  'Head Office',
+// DEPRECATED post sesi 17 lanjutan — filter dihapus, tarik semua staff RIFIM.
+// Const tetap disimpan untuk backward-compat reference. Pakai SKIP_CABANG_SYNC
+// (kosong = tarik semua) untuk filter opsional di masa depan.
+const RAOS_ALLOWED_BRANCHES_LEGACY = [
+  'ID Rifim Airport Soeta', 'ID Rifim Airport Batam', 'ID Rifim Airport Jambi',
+  'ID Rifim Airport Balikpapan', 'ID Rifim Airport Manado',
+  'ID Rifim Airport Pekanbaru', 'ID Rifim Airport Makassar',
+  'ID Rifim Batam', 'ID Rifim Jambi Luar', 'Head Office',
 ]
 
 function getMasterStaffSheet_() {
@@ -137,10 +137,17 @@ function syncStaffFromSSOT() {
       const [emailRaw, namaRaw, /* gaji */, idCabangRaw, staffIdRaw, jabatanRaw, phoneRaw, pinRaw] = row
 
       const idCabang = String(idCabangRaw || '').trim()
-      if (RAOS_ALLOWED_BRANCHES.indexOf(idCabang) < 0) return // bukan cabang aktif — lewati
+      // Post sesi 17: tarik SEMUA staff RIFIM (bukan filter cabang).
+      // Cabang di SKIP_CABANG_SYNC list → lewati (kosong default = tarik semua).
+      if (SKIP_CABANG_SYNC.indexOf(idCabang) >= 0) return
+      if (!idCabang) return // baris kosong / header
 
-      // Auto-map slug ID CABANG → branches.id (P1.4). Head Office → NULL (bebas cabang).
+      // Auto-map slug ID CABANG → branches.id. Head Office atau slug yang
+      // belum di-seed → branch_id NULL (staff tetap masuk untuk PWA lain).
       const branchId = branchMap[idCabang] || null
+      if (idCabang && !branchId && idCabang !== 'Head Office' && idCabang !== 'Admin') {
+        warnings.push(`Baris ${rowNum} (${staffId}): cabang "${idCabang}" tidak ada di tabel branches — branch_id di-set NULL`)
+      }
 
       const email = String(emailRaw || '').trim().toLowerCase()
       const nama = String(namaRaw || '').replace(/⁠/g, '').trim() // buang word joiner

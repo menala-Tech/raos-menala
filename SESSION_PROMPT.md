@@ -4,7 +4,7 @@
 > `C:\Projects\menala\RAOS`. Paste seluruh isi section
 > [🚀 PROMPT UNTUK PASTE](#-prompt-untuk-paste) ke Claude → dia baca
 > file ini + lanjutkan pekerjaan tepat dari checkpoint terakhir.
-> Update terakhir: 2026-07-25 (sesi 17 — Phase 1 + 2 + 3 SEMUA DONE)
+> Update terakhir: 2026-07-25 (sesi 18 — P4 Opsi C DONE + advisor lockdown + hub multi-PWA)
 
 ---
 
@@ -151,11 +151,11 @@ Legenda: ⬜ pending · 🟨 in progress · ✅ done · ⚠️ blocked
 | P3.2 | Tabel `raos_driver_queue` + RLS + 4 RPC | ✅ | mig raos_043 |
 | P3.3 | Chat command `/antri` `/panggil` `/selesai` `/keluar` | ✅ | pending-p3 |
 | P3.4 | Monitoring `/antrian-driver` real-time | ✅ | pending-p3 |
-| P4.1 | Arsitektur split (monorepo vs multi-repo) — VALIDASI | ⬜ | — |
-| P4.2 | Split `apps/pwa` → `apps/pwa-staff` | ⬜ | — |
-| P4.3 | 4 PWA lain (koord/mgmt/direksi/driver) | ⬜ | — |
-| P4.4 | Icon per PWA (5 set) | ⬜ | — |
-| P4.5 | Vercel projects — VALIDASI | ⬜ | — |
+| P4.1 | **Opsi C** — role gating + install variant | ✅ | pending-p4 |
+| P4.2 | 5 icon variant + dynamic manifest per role | ✅ | pending-p4b |
+| P4.3 | 4 PWA lain — TIDAK BERLAKU (Opsi C = 1 codebase) | ✅ | — |
+| P4.4 | Icon per PWA (5 set) | ✅ | pending-p4b |
+| P4.5 | Vercel projects — 1 project (Opsi C) | ✅ | existing |
 | P5.1 | Baca `rifim-os` codebase | ⬜ | — |
 | P5.2 | RAOS jadi modul rifim-os (deep link + SSO) | ⬜ | — |
 | P5.3 | Dashboard direksi consume metric RAOS | ⬜ | — |

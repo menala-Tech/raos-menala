@@ -37,6 +37,10 @@ function onOpen() {
         .addItem('🔄 Sync Pengajuan ke Sheet "Form Isi Saldo"', 'syncSaldoRequestsToSheet')
     )
     .addSubMenu(
+      SpreadsheetApp.getUi().createMenu('🚕 Antrian Driver')
+        .addItem('🔄 Sync ke Sheet "Antrian Driver"', 'syncDriverQueueToSheet')
+    )
+    .addSubMenu(
       SpreadsheetApp.getUi().createMenu('📋 Laporan')
         .addItem('Kirim Laporan Harian ke Admin', 'kirimLaporanHarianAdmin')
         .addItem('Export Laporan Bulanan ke Drive', 'exportLaporanBulanIni')

@@ -75,6 +75,10 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('reminderSaldoBelumDiisi')
     .timeBased().everyMinutes(5).create()
 
+  // Sync raos_driver_queue → tab "Antrian Driver" setiap 15 menit
+  ScriptApp.newTrigger('syncDriverQueueToSheet')
+    .timeBased().everyMinutes(15).create()
+
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
 }

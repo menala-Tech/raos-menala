@@ -44,6 +44,23 @@ export default function RootLayout({
             if ((prefs.tema || 'terang') === 'gelap') document.documentElement.classList.add('dark');
             var uk = prefs.ukuranTeks || 'sedang';
             document.documentElement.setAttribute('data-text-size', uk);
+
+            // Install variant per role (Opsi C batch 2) — inject <link rel="manifest">
+            // based on ?role= query. 5 variant: staff/koord/mgmt/direksi/driver.
+            // Chrome fetch manifest saat detect installable → icon variant sesuai URL install.
+            var p = new URLSearchParams(location.search);
+            var r = (p.get('role') || '').toLowerCase();
+            var v = (r === 'koord' || r === 'koordinator') ? 'koord'
+                  : (r === 'mgmt' || r === 'management') ? 'mgmt'
+                  : (r === 'direksi') ? 'direksi'
+                  : (r === 'driver') ? 'driver'
+                  : 'staff';
+            var link = document.createElement('link');
+            link.rel = 'manifest';
+            link.href = '/manifest-' + v;
+            document.head.appendChild(link);
+            // Persist variant di localStorage supaya reload PWA tetap pakai variant sama
+            try { localStorage.setItem('raos_install_variant', v); } catch(e) {}
           } catch(e) {}
         `}} />
       </head>

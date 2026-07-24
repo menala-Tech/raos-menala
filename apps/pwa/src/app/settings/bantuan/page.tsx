@@ -11,7 +11,7 @@ type FaqItem = { q: string; a: string }
 const FAQ: FaqItem[] = [
   {
     q: 'Bagaimana cara install PWA sesuai role saya (Staff/Koord/Mgmt/Direksi/Driver)?',
-    a: 'RAOS adalah 1 aplikasi dengan 5 variant install per role. Setelah login, buka Chrome/Safari lalu tap menu "Install app" atau "Tambahkan ke Layar Utama". Ikon aplikasi akan otomatis pakai variant yang cocok dengan role Anda. Untuk mengganti variant, uninstall dulu yang lama, lalu install ulang dari URL berikut:\n\n• Staff: raos-menala.vercel.app\n• Koord: raos-menala.vercel.app/?role=koord\n• Mgmt: raos-menala.vercel.app/?role=mgmt\n• Direksi: raos-menala.vercel.app/?role=direksi\n• Driver: raos-menala.vercel.app/?role=driver\n\nSemua share codebase yang sama — bug fix + fitur baru otomatis update di 5 variant.',
+    a: 'RAOS adalah 1 aplikasi dengan 5 variant install per role — ikon home screen berbeda ("M" + label STAFF/KOORD/MGMT/DIREKSI/DRIVER). Ikon aplikasi otomatis pakai variant sesuai URL install:\n\n• Staff: raos-menala.vercel.app\n• Koord: raos-menala.vercel.app/?role=koord\n• Mgmt: raos-menala.vercel.app/?role=mgmt\n• Direksi: raos-menala.vercel.app/?role=direksi\n• Driver: raos-menala.vercel.app/?role=driver\n\nCara install:\n1. Buka URL di Chrome/Safari HP\n2. Tap menu 3 titik → "Install app" atau "Tambahkan ke Layar Utama"\n3. Ikon dengan label variant muncul di home screen\n\nUntuk ganti variant, uninstall dulu yang lama lalu install ulang dari URL berbeda. Semua share codebase yang sama — bug fix + fitur baru otomatis update di 5 variant.',
   },
   {
     q: 'Kenapa saya tidak bisa akses halaman validasi/laporan/kelola driver?',

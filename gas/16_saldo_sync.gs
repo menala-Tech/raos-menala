@@ -57,12 +57,19 @@ function ensureSaldoSheet_(ss) {
   if (!sh) {
     sh = ss.insertSheet(SALDO_SHEET_NAME)
   }
-  // Refresh header (idempotent — kalau format berubah, header baru overwrite)
+  // Clear semua data validation (termasuk stray checkbox dari layout lama).
+  // Data validation clear pakai clearDataValidations() cakupan seluruh sheet.
+  const maxCols = Math.max(sh.getMaxColumns(), SALDO_HEADER.length)
+  const maxRows = Math.max(sh.getMaxRows(), 1000)
+  sh.getRange(2, 1, maxRows - 1, maxCols).clearDataValidations()
+
+  // Refresh header (idempotent)
   sh.getRange(1, 1, 1, SALDO_HEADER.length).setValues([SALDO_HEADER])
     .setFontWeight('bold').setBackground('#F5A623').setFontColor('#000')
-  // Kolom "Alert Terakhir" (header aksen)
   sh.getRange(1, SALDO_COL.ALERT_LAST).setBackground('#DC2626').setFontColor('#fff')
   sh.getRange('E:E').setNumberFormat('"Rp"#,##0')
+
+  // Pasang HANYA 2 checkbox column: I "Sudah Diisi" + M "Alert Terkirim"
   sh.getRange(2, SALDO_COL.SUDAH_DIISI, 1000, 1).insertCheckboxes()
   sh.getRange(2, SALDO_COL.ALERT_SENT, 1000, 1).insertCheckboxes()
   sh.hideColumn(sh.getRange(1, SALDO_COL.REQ_ID))

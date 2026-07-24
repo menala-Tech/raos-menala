@@ -49,20 +49,21 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncSelfiePhotosToGDrive')
     .timeBased().everyMinutes(30).create()
 
-  // Sync driver airport dari SSOT (Google Sheets Database Driver Airport)
-  // setiap 6 jam — roster driver jarang berubah, tidak perlu lebih sering
+  // Sync driver airport (7 tab SSOT) setiap 10 menit — driver aktif diupdate
+  // sering (nama/status), roster PWA lain (radms-driver, isi-saldo) butuh
+  // fresh data.
   ScriptApp.newTrigger('syncDriverAirportFromSSOT')
-    .timeBased().everyHours(6).create()
+    .timeBased().everyMinutes(10).create()
 
-  // Sync driver eksternal (Batam + Jambi Luar) — jarang berubah, 6 jam OK
+  // Sync driver eksternal (Batam + Jambi Luar) setiap 10 menit — sama alasan
   ScriptApp.newTrigger('syncDriverExternalFromSSOT')
-    .timeBased().everyHours(6).create()
+    .timeBased().everyMinutes(10).create()
 
-  // Sync staff Soeta dari SSOT MASTER DATA STAFF setiap 1 jam — perubahan
-  // roster/PIN staff perlu propagate cepat (staff bisa berubah shift/PIN
-  // di HRIS dan langsung login tanpa nunggu lama)
+  // Sync staff (semua RIFIM dari MASTER DATA STAFF) setiap 6 jam — perubahan
+  // roster/PIN/jabatan tidak sering, cukup 6 jam. Kalau butuh update cepat,
+  // admin bisa run manual dari menu 👥 Staff → 🔄 Sync Staff
   ScriptApp.newTrigger('syncStaffFromSSOT')
-    .timeBased().everyHours(1).create()
+    .timeBased().everyHours(6).create()
 
   // Sync pengajuan isi saldo ke tab "Form Isi Saldo" setiap 5 menit —
   // user minta real-time. Refresh column checkbox otomatis.

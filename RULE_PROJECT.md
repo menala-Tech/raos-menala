@@ -67,6 +67,28 @@ Cabang lain + Pengisian Saldo (Rp) di-handle project HRIS terpisah
 
 Sesi berikutnya JANGAN campur data cabang lain ke sheet/DB RAOS.
 
+### 1.0.5 RAOS = Hub Sync SSoT Multi-PWA RIFIM
+
+Post-sesi 17 lanjutan: RAOS **jadi hub sync SSoT** untuk seluruh ecosystem
+RIFIM (isi-saldo, radms-driver, rifim-os, HRIS). Konsekuensi:
+
+1. **Sync SEMUA staff RIFIM** dari MASTER DATA STAFF (tanpa filter cabang) —
+   PWA lain baca dari `user_profiles` yang sama. Staff dengan slug cabang
+   yang belum di-seed di `branches` → `branch_id=NULL` + warning log,
+   tapi TETAP insert supaya PWA lain punya data lengkap.
+2. **Sync SEMUA driver RIFIM**:
+   - Driver airport (7 tab, source='ssot_driver_airport') via `gas/12`
+   - Driver eksternal (2 tab non-airport, source='ssot_driver_external')
+     via `gas/17`
+3. Filter scope akses per PWA di-enforce oleh **RLS Supabase** (`is_branch_in_scope`),
+   BUKAN di sync (jangan filter di GAS supaya PWA lain kehilangan data).
+4. PWA lain yang butuh data staff/driver harus:
+   - Read-only via Supabase REST/RPC
+   - JANGAN sync sendiri dari sheet SSoT — cukup baca dari
+     `user_profiles`/`raos_drivers` yang sudah di-sync RAOS
+5. Kalau ada PWA lain yang butuh kolom staff/driver yang belum ada,
+   diskusikan dulu — mungkin extend schema atau bikin tabel proyeksi.
+
 ### 1.1 Staff — MASTER DATA STAFF
 - Spreadsheet: `1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw`, tab
   **"MASTER DATA STAFF"**.

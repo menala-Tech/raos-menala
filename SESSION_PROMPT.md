@@ -194,7 +194,31 @@ Yang selesai sebelum Phase 1 dimulai:
   `kpiBranchMap_()` helper. GAS `12_driver_airport_sync.gs` — extend loop
   ke 7 tab airport, auto-set branch_id per driver dari mapping tab-slug.
 
-**Phase 2 (Isi Saldo) FULLY DONE**:
+**Phase 2 (Isi Saldo) FULLY DONE + REFINEMENT** (12 poin user requirement):
+- Nominal exact per cabang (sesuai user):
+  * 4 opsi (45k/95k/145k/195k): Balikpapan, Pekanbaru, Makassar
+  * 2 opsi (45k/95k): Batam Airport, Jambi Airport, Manado, Rifim Batam, Rifim Jambi Luar
+  * Soeta: `[]` (khusus Order, tidak ada isi saldo)
+- Migration `raos_040_saldo_processing`: kolom `is_processed`, `processed_at`,
+  `processed_by`, `auto_chat_posted`. Trigger `raos_saldo_after_processed`
+  BEFORE UPDATE — saat `is_processed` false→true dispatch push notif ke
+  staff + auto-post chat "Terima kasih..." ke room driver cabang
+- GAS 16 real-time sync per 5-menit + `handleSaldoCheckboxEdit_` onEdit
+  handler untuk checkbox "Sudah Diisi" kolom G di sheet Form Isi Saldo
+  → PATCH `is_processed=true` → trigger DB fire semua efek
+- GAS `reminderSaldoBelumDiisi` cron 5-menit: post WA-style pesan ke
+  room Pengisian Saldo cabang untuk request >5 menit belum diisi
+- GAS `updateTargetStaffPencapaian_` — tambah nominal ke sheet TARGET
+  STAFF kolom pencapaian_gmv bulan berjalan
+- `/riwayat` tab **Isi Saldo** baru — pin kuning (belum) / hijau (sudah) /
+  merah (ditolak). Include di list "Semua"
+- `/validasi-saldo` page baru untuk koord/admin — total per status
+  (Menunggu/Sudah/Ditolak) + filter tab + tombol Setujui/Tolak (RLS
+  scope by cabang)
+- Poin user 3: sync sheet real-time (5-menit cron) + manual button
+  (menu 💰 Isi Saldo → 🔄 Sync ke Sheet)
+- Poin user 4: koord approve/reject TIDAK mempengaruhi sheet — hanya
+  admin centang "Sudah Diisi" yang mengubah status final
 - P2.1: `rifim-isi-saldo` codebase pattern: sheet-based, nominal
   45k/95k/145k/195k (Balikpapan/Pekanbaru) atau 45k/95k (cabang lain).
   Adaptasi RAOS: chat command + Supabase + sync ke sheet Form Isi Saldo.

@@ -12,6 +12,7 @@ interface SaldoContent {
   branch_name?: string | null
   nominal: number
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  is_processed?: boolean
 }
 
 interface Props {
@@ -41,11 +42,15 @@ export default function SaldoRequestCard({ raw, currentUserId, currentUserRole, 
   if (!data) return <p className="text-xs text-red-500">Pengajuan isi saldo (data tidak terbaca)</p>
 
   const nominalFmt = `Rp${Number(data.nominal).toLocaleString('id-ID')}`
+  // is_processed adalah status FINAL dari admin (via centang sheet).
+  // approve/reject koordinator hanya untuk validasi audit, tidak
+  // mempengaruhi pengiriman ke sheet.
   const statusChip = (() => {
+    if (data.is_processed) return { icon: CheckCircle2, label: 'Sudah Diisi', cls: 'bg-green-100 text-green-700' }
     switch (data.status) {
-      case 'approved': return { icon: CheckCircle2, label: 'Disetujui', cls: 'bg-green-100 text-green-700' }
       case 'rejected': return { icon: XCircle, label: 'Ditolak', cls: 'bg-red-100 text-red-700' }
       case 'cancelled': return { icon: XCircle, label: 'Dibatalkan', cls: 'bg-gray-100 text-gray-600' }
+      case 'approved': return { icon: Clock, label: 'Validasi ✓ — Menunggu Admin', cls: 'bg-blue-100 text-blue-700' }
       default: return { icon: Clock, label: 'Menunggu', cls: 'bg-amber-100 text-amber-700' }
     }
   })()

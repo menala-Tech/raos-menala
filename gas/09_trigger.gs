@@ -60,10 +60,15 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncStaffFromSSOT')
     .timeBased().everyHours(1).create()
 
-  // Sync pengajuan isi saldo ke tab "Form Isi Saldo" setiap 15 menit —
-  // koordinator butuh data fresh untuk approval review + laporan bulanan.
+  // Sync pengajuan isi saldo ke tab "Form Isi Saldo" setiap 5 menit —
+  // user minta real-time. Refresh column checkbox otomatis.
   ScriptApp.newTrigger('syncSaldoRequestsToSheet')
-    .timeBased().everyMinutes(15).create()
+    .timeBased().everyMinutes(5).create()
+
+  // Reminder chat "SALDO BELUM DIPROSES" untuk request >5 menit yang belum
+  // dicentang. Cron 5 menit — post ke room Pengisian Saldo cabang.
+  ScriptApp.newTrigger('reminderSaldoBelumDiisi')
+    .timeBased().everyMinutes(5).create()
 
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
@@ -142,5 +147,11 @@ function onEdit(e) {
     logActivity(user, 'edit_absensi', `Cell: ${e.range.getA1Notation()}`)
   } else if (sheet === CONFIG.SHEETS.ORDER) {
     logActivity(user, 'edit_order', `Cell: ${e.range.getA1Notation()}`)
+  } else if (sheet === 'Form Isi Saldo') {
+    // Hook admin centang checkbox "Sudah Diisi" (kolom G).
+    // handleSaldoCheckboxEdit_ di 16_saldo_sync.gs handle detail.
+    try { handleSaldoCheckboxEdit_(e) } catch (err) {
+      logSistem('error', 'onEdit:saldo', 'error', err.message)
+    }
   }
 }

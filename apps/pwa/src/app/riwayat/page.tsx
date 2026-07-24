@@ -14,7 +14,18 @@ import Link from 'next/link'
 import clsx from 'clsx'
 import type { ScanOrder, Attendance } from '@/types'
 
-type Tab = 'semua' | 'scan' | 'absensi'
+type Tab = 'semua' | 'scan' | 'absensi' | 'saldo'
+
+interface SaldoRequest {
+  id: string
+  request_no: string
+  nominal: number
+  status: string
+  is_processed: boolean
+  requested_at: string
+  processed_at: string | null
+  rejection_reason: string | null
+}
 type StatusFilter = 'semua' | 'valid' | 'pending'
 type DateRange = 'hari-ini' | 'kemarin' | '7-hari' | '30-hari'
 
@@ -47,6 +58,7 @@ export default function RiwayatPage() {
   const [search, setSearch] = useState('')
   const [scans, setScans] = useState<ScanOrder[]>([])
   const [absensies, setAbsensies] = useState<Attendance[]>([])
+  const [saldoRequests, setSaldoRequests] = useState<SaldoRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<{ type: 'scan' | 'absensi'; data: any } | null>(null)
   const [showSummary, setShowSummary] = useState(false)
@@ -63,7 +75,7 @@ export default function RiwayatPage() {
       const toIso = to.toISOString()
       const toDate = to.toISOString().split('T')[0]
 
-      const [{ data: scanData }, { data: attData }] = await Promise.all([
+      const [{ data: scanData }, { data: attData }, { data: saldoData }] = await Promise.all([
         supabase.from('scan_orders')
           .select('*, raos_drivers(*), pickup_points(name)')
           .eq('staff_id', session.user.id)
@@ -74,9 +86,15 @@ export default function RiwayatPage() {
           .eq('staff_id', session.user.id)
           .gte('date', fromDate).lte('date', toDate)
           .order('date', { ascending: false }).limit(60),
+        supabase.from('raos_saldo_requests')
+          .select('id, request_no, nominal, status, is_processed, requested_at, processed_at, rejection_reason')
+          .eq('staff_id', session.user.id)
+          .gte('requested_at', fromIso).lte('requested_at', toIso)
+          .order('requested_at', { ascending: false }).limit(200),
       ])
       setScans(scanData ?? [])
       setAbsensies(attData ?? [])
+      setSaldoRequests((saldoData ?? []) as SaldoRequest[])
       setLoading(false)
     }
     load()
@@ -125,9 +143,10 @@ export default function RiwayatPage() {
   }, [scans, absensies])
 
   const TABS: { key: Tab; label: string; count?: number }[] = [
-    { key: 'semua',   label: 'Semua',   count: filteredScans.length + absensies.length },
+    { key: 'semua',   label: 'Semua',   count: filteredScans.length + absensies.length + saldoRequests.length },
     { key: 'scan',    label: 'Scan',    count: filteredScans.length },
     { key: 'absensi', label: 'Absensi', count: absensies.length },
+    { key: 'saldo',   label: 'Isi Saldo', count: saldoRequests.length },
   ]
 
   return (
@@ -343,7 +362,53 @@ export default function RiwayatPage() {
           </button>
         ))}
 
-        {!loading && filteredScans.length === 0 && absensies.length === 0 && (
+        {/* Isi Saldo list — pin kuning (belum diisi) / hijau (sudah) */}
+        {!loading && (tab === 'semua' || tab === 'saldo') && saldoRequests.map(req => {
+          const isDone = req.is_processed
+          const isRejected = req.status === 'rejected' || req.status === 'cancelled'
+          return (
+            <div key={req.id} className="card flex items-center gap-3">
+              <div className={clsx(
+                'p-2.5 rounded-xl flex-shrink-0 relative',
+                isDone ? 'bg-green-50' : isRejected ? 'bg-red-50' : 'bg-amber-50'
+              )}>
+                <BarChart3 size={18} className={clsx(
+                  isDone ? 'text-green-600' : isRejected ? 'text-red-600' : 'text-amber-600'
+                )} />
+                {/* Pin status */}
+                <span className={clsx(
+                  'absolute -top-1 -right-1 w-3 h-3 rounded-full ring-2 ring-white',
+                  isDone ? 'bg-green-500' : isRejected ? 'bg-red-500' : 'bg-amber-400 animate-pulse'
+                )} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-bold text-sm text-gray-800 truncate">
+                    Isi Saldo Rp{Number(req.nominal).toLocaleString('id-ID')}
+                  </p>
+                  <span className={clsx(
+                    'text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap',
+                    isDone ? 'bg-green-100 text-green-700'
+                      : isRejected ? 'bg-red-100 text-red-700'
+                      : 'bg-amber-100 text-amber-700'
+                  )}>
+                    {isDone ? 'SUDAH DIISI' : isRejected ? req.status.toUpperCase() : 'MENUNGGU'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  {req.request_no} · {new Date(req.requested_at).toLocaleString('id-ID', {
+                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                  })}
+                </p>
+                {req.rejection_reason && (
+                  <p className="text-[11px] text-red-500 mt-0.5">Ditolak: {req.rejection_reason}</p>
+                )}
+              </div>
+            </div>
+          )
+        })}
+
+        {!loading && filteredScans.length === 0 && absensies.length === 0 && saldoRequests.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <Clock size={32} className="mx-auto mb-3 opacity-30" />
             <p className="text-sm font-medium">Belum ada riwayat di rentang ini</p>

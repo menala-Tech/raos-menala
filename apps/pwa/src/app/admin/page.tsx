@@ -162,7 +162,7 @@ export default function AdminPage() {
               className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-primary/10 rounded-lg text-left"
             >
               <MessageCirclePlus size={16} className="text-primary" />
-              Bulk-create Room "Pengisian Saldo" per Cabang
+              Bulk-create Room &ldquo;Pengisian Saldo&rdquo; per Cabang
             </button>
             <button
               onClick={async () => {
@@ -176,7 +176,7 @@ export default function AdminPage() {
               className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-primary/10 rounded-lg text-left"
             >
               <MessageCirclePlus size={16} className="text-primary" />
-              Bulk-create Room "Driver" per Cabang
+              Bulk-create Room &ldquo;Driver&rdquo; per Cabang
             </button>
             <button
               onClick={async () => {

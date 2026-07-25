@@ -4,7 +4,7 @@
 > `C:\Projects\menala\RAOS`. Paste seluruh isi section
 > [🚀 PROMPT UNTUK PASTE](#-prompt-untuk-paste) ke Claude → dia baca
 > file ini + lanjutkan pekerjaan tepat dari checkpoint terakhir.
-> Update terakhir: 2026-07-25 (sesi 20 — 7-poin chat rooms user feedback)
+> Update terakhir: 2026-07-25 (sesi 20 lengkap — chat rooms feedback 3 batch + saldo bot + audit push)
 
 ---
 
@@ -178,7 +178,45 @@ Baca panduan lengkap di [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
 ## 🎯 Checkpoint Terakhir
 
-**Sesi 20 (25 Juli 2026 malam) — 7-poin chat rooms feedback user**
+**Sesi 20 lengkap (25-26 Juli 2026) — 3 batch fitur chat + saldo bot + audit push**
+
+Total commit sesi 20: 6 (dcec153, 1ce07e0, f0718cb, fe6c27a, 2530442) +
+1 dari sesi 19 (c526771).
+Total migration Supabase: 7 (raos_049 s/d raos_055).
+
+**Batch A — Chat rooms feedback 7 poin user (screenshot 1)** — commit `dcec153`:
+- (1) Room cabang lain tidak muncul ✅
+- (2) 5 room wajib per cabang ✅
+- (3) Kuning hilang saat dibuka ✅
+- (4+5+6) Read receipt centang 1/2 + list pembaca ✅
+- (7) Notif high-level Pengumuman ✅
+
+**Batch B — Fix Wallet toggle** (screenshot 2) — commit `1ce07e0`:
+- Toggle Wallet cek nominal cabang ROOM (bukan cabang user login)
+- State baru activeRoomBranch fetch dari activeRoom.branch_id
+
+**Batch C — Retensi + hapus per-pesan + hapus room admin** (screenshot 3) — commit `f0718cb`:
+- Migration `raos_053` — 3 RPC: set_chat_room_retention (semua PWA),
+  delete_chat_message (sender+koord+), clear_chat_room_messages (admin+).
+- Chip retensi hilangkan gate PIN_ROLES → semua role bisa ubah
+- Action menu tambah "Hapus Pesan"
+- Pengaturan Room tambah "Hapus Semua Pesan Room" (admin only, 3-step konfirmasi)
+- Realtime channel DELETE chat_messages listener
+
+**Batch D — Hapus lokal per user** (klarifikasi user) — commit `fe6c27a`:
+- Migration `raos_054` — tabel `chat_room_local_clears` + RPC clear_chat_room_for_me
+- Ganti "Hapus Semua Pesan Room" (destructive) → "Hapus Semua Pesan (untuk Saya)"
+- Semua user bisa akses, hanya sembunyi di device sendiri, user lain tetap lihat
+- loadMessages filter `created_at > cleared_before_at`
+
+**Batch E — Info Room lengkap + mention @nama** (screenshot 4) — commit `2530442`:
+- Info Sheet: hapus limit + slice, list SEMUA member scrollable + klik → open pribadi
+- Migration `raos_055` — chat_messages.mentions uuid[] + trigger extend push khusus
+- Input text: dropdown autocomplete saat ketik @, insert @Nama + track user_id
+- Bubble render: highlight @Nama primary color
+- Mentioned user dapat push "📣 Anda di-tag di <room>" kategori pengumuman
+
+**Sesi 19 (sebelumnya) — Batch 3+4 Room chat pengisian saldo** — commit `c526771`:
 
 User kirim 7 requirement dari screenshot chat room:
 1. Room cabang lain tidak muncul di cabang lain ✅ (RLS `is_branch_in_scope`
@@ -207,7 +245,7 @@ User kirim 7 requirement dari screenshot chat room:
    '%pengumuman%'` → kategori 'pengumuman' + title "📢 Pengumuman Baru"
    + tag `pengumuman-<id>` untuk urgency high di SW)
 
-**Sesi 19 (25 Juli 2026 malam) — Batch 3+4 Room chat pengisian saldo**
+### Sesi 19 (25 Juli 2026 malam) — Batch 3+4 Room chat pengisian saldo
 
 Poin 4-5 dari sisipan `Room chat pengisian saldo` di `Upgrade Full Cabang.md`
 (yang tadinya di-defer di commit `fbe59d5` "batch 1+2"):

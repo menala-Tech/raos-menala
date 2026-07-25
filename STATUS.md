@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-07-25 (sesi 20 — 7-poin chat rooms feedback user)*
+*Diupdate: 2026-07-26 dinihari (sesi 20 lengkap — 5 batch fitur chat)*
 
 ## COLLABORATION LOG
 
@@ -9,10 +9,18 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
-- [2026-07-26 00:30 Claude] feat(chat) sesi 20 — 7 poin user feedback:
-  cleanup 4 stale room + auto-member 3 global (mig raos_051) + read
-  receipt per-message + pengumuman kategori (mig raos_052) + client UI
-  centang 1/2 + readers modal
+- [2026-07-26 02:07 Claude] 2530442 feat(chat) daftar anggota lengkap +
+  klik-buka-pribadi + mention @nama (mig raos_055)
+- [2026-07-26 02:00 Claude] fe6c27a feat(chat) 'Hapus Semua Pesan' jadi
+  lokal per user (mig raos_054)
+- [2026-07-26 01:50 Claude] f0718cb feat(chat) retensi semua PWA + hapus
+  per-pesan + hapus semua pesan admin (mig raos_053)
+- [2026-07-26 01:45 Claude] 1ce07e0 fix(saldo) toggle Wallet cek nominal
+  cabang ROOM bukan user login
+- [2026-07-26 00:30 Claude] dcec153 feat(chat) sesi 20 — 7 poin user
+  feedback: cleanup 4 stale room + auto-member 3 global (mig raos_051)
+  + read receipt per-message + pengumuman kategori (mig raos_052) +
+  client UI centang 1/2 + readers modal
 - [2026-07-25 23:30 Claude] c526771 feat(saldo) batch 3+4 — bot pribadi
   progress (mig raos_049) + audit push submit/approve/reject (mig raos_050)
 - [2026-07-25 22:00 Claude] docs(collab) create docs/COLLABORATION.md + template
@@ -107,12 +115,84 @@ User kirim screenshot chat room + 7 requirement. Semua di-address dalam
 - Trigger `raos_notify_new_chat_message` v2 — kategori dinamis per
   room name
 
+### Sesi 20 lanjutan (25-26 Juli 2026 dinihari) — 4 batch tambahan feedback user
+
+**Batch B — Fix Wallet toggle** (screenshot user room Pengisian Saldo Batam)
+— commit `1ce07e0`:
+- Tombol Wallet cek `user.branches.saldo_nominal_options` (cabang USER
+  login) padahal harus cek cabang ROOM. Direksi/T1 tanpa
+  saldo_nominal_options → tombol hilang.
+- Fix: state `activeRoomBranch` fetch `branches` by `activeRoom.branch_id`
+  saat activeRoom di-set. Tombol Wallet + props IsiSaldoBottomSheet
+  pakai cabang ROOM. RLS raos_saldo_requests_staff_insert hanya cek
+  staff_id, tidak batasi branch_id → safe direksi submit ke cabang mana pun.
+
+**Batch C — Retensi semua PWA + hapus per-pesan + hapus semua admin**
+(screenshot user Pengaturan Room "Retensi Pesan Tidak aktif" tapi tidak
+ada opsi ubah) — commit `f0718cb`, migration `raos_053`:
+- `set_chat_room_retention(uuid, int)` SECURITY DEFINER — bypass RLS
+  admin-only. Otorisasi member/scope. Validasi null atau 1-365.
+- `delete_chat_message(uuid)` — sender atau admin/mgmt/koord/direksi.
+  Hard delete (cascade FK).
+- `clear_chat_room_messages(uuid)` — admin/mgmt/direksi only.
+  Return count deleted.
+- Client: chip retensi hilangkan gate PIN_ROLES → tampil untuk SEMUA
+  role. Action menu tambah "Hapus Pesan" (Trash2 red).
+- Realtime listener DELETE chat_messages → auto-hilang di semua user.
+
+**Batch D — Hapus lokal per user** (klarifikasi user: harus semua PWA
+tapi hanya sembunyi di device sendiri, user lain tetap lihat) —
+commit `fe6c27a`, migration `raos_054`:
+- Tabel `chat_room_local_clears` (user_id, room_id, cleared_before_at)
+  UNIQUE(user_id, room_id) + RLS own-only.
+- RPC `clear_chat_room_for_me(uuid)` UPSERT cutoff timestamp.
+- `loadMessages` fetch cutoff dulu → filter `created_at > cleared_before_at`.
+- Tombol berubah jadi "Hapus Semua Pesan (untuk Saya)" tampil untuk
+  SEMUA user. Konfirmasi cukup 1 dialog (reversible per-user).
+- RPC destructive `clear_chat_room_messages` (batch C) tetap ada di
+  DB tapi UI tidak panggil lagi.
+
+**Batch E — Info Room lengkap + mention @nama** (screenshot user Info
+Room "ANGGOTA: Semua Staff" statis) — commit `2530442`, migration
+`raos_055`:
+- `openInfoSheet` hapus `.limit(30)` → fetch semua member.
+- Info Sheet Anggota section: hapus `slice(5)`, tampil sebagai list
+  scrollable max-h-[280px]. Klik nama → `openPribadiWithMember` →
+  RPC `get_or_create_pribadi_room` → setActiveRoom pribadi.
+- `chat_messages.mentions uuid[]` + GIN index partial.
+- Trigger `raos_notify_new_chat_message` extend:
+  * Push umum ke member (kecuali sender & mentioned).
+  * Push khusus mentioned: title "📣 Anda di-tag di <room>" +
+    kategori 'pengumuman' (bypass filter chat_room).
+- Client input onChange regex `(?:^|\s)@([\w.\-]*)$` di teks sebelum
+  caret → dropdown autocomplete filter roomMembers, max 6. Klik →
+  insert `@<Full Name> ` + push user_id ke `mentionsPending`.
+- Bubble render text: split regex mention, wrap `@Nama` dalam span
+  primary color + bg tint (WhatsApp-like).
+- Escape key close dropdown.
+
+### State akhir sesi 20 (setelah 5 batch)
+
+- Migration Supabase: **55** (raos_055_chat_message_mentions)
+- Commit terakhir sesi 20: `2530442` (di branch
+  claude/raos-multi-cabang-upgrade-tehg2x)
+- PR #1 draft: 3 commit sesi 19 + 5 commit sesi 20 = 8 commits
+- Vercel preview `2530442` = Ready
+- GAS: tidak ada perubahan sesi 20 (sesi 20 murni PWA + Supabase)
+
 ### Pending sesi 21+
 
-- User test end-to-end di HP: (a) verify Bobby tidak lihat 4 room
-  stale lagi, (b) staff Batam login → hanya lihat 3 global + 2 Batam,
-  (c) Pengumuman post → verify high-level notif walau chat_room off,
-  (d) send chat + partner buka → verify centang jadi sky.
+- User test end-to-end di HP:
+  * verify Bobby tidak lihat 4 room stale lagi
+  * staff Batam login → hanya lihat 3 global + 2 Batam
+  * Pengumuman post → verify high-level notif walau chat_room off
+  * send chat + partner buka → verify centang jadi sky
+  * long-press pesan sendiri → tombol Hapus Pesan → verify hilang
+    di semua user (realtime)
+  * "Hapus Semua Pesan (untuk Saya)" → verify hilang hanya di device
+    sendiri, user lain masih lihat
+  * ketik @<nama> → verify dropdown + kirim → target dapat push
+    khusus "📣 Anda di-tag..."
 - Kalau ada staff baru sync SSoT nanti, panggil manual sekali RPC
   `raos_ensure_global_rooms_members()` supaya join 3 room global.
   Untuk otomatis: bisa jadwalkan trigger AFTER INSERT/UPDATE on
@@ -120,6 +200,7 @@ User kirim screenshot chat room + 7 requirement. Semua di-address dalam
 - P5 rifim-os integration, P6 riwayat scope polish, P7 test HP.
 - Bot pribadi progress untuk Soeta staff (scan_orders validated) —
   masih deferred dari sesi 19.
+- Merge PR #1 draft ke main setelah user sign-off testing.
 
 ---
 

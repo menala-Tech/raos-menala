@@ -149,6 +149,9 @@ function ChatPageInner() {
   const [actionMenu, setActionMenu]     = useState<ActionMenu | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Data cabang ROOM aktif (bukan cabang user login) — untuk validasi tombol Isi Saldo
+  const [activeRoomBranch, setActiveRoomBranch] = useState<{ id: string; slug: string | null; name: string | null; saldo_nominal_options: number[] } | null>(null)
+
   // Read receipt (sesi 20 batch chat #4-6) — centang 1/2 + list pembaca
   const [readSummary, setReadSummary] = useState<Record<string, { read_count: number; total_recipients: number }>>({})
   const [readersModalMsgId, setReadersModalMsgId] = useState<string | null>(null)
@@ -303,12 +306,29 @@ function ChatPageInner() {
   }, [activeRoom])
 
   useEffect(() => {
-    if (!activeRoom) return
+    if (!activeRoom) { setActiveRoomBranch(null); return }
     setReactions({})
     setPinnedMsg(null)
     setReadSummary({})
     markedReadRef.current = new Set()
     setRoomPrefs(getRoomPrefs(activeRoom.id))
+    // Fetch cabang ROOM (bukan cabang user) supaya tombol Isi Saldo muncul untuk semua role di room cabang tsb
+    const roomBranchId = (activeRoom as any).branch_id as string | null | undefined
+    if (roomBranchId) {
+      supabase.from('branches')
+        .select('id, slug, name, saldo_nominal_options')
+        .eq('id', roomBranchId).single()
+        .then(({ data }) => {
+          if (data) setActiveRoomBranch({
+            id: data.id,
+            slug: data.slug,
+            name: data.name,
+            saldo_nominal_options: Array.isArray(data.saldo_nominal_options) ? data.saldo_nominal_options : [],
+          })
+        })
+    } else {
+      setActiveRoomBranch(null)
+    }
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
     loadPinnedMessage(activeRoom.id)
@@ -1043,14 +1063,14 @@ function ChatPageInner() {
           )}
 
           {/* ── Isi Saldo BottomSheet ─────────────────────────────────────── */}
-          {isiSaldoSheet && activeRoom && user && (
+          {isiSaldoSheet && activeRoom && user && activeRoomBranch && (
             <IsiSaldoBottomSheet
               userId={user.id}
               userFullName={(user as any).full_name ?? 'Staff'}
-              branchId={user.branch_id}
-              branchSlug={(user as any).branches?.slug ?? null}
-              branchName={(user as any).branches?.name ?? null}
-              branchNominalOptions={(user as any).branches?.saldo_nominal_options ?? []}
+              branchId={activeRoomBranch.id}
+              branchSlug={activeRoomBranch.slug}
+              branchName={activeRoomBranch.name}
+              branchNominalOptions={activeRoomBranch.saldo_nominal_options}
               roomId={activeRoom.id}
               onClose={() => setIsiSaldoSheet(false)}
               onSubmitted={() => { setIsiSaldoSheet(false) }}
@@ -1769,8 +1789,7 @@ function ChatPageInner() {
                 title="Buat polling">
                 <BarChart2 size={20} />
               </button>
-              {(activeRoom as any).branch_id && Array.isArray((user as any).branches?.saldo_nominal_options) &&
-                (user as any).branches.saldo_nominal_options.length > 0 && (
+              {activeRoomBranch && activeRoomBranch.saldo_nominal_options.length > 0 && (
                 <button onClick={() => setIsiSaldoSheet(true)}
                   disabled={uploading || sendingLocation || pollSending || uploadingAudio}
                   className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"

@@ -235,10 +235,22 @@ function ChatPageInner() {
   useEffect(() => { if (activeRoom === null && user) loadRooms() }, [activeRoom, user, loadRooms])
 
   const loadMessages = useCallback(async (roomId: string) => {
-    const { data } = await supabase
+    // Ambil cutoff hapus lokal (kalau user pernah "Hapus untuk Saya")
+    let clearedBefore: string | null = null
+    if (user?.id) {
+      const { data: clr } = await supabase
+        .from('chat_room_local_clears')
+        .select('cleared_before_at')
+        .eq('user_id', user.id).eq('room_id', roomId)
+        .maybeSingle()
+      clearedBefore = clr?.cleared_before_at ?? null
+    }
+    let q = supabase
       .from('chat_messages')
       .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)')
-      .eq('room_id', roomId).order('created_at').limit(50)
+      .eq('room_id', roomId)
+    if (clearedBefore) q = q.gt('created_at', clearedBefore)
+    const { data } = await q.order('created_at').limit(50)
     const rows = data ?? []
     setMessages(rows)
     setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
@@ -916,16 +928,15 @@ function ChatPageInner() {
     setActionMenu(null)
   }
 
-  // Hapus semua pesan di room (sesi 20) — admin/mgmt/direksi only, destructive
+  // Hapus semua pesan di room — versi LOKAL per user (sesi 20 refine).
+  // Hanya sembunyi di device sendiri; user lain di room tetap lihat pesan.
+  // Server simpan cutoff timestamp di chat_room_local_clears; loadMessages
+  // filter created_at > cleared_before_at.
   async function clearAllMessages() {
     if (!activeRoom || !user) return
-    if (!confirm(`⚠️ HAPUS SEMUA PESAN di room "${activeRoom.name}"?\n\nTindakan ini tidak bisa di-undo. Semua pesan (termasuk yang di-pin) akan hilang permanen.`)) return
-    if (!confirm(`Konfirmasi kedua: ketik OK di prompt berikutnya untuk melanjutkan.`)) return
-    const confirmText = prompt('Ketik OK persis untuk konfirmasi:')
-    if (confirmText !== 'OK') { alert('Dibatalkan.'); return }
-    const { data, error } = await supabase.rpc('clear_chat_room_messages', { p_room_id: activeRoom.id })
+    if (!confirm(`Sembunyikan semua pesan di room "${activeRoom.name}" hanya untuk Anda?\n\nPesan tetap ada untuk anggota lain. Pesan baru setelah ini akan tetap muncul.`)) return
+    const { error } = await supabase.rpc('clear_chat_room_for_me', { p_room_id: activeRoom.id })
     if (error) { alert('Gagal hapus: ' + error.message); return }
-    alert(`Berhasil hapus ${data ?? 0} pesan.`)
     setMessages([])
     setRoomSheet('none')
   }
@@ -1430,12 +1441,13 @@ function ChatPageInner() {
                         </div>
                       )}
                     </div>
-                    {/* Hapus semua pesan (sesi 20) — admin/mgmt/direksi only, destructive */}
-                    {user && ['admin','management','direksi'].includes(user.role) && (
+                    {/* Hapus semua pesan (sesi 20 refine) — LOKAL per user, semua role.
+                        Hanya sembunyi di device sendiri; user lain tetap lihat pesan. */}
+                    {user && (
                       <button
                         onClick={clearAllMessages}
                         className="w-full flex items-center justify-center gap-2 text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
-                        <Trash2 size={16} /><span className="text-sm font-semibold">Hapus Semua Pesan Room</span>
+                        <Trash2 size={16} /><span className="text-sm font-semibold">Hapus Semua Pesan (untuk Saya)</span>
                       </button>
                     )}
                     {canLeave && (

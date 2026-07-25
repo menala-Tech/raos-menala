@@ -4,7 +4,7 @@
 > `C:\Projects\menala\RAOS`. Paste seluruh isi section
 > [🚀 PROMPT UNTUK PASTE](#-prompt-untuk-paste) ke Claude → dia baca
 > file ini + lanjutkan pekerjaan tepat dari checkpoint terakhir.
-> Update terakhir: 2026-07-25 (sesi 18 — P4 Opsi C DONE + advisor lockdown + hub multi-PWA)
+> Update terakhir: 2026-07-25 (sesi 20 lengkap — chat rooms feedback 3 batch + saldo bot + audit push)
 
 ---
 
@@ -177,6 +177,106 @@ Baca panduan lengkap di [docs/COLLABORATION.md](docs/COLLABORATION.md).
 ---
 
 ## 🎯 Checkpoint Terakhir
+
+**Sesi 20 lengkap (25-26 Juli 2026) — 3 batch fitur chat + saldo bot + audit push**
+
+Total commit sesi 20: 6 (dcec153, 1ce07e0, f0718cb, fe6c27a, 2530442) +
+1 dari sesi 19 (c526771).
+Total migration Supabase: 7 (raos_049 s/d raos_055).
+
+**Batch A — Chat rooms feedback 7 poin user (screenshot 1)** — commit `dcec153`:
+- (1) Room cabang lain tidak muncul ✅
+- (2) 5 room wajib per cabang ✅
+- (3) Kuning hilang saat dibuka ✅
+- (4+5+6) Read receipt centang 1/2 + list pembaca ✅
+- (7) Notif high-level Pengumuman ✅
+
+**Batch B — Fix Wallet toggle** (screenshot 2) — commit `1ce07e0`:
+- Toggle Wallet cek nominal cabang ROOM (bukan cabang user login)
+- State baru activeRoomBranch fetch dari activeRoom.branch_id
+
+**Batch C — Retensi + hapus per-pesan + hapus room admin** (screenshot 3) — commit `f0718cb`:
+- Migration `raos_053` — 3 RPC: set_chat_room_retention (semua PWA),
+  delete_chat_message (sender+koord+), clear_chat_room_messages (admin+).
+- Chip retensi hilangkan gate PIN_ROLES → semua role bisa ubah
+- Action menu tambah "Hapus Pesan"
+- Pengaturan Room tambah "Hapus Semua Pesan Room" (admin only, 3-step konfirmasi)
+- Realtime channel DELETE chat_messages listener
+
+**Batch D — Hapus lokal per user** (klarifikasi user) — commit `fe6c27a`:
+- Migration `raos_054` — tabel `chat_room_local_clears` + RPC clear_chat_room_for_me
+- Ganti "Hapus Semua Pesan Room" (destructive) → "Hapus Semua Pesan (untuk Saya)"
+- Semua user bisa akses, hanya sembunyi di device sendiri, user lain tetap lihat
+- loadMessages filter `created_at > cleared_before_at`
+
+**Batch E — Info Room lengkap + mention @nama** (screenshot 4) — commit `2530442`:
+- Info Sheet: hapus limit + slice, list SEMUA member scrollable + klik → open pribadi
+- Migration `raos_055` — chat_messages.mentions uuid[] + trigger extend push khusus
+- Input text: dropdown autocomplete saat ketik @, insert @Nama + track user_id
+- Bubble render: highlight @Nama primary color
+- Mentioned user dapat push "📣 Anda di-tag di <room>" kategori pengumuman
+
+**Sesi 19 (sebelumnya) — Batch 3+4 Room chat pengisian saldo** — commit `c526771`:
+
+User kirim 7 requirement dari screenshot chat room:
+1. Room cabang lain tidak muncul di cabang lain ✅ (RLS `is_branch_in_scope`
+   sudah benar; stale room "Soetta T1/T2/T3 — Ops" + "Dukungan Driver"
+   di-soft-delete via migration `raos_051`; get_chat_rooms_for_user filter
+   `is_active=true`)
+2. 5 room wajib per cabang: Umum/Pengumuman/Absensi (global) + Pengisian
+   Saldo/Driver (per-cabang) ✅ (semua sudah ada; helper baru
+   `raos_ensure_global_rooms_members()` auto-attach semua active
+   user_profiles ke 3 room global; jalan sekali di migration 051,
+   backfill 29 staff × 3 room)
+3. Tanda kuning hilang saat room dibuka ✅ (verified existing —
+   `mark_chat_room_read` fire on open + on new message; loadRooms
+   re-fetch saat back ke list)
+4+5+6. Read receipt per-message ✅ (Migration `raos_052_chat_message_reads`
+   — tabel `chat_message_reads` UNIQUE(message_id,user_id) + 3 RPC
+   `mark_messages_read(uuid[])`, `get_message_read_summary(uuid[])`,
+   `get_message_readers(uuid)` + realtime publication. Client
+   `chat/page.tsx` — state `readSummary` + `markedReadRef` + auto-mark
+   pesan orang lain saat load + summary batch untuk pesan sendiri +
+   render Check/CheckCheck di bubble sender (1 centang abu =terkirim,
+   2 centang abu =partial, 2 centang sky = dibaca semua) + tap-to-open
+   modal daftar pembaca via `get_message_readers`)
+7. Notif high-level bila ada pesan di Room Pengumuman ✅ (Extend trigger
+   `raos_notify_new_chat_message` — detect `lower(room.name) LIKE
+   '%pengumuman%'` → kategori 'pengumuman' + title "📢 Pengumuman Baru"
+   + tag `pengumuman-<id>` untuk urgency high di SW)
+
+### Sesi 19 (25 Juli 2026 malam) — Batch 3+4 Room chat pengisian saldo
+
+Poin 4-5 dari sisipan `Room chat pengisian saldo` di `Upgrade Full Cabang.md`
+(yang tadinya di-defer di commit `fbe59d5` "batch 1+2"):
+
+- **Batch 3 — Auto-bot progress ke chat pribadi staff** (poin 4):
+  Migration `raos_049_saldo_target_bot_notify` — extend trigger
+  `raos_saldo_after_processed` (BEFORE UPDATE) untuk juga post pesan bot
+  ke room `category='pribadi'` antara staff + sender_id (admin/direksi
+  fallback dari `raos_get_system_bot_id`). Isi pesan: pin 🟢🟡🔴 sesuai
+  persentase (≥100/50-99/<50), Target/Realisasi/Persentase +
+  hint pengingat. Sumber data: `raos_saldo_progress_snapshot(uuid)` —
+  dual-mode: Soeta pakai count `scan_orders` bulan berjalan, lainnya
+  SUM(nominal) `raos_saldo_requests` `is_processed=true` bulan berjalan.
+  Target dari `kpi_targets` (staff_id + month+year). Push notif juga
+  fire ke staff dengan kategori 'pengumuman' untuk trigger tab / lock
+  screen.
+  Helper baru `raos_ensure_pribadi_room(uuid,uuid)` — SECURITY DEFINER,
+  bypass `auth.uid()` (versi trigger-callable dari `get_or_create_pribadi_room`).
+- **Batch 4 — Audit push notif semua fungsi baru** (poin 5):
+  Migration `raos_050_saldo_push_audit` — trigger baru
+  `raos_saldo_after_submitted` (AFTER INSERT) → push
+  `validasi_koordinator` ke koord cabang tsb + admin/mgmt/direksi
+  global. Client `approveSaldoRequest`/`rejectSaldoRequest` di
+  `lib/saldoRequest.ts` sekarang `SELECT staff_id, request_no, nominal
+  .single()` post-update + fire `invokePush` kategori `pengumuman` ke
+  staff pengaju. Driver queue events sudah dapat push via chat_room
+  kategori (existing chat trigger), tidak perlu tambahan.
+
+**Sesi 18 lanjutan (25 Juli 2026 pagi)**
+- Batch 1+2 saldo refinement (commit `fbe59d5`): driver info di card +
+  IsiSaldoBottomSheet + nama cabang di room proyek.
 
 **Sesi 16 lanjutan (24 Juli 2026 sore)**
 

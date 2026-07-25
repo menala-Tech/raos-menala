@@ -20,6 +20,7 @@ import {
   Copy, SmilePlus, MapPin, Navigation,
   BarChart2, CheckSquare, Square, Plus, Trash2, Lock,
   Mic, Trash, StopCircle, Wallet,
+  Check, CheckCheck,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatPollOption, UserProfile } from '@/types'
@@ -148,6 +149,21 @@ function ChatPageInner() {
   const [actionMenu, setActionMenu]     = useState<ActionMenu | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Data cabang ROOM aktif (bukan cabang user login) — untuk validasi tombol Isi Saldo
+  const [activeRoomBranch, setActiveRoomBranch] = useState<{ id: string; slug: string | null; name: string | null; saldo_nominal_options: number[] } | null>(null)
+
+  // Mention @nama (sesi 20) — track user_ids yang di-tag di message baru
+  const [mentionsPending, setMentionsPending] = useState<string[]>([])
+  const [mentionDropdown, setMentionDropdown] = useState<{ open: boolean; query: string; startPos: number }>({ open: false, query: '', startPos: 0 })
+  const textInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Read receipt (sesi 20 batch chat #4-6) — centang 1/2 + list pembaca
+  const [readSummary, setReadSummary] = useState<Record<string, { read_count: number; total_recipients: number }>>({})
+  const [readersModalMsgId, setReadersModalMsgId] = useState<string | null>(null)
+  const [readersList, setReadersList] = useState<Array<{ user_id: string; full_name: string; avatar_url: string | null; read_at: string }>>([])
+  const [readersLoading, setReadersLoading] = useState(false)
+  const markedReadRef = useRef<Set<string>>(new Set())
+
   // Voice recorder (Fase 8) — MediaRecorder blob → upload → message type 'audio'
   const [recording, setRecording]           = useState(false)
   const [recSeconds, setRecSeconds]         = useState(0)
@@ -169,6 +185,38 @@ function ChatPageInner() {
     const { data, error } = await supabase.rpc('get_chat_rooms_for_user')
     if (!error) setRooms((data ?? []) as ChatRoomWithMeta[])
   }, [])
+
+  // Read receipt (sesi 20) — snapshot centang 1/2 per pesan `isMe`
+  const loadReadSummary = useCallback(async (msgIds: string[]) => {
+    if (msgIds.length === 0) return
+    const { data } = await supabase.rpc('get_message_read_summary', { p_message_ids: msgIds })
+    if (data) {
+      setReadSummary(prev => {
+        const next = { ...prev }
+        for (const row of data as Array<{ message_id: string; read_count: number; total_recipients: number }>) {
+          next[row.message_id] = { read_count: row.read_count, total_recipients: row.total_recipients }
+        }
+        return next
+      })
+    }
+  }, [])
+
+  // Bulk mark pesan orang lain sebagai dibaca — fire-and-forget
+  const markVisibleMessagesRead = useCallback(async (msgIds: string[]) => {
+    const pending = msgIds.filter(id => !markedReadRef.current.has(id))
+    if (pending.length === 0) return
+    pending.forEach(id => markedReadRef.current.add(id))
+    void supabase.rpc('mark_messages_read', { p_message_ids: pending })
+  }, [])
+
+  async function openReadersModal(msgId: string) {
+    setReadersModalMsgId(msgId)
+    setReadersLoading(true)
+    setReadersList([])
+    const { data } = await supabase.rpc('get_message_readers', { p_message_id: msgId })
+    setReadersList((data ?? []) as any[])
+    setReadersLoading(false)
+  }
 
   useEffect(() => {
     async function init() {
@@ -192,13 +240,33 @@ function ChatPageInner() {
   useEffect(() => { if (activeRoom === null && user) loadRooms() }, [activeRoom, user, loadRooms])
 
   const loadMessages = useCallback(async (roomId: string) => {
-    const { data } = await supabase
+    // Ambil cutoff hapus lokal (kalau user pernah "Hapus untuk Saya")
+    let clearedBefore: string | null = null
+    if (user?.id) {
+      const { data: clr } = await supabase
+        .from('chat_room_local_clears')
+        .select('cleared_before_at')
+        .eq('user_id', user.id).eq('room_id', roomId)
+        .maybeSingle()
+      clearedBefore = clr?.cleared_before_at ?? null
+    }
+    let q = supabase
       .from('chat_messages')
       .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)')
-      .eq('room_id', roomId).order('created_at').limit(50)
-    setMessages(data ?? [])
+      .eq('room_id', roomId)
+    if (clearedBefore) q = q.gt('created_at', clearedBefore)
+    const { data } = await q.order('created_at').limit(50)
+    const rows = data ?? []
+    setMessages(rows)
     setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
-  }, [])
+    // Read receipt batch: (a) summary untuk pesan sendiri, (b) mark pesan orang lain sebagai dibaca
+    if (user?.id) {
+      const mine = rows.filter((m: any) => m.sender_id === user.id).map((m: any) => m.id)
+      const others = rows.filter((m: any) => m.sender_id !== user.id).map((m: any) => m.id)
+      if (mine.length) void loadReadSummary(mine)
+      if (others.length) void markVisibleMessagesRead(others)
+    }
+  }, [user?.id, loadReadSummary, markVisibleMessagesRead])
 
   async function loadReactions(roomId: string) {
     const { data } = await supabase
@@ -255,10 +323,29 @@ function ChatPageInner() {
   }, [activeRoom])
 
   useEffect(() => {
-    if (!activeRoom) return
+    if (!activeRoom) { setActiveRoomBranch(null); return }
     setReactions({})
     setPinnedMsg(null)
+    setReadSummary({})
+    markedReadRef.current = new Set()
     setRoomPrefs(getRoomPrefs(activeRoom.id))
+    // Fetch cabang ROOM (bukan cabang user) supaya tombol Isi Saldo muncul untuk semua role di room cabang tsb
+    const roomBranchId = (activeRoom as any).branch_id as string | null | undefined
+    if (roomBranchId) {
+      supabase.from('branches')
+        .select('id, slug, name, saldo_nominal_options')
+        .eq('id', roomBranchId).single()
+        .then(({ data }) => {
+          if (data) setActiveRoomBranch({
+            id: data.id,
+            slug: data.slug,
+            name: data.name,
+            saldo_nominal_options: Array.isArray(data.saldo_nominal_options) ? data.saldo_nominal_options : [],
+          })
+        })
+    } else {
+      setActiveRoomBranch(null)
+    }
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
     loadPinnedMessage(activeRoom.id)
@@ -274,6 +361,18 @@ function ChatPageInner() {
           setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
           supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
+          if (msg.sender_id !== user?.id) void markVisibleMessagesRead([msg.id])
+          else void loadReadSummary([msg.id])
+        })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_message_reads' },
+        payload => {
+          const r = payload.new as { message_id: string; user_id: string }
+          setReadSummary(prev => {
+            const cur = prev[r.message_id]
+            if (!cur) return prev
+            return { ...prev, [r.message_id]: { ...cur, read_count: cur.read_count + 1 } }
+          })
         })
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
@@ -283,6 +382,13 @@ function ChatPageInner() {
           // Update pinned banner
           if (updated.is_pinned) setPinnedMsg(updated)
           else setPinnedMsg(prev => prev?.id === updated.id ? null : prev)
+        })
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
+        payload => {
+          const deleted = payload.old as { id: string }
+          setMessages(prev => prev.filter(m => m.id !== deleted.id))
+          setPinnedMsg(prev => prev?.id === deleted.id ? null : prev)
         })
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_message_reactions', filter: `room_id=eq.${activeRoom.id}` },
@@ -403,9 +509,19 @@ function ChatPageInner() {
       return
     }
 
-    const payload = {
+    // Mention @nama (sesi 20) — filter mentionsPending yang masih ada di text
+    // supaya tidak kirim user_id yang sudah dihapus dari text setelah tag.
+    const mentionsArr = mentionsPending.filter(uid => {
+      const member: any = roomMembers.find((m: any) => m.user_id === uid)
+      const name = member?.user_profiles?.full_name
+      return name && content.includes(`@${name}`)
+    })
+
+    const payload: any = {
       room_id: activeRoom.id, sender_id: user.id, type: 'text', content, client_id: clientId,
     }
+    if (mentionsArr.length > 0) payload.mentions = mentionsArr
+
     const { data, error } = await supabase.from('chat_messages').insert(payload)
       .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     setSending(false)
@@ -417,12 +533,14 @@ function ChatPageInner() {
         ...prev,
         { ...payload, id: `local-${clientId}`, created_at: new Date().toISOString(), user_profiles: { full_name: (user as any).full_name, role: user.role } } as any,
       ])
+      setMentionsPending([])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
       return
     }
     if (error) { alert('Gagal kirim: ' + error.message); setText(content); return }
     if (data) {
       setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])
+      setMentionsPending([])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }
   }
@@ -648,8 +766,20 @@ function ChatPageInner() {
     setRoomSheet('info'); setMembersLoading(true)
     const { data } = await supabase.from('chat_room_members')
       .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
-      .eq('room_id', activeRoom.id).limit(30)
+      .eq('room_id', activeRoom.id)
     setRoomMembers(data ?? []); setMembersLoading(false)
+  }
+
+  // Buka chat pribadi dengan anggota grup (dari daftar member) — sesi 20
+  async function openPribadiWithMember(otherUserId: string) {
+    if (!user || otherUserId === user.id) return
+    const { data, error } = await supabase.rpc('get_or_create_pribadi_room', { p_other_user_id: otherUserId })
+    if (error || !data) { alert('Gagal buka chat pribadi: ' + (error?.message ?? '')); return }
+    const { data: roomData } = await supabase.from('chat_rooms').select('*').eq('id', data).single()
+    if (roomData) {
+      setRoomSheet('none')
+      setActiveRoom(roomData as any)
+    }
   }
 
   // ── Voice recorder (Fase 8) ──────────────────────────────────────────────
@@ -804,16 +934,40 @@ function ChatPageInner() {
     setActiveRoom(null) // balik ke list, useEffect akan refresh loadRooms()
   }
 
-  // Fase 5 — admin set/ubah retensi pesan per room. Cron server-side
-  // (raos_delete_expired_chat_messages) menghormati kolom auto_delete_days.
+  // Retensi pesan per room — sesi 20 update: buka akses ke semua PWA (bukan admin-only).
+  // Pakai RPC set_chat_room_retention (SECURITY DEFINER) supaya bypass RLS admin-only
+  // policy chat_rooms_update_admin. RPC sendiri cek membership atau branch scope.
+  // Cron server-side (raos_delete_expired_chat_messages) menghormati auto_delete_days.
   // Kirim null = matikan retensi (pesan tidak dihapus otomatis).
   async function updateRetention(days: number | null) {
     if (!activeRoom || !user) return
-    if (!PIN_ROLES.includes(user.role)) return
-    const { error } = await supabase.from('chat_rooms')
-      .update({ auto_delete_days: days }).eq('id', activeRoom.id)
+    const { error } = await supabase.rpc('set_chat_room_retention', {
+      p_room_id: activeRoom.id, p_days: days,
+    })
     if (error) { alert('Gagal ubah retensi: ' + error.message); return }
     setActiveRoom({ ...activeRoom, auto_delete_days: days ?? undefined })
+  }
+
+  // Hapus pesan (sesi 20) — sender atau admin/mgmt/koord/direksi
+  async function deleteMessage(messageId: string) {
+    if (!confirm('Hapus pesan ini? Aksi tidak bisa di-undo.')) return
+    const { error } = await supabase.rpc('delete_chat_message', { p_message_id: messageId })
+    if (error) { alert('Gagal hapus pesan: ' + error.message); return }
+    setMessages(prev => prev.filter(m => m.id !== messageId))
+    setActionMenu(null)
+  }
+
+  // Hapus semua pesan di room — versi LOKAL per user (sesi 20 refine).
+  // Hanya sembunyi di device sendiri; user lain di room tetap lihat pesan.
+  // Server simpan cutoff timestamp di chat_room_local_clears; loadMessages
+  // filter created_at > cleared_before_at.
+  async function clearAllMessages() {
+    if (!activeRoom || !user) return
+    if (!confirm(`Sembunyikan semua pesan di room "${activeRoom.name}" hanya untuk Anda?\n\nPesan tetap ada untuk anggota lain. Pesan baru setelah ini akan tetap muncul.`)) return
+    const { error } = await supabase.rpc('clear_chat_room_for_me', { p_room_id: activeRoom.id })
+    if (error) { alert('Gagal hapus: ' + error.message); return }
+    setMessages([])
+    setRoomSheet('none')
   }
 
   // ── Reactions (Fase 4) ────────────────────────────────────────────────────
@@ -939,15 +1093,56 @@ function ChatPageInner() {
             </div>
           )}
 
+          {/* ── Modal daftar pembaca (read receipt) ──────────────────────── */}
+          {readersModalMsgId && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center"
+              onClick={() => setReadersModalMsgId(null)}>
+              <div className="bg-white dark:bg-gray-800 w-full sm:w-[90%] sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-xl"
+                onClick={e => e.stopPropagation()}>
+                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-gray-800 dark:text-gray-100">Dibaca oleh</p>
+                    <p className="text-[10px] text-gray-400">Tap luar untuk tutup</p>
+                  </div>
+                  <button onClick={() => setReadersModalMsgId(null)} className="p-1 text-gray-400">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="max-h-[50vh] overflow-y-auto"
+                  style={{ paddingBottom: 'calc(20px + env(safe-area-inset-bottom))' }}>
+                  {readersLoading && <p className="text-center text-xs text-gray-400 py-6">Memuat...</p>}
+                  {!readersLoading && readersList.length === 0 && (
+                    <p className="text-center text-xs text-gray-400 py-6">Belum ada yang membaca</p>
+                  )}
+                  {readersList.map(r => (
+                    <div key={r.user_id} className="px-4 py-2 flex items-center gap-3 border-b border-gray-50 dark:border-gray-700/50">
+                      <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        {r.full_name?.[0]?.toUpperCase() ?? '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{r.full_name}</p>
+                      </div>
+                      <span className="text-[10px] text-gray-400 flex-shrink-0">
+                        {new Date(r.read_at).toLocaleString('id-ID', {
+                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Isi Saldo BottomSheet ─────────────────────────────────────── */}
-          {isiSaldoSheet && activeRoom && user && (
+          {isiSaldoSheet && activeRoom && user && activeRoomBranch && (
             <IsiSaldoBottomSheet
               userId={user.id}
               userFullName={(user as any).full_name ?? 'Staff'}
-              branchId={user.branch_id}
-              branchSlug={(user as any).branches?.slug ?? null}
-              branchName={(user as any).branches?.name ?? null}
-              branchNominalOptions={(user as any).branches?.saldo_nominal_options ?? []}
+              branchId={activeRoomBranch.id}
+              branchSlug={activeRoomBranch.slug}
+              branchName={activeRoomBranch.name}
+              branchNominalOptions={activeRoomBranch.saldo_nominal_options}
               roomId={activeRoom.id}
               onClose={() => setIsiSaldoSheet(false)}
               onSubmitted={() => { setIsiSaldoSheet(false) }}
@@ -1103,6 +1298,17 @@ function ChatPageInner() {
                     </button>
                   )}
 
+                  {/* Hapus pesan (sesi 20) — sender atau admin/koord/direksi */}
+                  {(actionMenu.isMe || (user && PIN_ROLES.includes(user.role))) && (
+                    <button
+                      onClick={() => deleteMessage(actionMenu.msgId)}
+                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-red-50 transition-colors text-left"
+                    >
+                      <Trash2 size={18} className="text-red-500" />
+                      <span className="text-sm font-semibold text-red-500">Hapus Pesan</span>
+                    </button>
+                  )}
+
                   <button onClick={() => setActionMenu(null)}
                     className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left">
                     <X size={18} className="text-gray-400" />
@@ -1158,23 +1364,36 @@ function ChatPageInner() {
                       </div>
                     </div>
                     {roomMembers.length > 0 && (
-                      <div className="mb-4 space-y-2">
-                        <p className="text-xs font-semibold text-gray-500">Anggota</p>
-                        {roomMembers.slice(0, 5).map((m: any) => {
-                          const p = m.user_profiles
-                          return (
-                            <div key={m.user_id} className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-secondary text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                {(p?.full_name ?? '?').charAt(0)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-gray-800 truncate">{p?.full_name ?? 'Staff'}</p>
-                                <p className="text-[10px] text-gray-400 capitalize">{p?.role ?? ''}</p>
-                              </div>
-                            </div>
-                          )
-                        })}
-                        {roomMembers.length > 5 && <p className="text-xs text-gray-400 text-center">+{roomMembers.length - 5} lainnya</p>}
+                      <div className="mb-4">
+                        <p className="text-xs font-semibold text-gray-500 mb-2">Anggota ({roomMembers.length})</p>
+                        <div className="max-h-[280px] overflow-y-auto space-y-1 pr-1">
+                          {roomMembers.map((m: any) => {
+                            const p = m.user_profiles
+                            const isSelf = m.user_id === user?.id
+                            return (
+                              <button
+                                key={m.user_id}
+                                onClick={() => !isSelf && openPribadiWithMember(m.user_id)}
+                                disabled={isSelf}
+                                className={clsx(
+                                  'w-full flex items-center gap-3 px-2 py-2 rounded-lg text-left transition-colors',
+                                  isSelf ? 'opacity-60 cursor-default' : 'hover:bg-gray-100 active:bg-gray-200'
+                                )}
+                              >
+                                <div className="w-9 h-9 rounded-full bg-secondary text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
+                                  {(p?.full_name ?? '?').charAt(0)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-gray-800 truncate">
+                                    {p?.full_name ?? 'Staff'}{isSelf ? ' (Saya)' : ''}
+                                  </p>
+                                  <p className="text-[10px] text-gray-400 capitalize">{p?.role ?? ''}</p>
+                                </div>
+                                {!isSelf && <MessageCircle size={14} className="text-primary flex-shrink-0" />}
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
                     )}
                     <button onClick={() => setRoomSheet('settings')}
@@ -1233,12 +1452,11 @@ function ChatPageInner() {
                           </p>
                         </div>
                       </div>
-                      {user && PIN_ROLES.includes(user.role) && (
-                        // Chip button — HINDARI native <select>. Native picker
-                        // di Android dismiss dengan back gesture, dan gesture
-                        // itu consume pushState dummy (baris 239) → popstate →
-                        // setActiveRoom(null) → keluar dari room. Chip = tap
-                        // langsung tanpa native picker.
+                      {/* Chip button — akses semua PWA (sesi 20). Update via RPC
+                          set_chat_room_retention (bypass RLS admin-only).
+                          HINDARI native <select> — Android back gesture consume
+                          pushState → keluar room. */}
+                      {user && (
                         <div className="flex gap-1.5 mt-3">
                           {([
                             { val: null, label: 'Tidak' },
@@ -1265,6 +1483,15 @@ function ChatPageInner() {
                         </div>
                       )}
                     </div>
+                    {/* Hapus semua pesan (sesi 20 refine) — LOKAL per user, semua role.
+                        Hanya sembunyi di device sendiri; user lain tetap lihat pesan. */}
+                    {user && (
+                      <button
+                        onClick={clearAllMessages}
+                        className="w-full flex items-center justify-center gap-2 text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
+                        <Trash2 size={16} /><span className="text-sm font-semibold">Hapus Semua Pesan (untuk Saya)</span>
+                      </button>
+                    )}
                     {canLeave && (
                       <button
                         onClick={leaveRoom}
@@ -1520,8 +1747,19 @@ function ChatPageInner() {
                       )
                     })()}
 
-                    {/* TEXT */}
-                    {msg.type === 'text' && <p className="leading-relaxed">{msg.content}</p>}
+                    {/* TEXT (dengan highlight @mention sesi 20) */}
+                    {msg.type === 'text' && (() => {
+                      const content = msg.content ?? ''
+                      // Split by pola "@<Nama Panjang> " — match nama huruf/spasi/titik/dash sampai space atau EOL
+                      const parts = content.split(/(@[A-Za-z][A-Za-z0-9._\- ]*?(?=\s|$|[.,!?]))/g)
+                      return (
+                        <p className="leading-relaxed whitespace-pre-wrap break-words">
+                          {parts.map((chunk, i) => chunk.startsWith('@')
+                            ? <span key={i} className={clsx('font-semibold rounded px-0.5', isMe ? 'text-primary bg-white/10' : 'text-secondary bg-secondary/10')}>{chunk}</span>
+                            : chunk)}
+                        </p>
+                      )
+                    })()}
 
                     {/* SALDO REQUEST (P2.3) */}
                     {msg.type === 'saldo_request' && (
@@ -1537,9 +1775,33 @@ function ChatPageInner() {
                       <DriverQueueCard raw={msg.content ?? ''} />
                     )}
 
-                    <p className={clsx('text-[9px] mt-1', isMe ? 'text-white/50' : 'text-gray-300')}>
-                      {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+                    <div className={clsx('flex items-center gap-1 mt-1', isMe ? 'justify-end' : 'justify-start')}>
+                      <p className={clsx('text-[9px]', isMe ? 'text-white/50' : 'text-gray-300')}>
+                        {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      {isMe && (() => {
+                        const summ = readSummary[msg.id]
+                        const total = summ?.total_recipients ?? 0
+                        const read = summ?.read_count ?? 0
+                        // 1 centang = terkirim, 2 abu = dibaca sebagian, 2 biru = dibaca semua
+                        // total=0 (chat pribadi baru dst) → tampil 1 centang saja
+                        const allRead = total > 0 && read >= total
+                        const partial = read > 0 && !allRead
+                        return (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openReadersModal(msg.id) }}
+                            className="flex items-center hover:opacity-80"
+                            title={total > 0 ? `${read}/${total} sudah baca` : 'Terkirim'}
+                          >
+                            {allRead
+                              ? <CheckCheck size={11} className="text-sky-300" />
+                              : partial
+                                ? <CheckCheck size={11} className="text-white/50" />
+                                : <Check size={11} className="text-white/50" />}
+                          </button>
+                        )
+                      })()}
+                    </div>
                   </div>
 
                   {/* Reaction bubbles */}
@@ -1642,8 +1904,7 @@ function ChatPageInner() {
                 title="Buat polling">
                 <BarChart2 size={20} />
               </button>
-              {(activeRoom as any).branch_id && Array.isArray((user as any).branches?.saldo_nominal_options) &&
-                (user as any).branches.saldo_nominal_options.length > 0 && (
+              {activeRoomBranch && activeRoomBranch.saldo_nominal_options.length > 0 && (
                 <button onClick={() => setIsiSaldoSheet(true)}
                   disabled={uploading || sendingLocation || pollSending || uploadingAudio}
                   className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
@@ -1653,15 +1914,77 @@ function ChatPageInner() {
               )}
               <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
                 className="hidden" onChange={handleFileSelect} />
-              <input
-                type="text"
-                placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan...'}
-                value={text}
-                onChange={e => setText(e.target.value)}
-                onKeyDown={e => { if (e.key !== 'Enter') return; pendingFile ? sendWithAttachment() : sendMessage() }}
-                className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
-                disabled={uploading || sendingLocation || pollSending || uploadingAudio}
-              />
+              <div className="flex-1 relative">
+                {/* Dropdown mention autocomplete — muncul saat ketik @ diikuti nama */}
+                {mentionDropdown.open && (() => {
+                  const q = mentionDropdown.query.toLowerCase()
+                  const candidates = roomMembers
+                    .filter((m: any) => m.user_id !== user?.id)
+                    .filter((m: any) => (m.user_profiles?.full_name ?? '').toLowerCase().includes(q))
+                    .slice(0, 6)
+                  if (candidates.length === 0) return null
+                  return (
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-white rounded-xl shadow-lg border border-gray-100 max-h-56 overflow-y-auto z-10">
+                      {candidates.map((m: any) => {
+                        const p = m.user_profiles
+                        return (
+                          <button key={m.user_id}
+                            onClick={() => {
+                              const before = text.slice(0, mentionDropdown.startPos)
+                              const afterAt = text.slice(mentionDropdown.startPos + 1 + mentionDropdown.query.length)
+                              const inserted = `@${p?.full_name ?? 'Staff'} `
+                              const newText = before + inserted + afterAt
+                              setText(newText)
+                              setMentionsPending(prev => prev.includes(m.user_id) ? prev : [...prev, m.user_id])
+                              setMentionDropdown({ open: false, query: '', startPos: 0 })
+                              setTimeout(() => textInputRef.current?.focus(), 0)
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                          >
+                            <div className="w-7 h-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                              {(p?.full_name ?? '?').charAt(0)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-gray-800 truncate">{p?.full_name ?? 'Staff'}</p>
+                              <p className="text-[9px] text-gray-400 capitalize">{p?.role ?? ''}</p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+                <input
+                  ref={textInputRef}
+                  type="text"
+                  placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan... (@nama untuk tag)'}
+                  value={text}
+                  onChange={e => {
+                    const val = e.target.value
+                    setText(val)
+                    // Deteksi @ sebelum caret
+                    const caret = e.target.selectionStart ?? val.length
+                    const uptoCaret = val.slice(0, caret)
+                    const m = uptoCaret.match(/(?:^|\s)@([\w.\-]*)$/)
+                    if (m) {
+                      const startPos = caret - m[0].length + (m[0].startsWith(' ') ? 1 : 0)
+                      setMentionDropdown({ open: true, query: m[1] ?? '', startPos })
+                    } else {
+                      if (mentionDropdown.open) setMentionDropdown({ open: false, query: '', startPos: 0 })
+                    }
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape' && mentionDropdown.open) {
+                      setMentionDropdown({ open: false, query: '', startPos: 0 })
+                      return
+                    }
+                    if (e.key !== 'Enter') return
+                    pendingFile ? sendWithAttachment() : sendMessage()
+                  }}
+                  className="w-full bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
+                  disabled={uploading || sendingLocation || pollSending || uploadingAudio}
+                />
+              </div>
               {(text.trim() || pendingFile) ? (
                 <button
                   onClick={pendingFile ? sendWithAttachment : sendMessage}

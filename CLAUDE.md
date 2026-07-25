@@ -118,6 +118,81 @@ Backup Database/2026-07 Juli/      ← reserved untuk backup Supabase (belum dip
    `chat_message_reactions`, `chat_polls`, `chat_poll_votes`, `activity_logs`,
    `system_logs`, `notifications`, `system_config`, `push_subscriptions`
 
+## Chat Rooms — sesi 20 (25-26 Juli 2026): 5 batch fitur
+
+Post-user-feedback screenshot chat rooms:
+
+### Migration & schema baru sesi 20
+- `raos_051_room_cleanup_and_pengumuman_notif` — soft-delete 4 room stale
+  (Soetta T1/T2/T3, Dukungan Driver) + helper `raos_ensure_global_rooms_members()`
+  auto-attach semua user_profiles.is_active ke 3 room global (Umum/Pengumuman/
+  Absensi) + extend trigger `raos_notify_new_chat_message` untuk detect room
+  Pengumuman → kategori `'pengumuman'` + title "📢 Pengumuman Baru".
+- `raos_052_chat_message_reads` — tabel `chat_message_reads` UNIQUE(message_id,
+  user_id) + 3 RPC: `mark_messages_read(uuid[])`, `get_message_read_summary(uuid[])`,
+  `get_message_readers(uuid)` + realtime publication.
+- `raos_053_chat_retention_and_delete_rpc` — 3 RPC:
+  * `set_chat_room_retention(uuid, int)` — SECURITY DEFINER, bypass RLS
+    admin-only. Otorisasi member OR global room OR scope. Validasi 1-365.
+  * `delete_chat_message(uuid)` — sender OR admin/mgmt/koord/direksi.
+  * `clear_chat_room_messages(uuid)` — admin/mgmt/direksi only (destructive,
+    UI tidak panggil lagi setelah batch D).
+- `raos_054_chat_local_clear` — tabel `chat_room_local_clears` + RPC
+  `clear_chat_room_for_me(uuid)`. Pattern WhatsApp "clear chat for me" —
+  hanya sembunyi di device pemanggil, user lain tetap lihat pesan.
+- `raos_055_chat_message_mentions` — kolom `chat_messages.mentions uuid[]` +
+  GIN index partial + extend trigger push khusus untuk mentioned users
+  (kategori `'pengumuman'` bypass filter chat_room, title "📣 Anda di-tag").
+
+### Konvensi client chat baru
+
+- **Read receipt centang**: `Check` (1 abu, terkirim), `CheckCheck` abu (partial),
+  `CheckCheck` sky-300 (dibaca semua). Tap tombol → modal "Dibaca oleh" via
+  `get_message_readers`. State: `readSummary` map + `markedReadRef` Set untuk
+  cegah RPC ganda. Realtime `chat_message_reads INSERT` → `+1 read_count`.
+- **Retensi Pesan**: chip button (Tidak/7/30/90 hari) tampil untuk SEMUA role
+  (tidak lagi gate PIN_ROLES). Panggil RPC `set_chat_room_retention` (bukan
+  direct table update, karena RLS admin-only masih ada untuk direct update).
+- **Hapus per-pesan**: action menu tombol Trash2 red, visible untuk sender OR
+  admin/mgmt/koord/direksi. Realtime `DELETE chat_messages` listener auto-remove
+  dari state di semua user yang lagi buka room.
+- **Hapus semua pesan (lokal)**: tombol "Hapus Semua Pesan (untuk Saya)" tampil
+  untuk semua user. Panggil RPC `clear_chat_room_for_me`. `loadMessages` fetch
+  cutoff dari `chat_room_local_clears` dulu → filter `created_at > cleared_before_at`.
+- **Info Room daftar anggota lengkap**: hapus `.limit(30)` di fetch, hapus
+  `.slice(5)` di render. List scrollable max-h-[280px]. Klik nama → RPC
+  `get_or_create_pribadi_room` + `setActiveRoom(pribadiRoom)`.
+- **Mention @nama**: input onChange handler deteksi regex
+  `(?:^|\s)@([\w.\-]*)$` sebelum caret → dropdown autocomplete filter
+  `roomMembers` by full_name, max 6. Klik pilihan → insert `@<Full Name> `
+  di posisi caret + push user_id ke `mentionsPending`. sendMessage validate
+  mentions yang masih ada di text lalu include di payload
+  `chat_messages.mentions`. Bubble render split regex mention → wrap `@Nama`
+  dalam `<span>` primary color + bg tint.
+
+### Fix Wallet toggle di room Pengisian Saldo (sesi 20 batch B)
+
+- Tombol Wallet + `IsiSaldoBottomSheet` sekarang cek `activeRoomBranch`
+  (fetch `branches` by `activeRoom.branch_id`) bukan `user.branches`
+  (cabang user login).
+- Alasan: direksi/admin/user dengan branch T1 atau tanpa branch
+  (`saldo_nominal_options=[]`) tidak boleh hilang tombol saat buka room
+  cabang lain. RLS raos_saldo_requests_staff_insert cukup cek staff_id,
+  tidak batasi branch_id → safe direksi submit ke cabang mana pun.
+
+### Room global vs per-cabang (sesi 20 batch A)
+
+5 room wajib per cabang:
+- **Global (branch_id NULL, semua staff auto-member)**: Umum, Pengumuman, Absensi.
+- **Per-cabang (branch_id = cabang UUID, member dari `seed_room_per_branch`)**:
+  Pengisian Saldo — <Cabang>, Driver — <Cabang>.
+
+Untuk staff/koord non-admin: RLS `rooms_read_member` filter dengan
+`is_branch_in_scope` → hanya lihat 3 global + 2 cabang sendiri.
+Admin/mgmt/direksi bypass → lihat semua.
+
+Stale rooms yang di-soft-delete sesi 20: Soetta T1/T2/T3 — Ops, Dukungan Driver.
+
 ## Multi-cabang Phase 1-3 — sesi 17, 24-25 Juli 2026
 
 ### Phase 1 Foundation

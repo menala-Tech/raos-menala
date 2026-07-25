@@ -7,7 +7,7 @@ Berbeda dari `STATUS.md` (kronologi per sesi) dan `CLAUDE.md` (panduan
 teknis + state fitur). File ini murni **rule book**: aturan yang tidak
 berubah lintas sesi, hanya bertambah kalau ada policy baru.
 
-Update terakhir: **2026-07-25 (akhir sesi 17 — multi-cabang foundation + Isi Saldo + Antrian Driver)**
+Update terakhir: **2026-07-26 dinihari (akhir sesi 20 — chat rooms 5 batch fitur, migration raos_055)**
 
 ---
 
@@ -310,10 +310,11 @@ admin — mis. tombol Test Push di `/admin`).
 |---|---|---|
 | `scan_berhasil` | Notif hasil scan (ke staff pemilik) | `/admin` validate scan |
 | `scan_pending` | Reserved | — |
-| `validasi_koordinator` | Notif ke koord/admin ada scan pending | GAS `notifyPendingScansKoordinator` |
+| `validasi_koordinator` | Notif ke koord/admin ada pending validasi | GAS `notifyPendingScansKoordinator` + DB trigger `raos_saldo_after_submitted` (sesi 19) |
 | `pengingat_absen` | Reminder masuk/pulang 6 waktu per shift | GAS `reminderMasuk/PulangShift_` |
-| `pengumuman` | Reserved (broadcast admin) | — |
-| `chat_room` | Pesan chat + broadcast absensi ke chat | DB trigger `raos_notify_new_chat_message` |
+| `pengumuman` | Broadcast + saldo status ke staff pengaju | DB trigger `raos_saldo_after_processed` (sudah diisi, bot pribadi progress) + client `approve/rejectSaldoRequest` (sesi 19) |
+| `chat_room` | Pesan chat + broadcast absensi ke chat | DB trigger `raos_notify_new_chat_message` (kecuali room Pengumuman + kecuali user di NEW.mentions) |
+| `pengumuman` (mention) | Anda di-tag di grup chat (sesi 20) | DB trigger `raos_notify_new_chat_message` — extra push dengan title "📣 Anda di-tag di <room>" untuk user_id di `chat_messages.mentions` |
 | `master` | Toggle master di Settings — kalau false, SEMUA di-skip | otomatis di Edge Function |
 
 - **`invokePush` client (TypeScript)**: prop `kategori?: string` di
@@ -444,6 +445,71 @@ Dark mode di-handle via **specificity override** di `globals.css`
   kuning/hijau/merah per status. Filter 1/7/30 hari (semua tab).
 - `/settings/bantuan` = 8 FAQ collapsible + info app.
 - `/kpi`, `/laporan`, `/status` = role-gated (admin/koordinator/direksi).
+
+## 9.0 Chat rooms — 5 batch fitur sesi 20 (WAJIB dipahami sebelum edit chat/page.tsx)
+
+Konvensi client + RPC yang HARUS dipakai untuk semua operasi chat:
+
+### 9.0.1 Retensi Pesan
+- Ubah retensi WAJIB via RPC `set_chat_room_retention(uuid, int)`, JANGAN
+  direct `chat_rooms UPDATE auto_delete_days` — RLS `chat_rooms_update_admin`
+  masih admin-only (backward compat). RPC bypass RLS via SECURITY DEFINER.
+- Chip button retensi tampil untuk **semua role** (tidak lagi gate PIN_ROLES).
+- Otorisasi di RPC: member room ATAU global (branch_id NULL) ATAU
+  is_branch_in_scope.
+
+### 9.0.2 Hapus Pesan
+- Per-pesan (server-side hard delete): RPC `delete_chat_message(uuid)`.
+  Allow sender OR admin/mgmt/koord/direksi. Realtime `DELETE chat_messages`
+  listener otomatis remove dari state semua user.
+- Bulk untuk saya (local hide): RPC `clear_chat_room_for_me(uuid)`. Pattern
+  WhatsApp — hanya user pemanggil yg sembunyi. Semua user boleh akses.
+  `loadMessages` MUST fetch cutoff dari `chat_room_local_clears` dulu,
+  filter `created_at > cleared_before_at`.
+- Bulk destructive `clear_chat_room_messages(uuid)` — RPC ada di DB
+  (admin/mgmt/direksi only) tapi UI tidak panggil lagi setelah batch D.
+
+### 9.0.3 Read Receipt Centang 1/2
+- Tabel `chat_message_reads` UNIQUE(message_id, user_id).
+- Client `loadMessages` batch: (a) `get_message_read_summary` untuk pesan
+  sendiri, (b) `mark_messages_read` untuk pesan orang lain (dedup via
+  `markedReadRef: Set`).
+- Realtime `chat_message_reads INSERT` → increment `read_count` state.
+- Bubble render: `Check` (terkirim), `CheckCheck` gray (partial), `CheckCheck`
+  sky-300 (dibaca semua). Tap → modal "Dibaca oleh" via `get_message_readers`.
+
+### 9.0.4 Room Global vs Per-Cabang
+- Global room (`branch_id=NULL`): Umum, Pengumuman, Absensi. Auto-member
+  semua active user_profiles via `raos_ensure_global_rooms_members()`
+  (panggil sekali setelah sync staff baru).
+- Per-cabang: Pengisian Saldo, Driver via `seed_room_per_branch(text)`.
+  Nama pattern "`<Base> — <Cabang Name>`".
+- Room stale yang di-soft-delete sesi 20: Soetta T1/T2/T3 — Ops,
+  Dukungan Driver. JANGAN reactivate tanpa alasan.
+
+### 9.0.5 Mention @nama
+- Kolom `chat_messages.mentions uuid[]` (nullable) simpan user_id yang
+  di-tag. Client insert saat sendMessage.
+- Trigger `raos_notify_new_chat_message` push khusus untuk mentioned
+  dengan kategori `pengumuman` (bypass filter chat_room). Push umum
+  ke member lain EXCLUDE mentioned + sender.
+- Client regex `(?:^|\s)@([\w.\-]*)$` di teks sebelum caret → dropdown
+  autocomplete filter roomMembers. Klik → insert `@<Full Name> `.
+- Bubble render: split regex, wrap `@Nama` dalam span primary color.
+
+### 9.0.6 Info Room daftar anggota
+- Fetch semua member (hapus `.limit(30)`), tampil scrollable
+  `max-h-[280px]` (hapus `.slice(5)`).
+- Klik nama → RPC `get_or_create_pribadi_room(uuid)` → `setActiveRoom`
+  ke room pribadi.
+
+### 9.0.7 Wallet toggle di room Pengisian Saldo
+- Tombol Wallet cek `activeRoomBranch.saldo_nominal_options`
+  (branch ROOM), BUKAN `user.branches.saldo_nominal_options` (branch USER).
+- State `activeRoomBranch` fetch `branches` by `activeRoom.branch_id`
+  saat activeRoom di-set (reset ke null saat kembali ke list).
+- Props `IsiSaldoBottomSheet` juga pakai `activeRoomBranch.*` → submit
+  simpan `branch_id = cabang ROOM`.
 
 ## 9.1 Slash Command chat
 

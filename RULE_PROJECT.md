@@ -310,9 +310,9 @@ admin — mis. tombol Test Push di `/admin`).
 |---|---|---|
 | `scan_berhasil` | Notif hasil scan (ke staff pemilik) | `/admin` validate scan |
 | `scan_pending` | Reserved | — |
-| `validasi_koordinator` | Notif ke koord/admin ada scan pending | GAS `notifyPendingScansKoordinator` |
+| `validasi_koordinator` | Notif ke koord/admin ada pending validasi | GAS `notifyPendingScansKoordinator` + DB trigger `raos_saldo_after_submitted` (sesi 19) |
 | `pengingat_absen` | Reminder masuk/pulang 6 waktu per shift | GAS `reminderMasuk/PulangShift_` |
-| `pengumuman` | Reserved (broadcast admin) | — |
+| `pengumuman` | Broadcast + saldo status ke staff pengaju | DB trigger `raos_saldo_after_processed` (sudah diisi, bot pribadi progress) + client `approve/rejectSaldoRequest` (sesi 19) |
 | `chat_room` | Pesan chat + broadcast absensi ke chat | DB trigger `raos_notify_new_chat_message` |
 | `master` | Toggle master di Settings — kalau false, SEMUA di-skip | otomatis di Edge Function |
 

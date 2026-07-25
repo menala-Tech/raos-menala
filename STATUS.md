@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-07-25 (sesi 18 — Opsi C role gating + advisors lockdown + hub multi-PWA)*
+*Diupdate: 2026-07-25 (sesi 19 — Batch 3+4 bot pribadi progress + audit push saldo)*
 
 ## COLLABORATION LOG
 
@@ -9,10 +9,88 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-07-25 23:30 Claude] feat(saldo) batch 3+4 — bot pribadi progress
+  (mig raos_049) + audit push submit/approve/reject (mig raos_050)
 - [2026-07-25 22:00 Claude] docs(collab) create docs/COLLABORATION.md + template
   Owner tracker di SESSION_PROMPT + template COLLABORATION LOG di STATUS.md
 - [2026-07-25 20:30 Claude] ed43184 docs(status) pending sesi 19 refined
 - [2026-07-25 18:00 Claude] 5d9af27 feat sesi 18 advisor lockdown + 5 icon variant
+
+---
+
+## SESI 19 (25 Juli 2026 malam) — Batch 3+4 Room chat pengisian saldo
+
+Lanjutan `fbe59d5` (batch 1+2). Poin 4-5 dari sisipan "Room chat pengisian
+saldo" di `Upgrade Full Cabang.md` yang tadinya di-defer.
+
+### Migration Supabase sesi 19
+- `raos_049_saldo_target_bot_notify` — 3 change:
+  - `raos_ensure_pribadi_room(uuid,uuid)` helper SECURITY DEFINER (bypass
+    `auth.uid()`, callable dari trigger). Search existing 2-member pribadi
+    room, create kalau tidak ada.
+  - `raos_saldo_progress_snapshot(uuid)` helper — snapshot target +
+    realisasi + persentase per staff bulan berjalan, dual-mode:
+    * Soeta (slug ILIKE '%Soeta%') → `mode='order'`, target=`kpi_targets.target_scan`,
+      realisasi=count `scan_orders` validated bulan berjalan
+    * Lainnya → `mode='saldo'`, target=`kpi_targets.target_gmv`,
+      realisasi=SUM `raos_saldo_requests.nominal` is_processed=true
+  - Extend `raos_saldo_after_processed` — SETELAH auto-chat driver room,
+    tambah blok bot pribadi: pin 🟢🟡🔴 (≥100/50-99/<50) + kirim ke
+    room pribadi antara staff + sender + fire push kategori 'pengumuman'
+- `raos_050_saldo_push_audit` — trigger baru:
+  - `raos_saldo_after_submitted` AFTER INSERT → push kategori
+    `validasi_koordinator` ke koord dengan `branch_id=NEW.branch_id`
+    plus admin/mgmt/direksi global (exclude staff pengaju).
+    URL `/validasi-saldo`, tag `saldo-submitted-<id>`
+- Semua helper baru lockdown pattern raos_046 (REVOKE anon + authenticated).
+
+### Client sesi 19
+- `apps/pwa/src/lib/saldoRequest.ts`:
+  - Import `invokePush`
+  - `approveSaldoRequest` — chain `.select('staff_id, request_no, nominal')
+    .single()` post-update, fire `invokePush` kategori `pengumuman` ke
+    `staff_id` ("Pengajuan Isi Saldo Divalidasi", url=/riwayat,
+    tag=saldo-approved-<id>)
+  - `rejectSaldoRequest` — same pattern, ("Pengajuan Isi Saldo Ditolak",
+    body include alasan tolak)
+
+### Mapping push kategori setelah sesi 19
+
+| Event | Trigger/Handler | Kategori | Target |
+|---|---|---|---|
+| Staff submit `/isisaldo` | DB trigger `raos_saldo_after_submitted` | `validasi_koordinator` | koord cabang + admin+ global |
+| Chat message insert (general) | DB trigger `raos_notify_new_chat_message` | `chat_room` | member room |
+| Koord approve saldo | client `approveSaldoRequest` → invokePush | `pengumuman` | staff pengaju |
+| Koord reject saldo | client `rejectSaldoRequest` → invokePush | `pengumuman` | staff pengaju |
+| Admin centang "Sudah Diisi" | DB trigger `raos_saldo_after_processed` (existing) | `pengumuman` | staff pengaju |
+| Auto-chat "Terima kasih" driver | trigger post to driver room | via chat_room push | member driver room |
+| Bot progress pribadi (baru) | trigger post ke pribadi + push | `pengumuman` | staff pengaju |
+| Reminder saldo belum diisi 5m | GAS post chat msg | via chat_room push | member room |
+| Driver /antri /panggil /selesai /keluar | RPC + chat_msg insert | via chat_room push | member room |
+
+### Notes rasa aman
+
+- `raos_saldo_after_processed` trigger BEFORE UPDATE — `NEW.auto_chat_posted := true`
+  aman (tidak fire pesan duplikat kalau re-update).
+- Bot pribadi HANYA fire kalau `v_sender_id <> NEW.staff_id` — self-processing
+  edge case tidak spam.
+- `raos_ensure_pribadi_room` idempotent — 2 member match check dulu, tidak
+  bikin room baru kalau sudah ada. Tidak fire kalau staff = sender.
+- `kpi_targets` bisa kosong (belum di-run `updateAllKpiThisMonth`) → snapshot
+  return `target_val=0` → blok bot pribadi skip (silent, no error).
+
+### Pending sesi 20+
+- Migration `raos_051+` reserved
+- Poin 4 dari sisipan Upgrade Full Cabang.md sebenarnya juga mention
+  "Auto Bots memberi Balasan ke chat pribadi staff Pencapaian Target
+  **Saldo/order**" — sesi 19 sudah dual-mode di snapshot, tapi trigger
+  hanya fire dari raos_saldo_after_processed. Untuk staff Soeta khusus
+  Order, bot juga harus fire dari scan validation. Bisa ditambah trigger
+  `AFTER UPDATE OF validated_at ON scan_orders` (fire bot kalau
+  `NEW.validated_at IS NOT NULL AND OLD.validated_at IS NULL`) —
+  di-defer karena `scan_orders` 0 rows di production + risk spammy per
+  scan. Alternatif: daily digest cron GAS.
+- P5 rifim-os integration, P6 riwayat scope polish, P7 test end-to-end HP.
 
 ---
 

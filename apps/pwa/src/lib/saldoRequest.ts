@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { invokePush } from './pushClient'
 
 /**
  * Parse dan handle chat command untuk pengajuan isi saldo.
@@ -137,21 +138,45 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
 }
 
 export async function approveSaldoRequest(requestId: string, approverId: string): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase
+  const { data: row, error } = await supabase
     .from('raos_saldo_requests')
     .update({ status: 'approved', approved_by: approverId, approved_at: new Date().toISOString() })
     .eq('id', requestId)
     .eq('status', 'pending')
+    .select('staff_id, request_no, nominal')
+    .single()
   if (error) return { ok: false, error: error.message }
+  if (row?.staff_id) {
+    void invokePush({
+      user_ids: [row.staff_id],
+      title: 'Pengajuan Isi Saldo Divalidasi',
+      body: `${row.request_no} Rp${Number(row.nominal).toLocaleString('id-ID')} disetujui koord. Menunggu admin proses.`,
+      url: '/riwayat',
+      tag: `saldo-approved-${requestId}`,
+      kategori: 'pengumuman',
+    })
+  }
   return { ok: true }
 }
 
 export async function rejectSaldoRequest(requestId: string, approverId: string, reason: string): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase
+  const { data: row, error } = await supabase
     .from('raos_saldo_requests')
     .update({ status: 'rejected', approved_by: approverId, approved_at: new Date().toISOString(), rejection_reason: reason })
     .eq('id', requestId)
     .eq('status', 'pending')
+    .select('staff_id, request_no, nominal')
+    .single()
   if (error) return { ok: false, error: error.message }
+  if (row?.staff_id) {
+    void invokePush({
+      user_ids: [row.staff_id],
+      title: 'Pengajuan Isi Saldo Ditolak',
+      body: `${row.request_no} Rp${Number(row.nominal).toLocaleString('id-ID')} ditolak. Alasan: ${reason}`,
+      url: '/riwayat',
+      tag: `saldo-rejected-${requestId}`,
+      kategori: 'pengumuman',
+    })
+  }
   return { ok: true }
 }

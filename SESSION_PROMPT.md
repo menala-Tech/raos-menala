@@ -4,7 +4,7 @@
 > `C:\Projects\menala\RAOS`. Paste seluruh isi section
 > [🚀 PROMPT UNTUK PASTE](#-prompt-untuk-paste) ke Claude → dia baca
 > file ini + lanjutkan pekerjaan tepat dari checkpoint terakhir.
-> Update terakhir: 2026-07-25 (sesi 18 — P4 Opsi C DONE + advisor lockdown + hub multi-PWA)
+> Update terakhir: 2026-07-25 (sesi 19 — Batch 3+4 sisipan Room chat pengisian saldo)
 
 ---
 
@@ -177,6 +177,39 @@ Baca panduan lengkap di [docs/COLLABORATION.md](docs/COLLABORATION.md).
 ---
 
 ## 🎯 Checkpoint Terakhir
+
+**Sesi 19 (25 Juli 2026 malam) — Batch 3+4 Room chat pengisian saldo**
+
+Poin 4-5 dari sisipan `Room chat pengisian saldo` di `Upgrade Full Cabang.md`
+(yang tadinya di-defer di commit `fbe59d5` "batch 1+2"):
+
+- **Batch 3 — Auto-bot progress ke chat pribadi staff** (poin 4):
+  Migration `raos_049_saldo_target_bot_notify` — extend trigger
+  `raos_saldo_after_processed` (BEFORE UPDATE) untuk juga post pesan bot
+  ke room `category='pribadi'` antara staff + sender_id (admin/direksi
+  fallback dari `raos_get_system_bot_id`). Isi pesan: pin 🟢🟡🔴 sesuai
+  persentase (≥100/50-99/<50), Target/Realisasi/Persentase +
+  hint pengingat. Sumber data: `raos_saldo_progress_snapshot(uuid)` —
+  dual-mode: Soeta pakai count `scan_orders` bulan berjalan, lainnya
+  SUM(nominal) `raos_saldo_requests` `is_processed=true` bulan berjalan.
+  Target dari `kpi_targets` (staff_id + month+year). Push notif juga
+  fire ke staff dengan kategori 'pengumuman' untuk trigger tab / lock
+  screen.
+  Helper baru `raos_ensure_pribadi_room(uuid,uuid)` — SECURITY DEFINER,
+  bypass `auth.uid()` (versi trigger-callable dari `get_or_create_pribadi_room`).
+- **Batch 4 — Audit push notif semua fungsi baru** (poin 5):
+  Migration `raos_050_saldo_push_audit` — trigger baru
+  `raos_saldo_after_submitted` (AFTER INSERT) → push
+  `validasi_koordinator` ke koord cabang tsb + admin/mgmt/direksi
+  global. Client `approveSaldoRequest`/`rejectSaldoRequest` di
+  `lib/saldoRequest.ts` sekarang `SELECT staff_id, request_no, nominal
+  .single()` post-update + fire `invokePush` kategori `pengumuman` ke
+  staff pengaju. Driver queue events sudah dapat push via chat_room
+  kategori (existing chat trigger), tidak perlu tambahan.
+
+**Sesi 18 lanjutan (25 Juli 2026 pagi)**
+- Batch 1+2 saldo refinement (commit `fbe59d5`): driver info di card +
+  IsiSaldoBottomSheet + nama cabang di room proyek.
 
 **Sesi 16 lanjutan (24 Juli 2026 sore)**
 

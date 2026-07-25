@@ -152,6 +152,11 @@ function ChatPageInner() {
   // Data cabang ROOM aktif (bukan cabang user login) — untuk validasi tombol Isi Saldo
   const [activeRoomBranch, setActiveRoomBranch] = useState<{ id: string; slug: string | null; name: string | null; saldo_nominal_options: number[] } | null>(null)
 
+  // Mention @nama (sesi 20) — track user_ids yang di-tag di message baru
+  const [mentionsPending, setMentionsPending] = useState<string[]>([])
+  const [mentionDropdown, setMentionDropdown] = useState<{ open: boolean; query: string; startPos: number }>({ open: false, query: '', startPos: 0 })
+  const textInputRef = useRef<HTMLInputElement | null>(null)
+
   // Read receipt (sesi 20 batch chat #4-6) — centang 1/2 + list pembaca
   const [readSummary, setReadSummary] = useState<Record<string, { read_count: number; total_recipients: number }>>({})
   const [readersModalMsgId, setReadersModalMsgId] = useState<string | null>(null)
@@ -504,9 +509,19 @@ function ChatPageInner() {
       return
     }
 
-    const payload = {
+    // Mention @nama (sesi 20) — filter mentionsPending yang masih ada di text
+    // supaya tidak kirim user_id yang sudah dihapus dari text setelah tag.
+    const mentionsArr = mentionsPending.filter(uid => {
+      const member: any = roomMembers.find((m: any) => m.user_id === uid)
+      const name = member?.user_profiles?.full_name
+      return name && content.includes(`@${name}`)
+    })
+
+    const payload: any = {
       room_id: activeRoom.id, sender_id: user.id, type: 'text', content, client_id: clientId,
     }
+    if (mentionsArr.length > 0) payload.mentions = mentionsArr
+
     const { data, error } = await supabase.from('chat_messages').insert(payload)
       .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     setSending(false)
@@ -518,12 +533,14 @@ function ChatPageInner() {
         ...prev,
         { ...payload, id: `local-${clientId}`, created_at: new Date().toISOString(), user_profiles: { full_name: (user as any).full_name, role: user.role } } as any,
       ])
+      setMentionsPending([])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
       return
     }
     if (error) { alert('Gagal kirim: ' + error.message); setText(content); return }
     if (data) {
       setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])
+      setMentionsPending([])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }
   }
@@ -749,8 +766,20 @@ function ChatPageInner() {
     setRoomSheet('info'); setMembersLoading(true)
     const { data } = await supabase.from('chat_room_members')
       .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
-      .eq('room_id', activeRoom.id).limit(30)
+      .eq('room_id', activeRoom.id)
     setRoomMembers(data ?? []); setMembersLoading(false)
+  }
+
+  // Buka chat pribadi dengan anggota grup (dari daftar member) — sesi 20
+  async function openPribadiWithMember(otherUserId: string) {
+    if (!user || otherUserId === user.id) return
+    const { data, error } = await supabase.rpc('get_or_create_pribadi_room', { p_other_user_id: otherUserId })
+    if (error || !data) { alert('Gagal buka chat pribadi: ' + (error?.message ?? '')); return }
+    const { data: roomData } = await supabase.from('chat_rooms').select('*').eq('id', data).single()
+    if (roomData) {
+      setRoomSheet('none')
+      setActiveRoom(roomData as any)
+    }
   }
 
   // ── Voice recorder (Fase 8) ──────────────────────────────────────────────
@@ -1335,23 +1364,36 @@ function ChatPageInner() {
                       </div>
                     </div>
                     {roomMembers.length > 0 && (
-                      <div className="mb-4 space-y-2">
-                        <p className="text-xs font-semibold text-gray-500">Anggota</p>
-                        {roomMembers.slice(0, 5).map((m: any) => {
-                          const p = m.user_profiles
-                          return (
-                            <div key={m.user_id} className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-secondary text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                {(p?.full_name ?? '?').charAt(0)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-gray-800 truncate">{p?.full_name ?? 'Staff'}</p>
-                                <p className="text-[10px] text-gray-400 capitalize">{p?.role ?? ''}</p>
-                              </div>
-                            </div>
-                          )
-                        })}
-                        {roomMembers.length > 5 && <p className="text-xs text-gray-400 text-center">+{roomMembers.length - 5} lainnya</p>}
+                      <div className="mb-4">
+                        <p className="text-xs font-semibold text-gray-500 mb-2">Anggota ({roomMembers.length})</p>
+                        <div className="max-h-[280px] overflow-y-auto space-y-1 pr-1">
+                          {roomMembers.map((m: any) => {
+                            const p = m.user_profiles
+                            const isSelf = m.user_id === user?.id
+                            return (
+                              <button
+                                key={m.user_id}
+                                onClick={() => !isSelf && openPribadiWithMember(m.user_id)}
+                                disabled={isSelf}
+                                className={clsx(
+                                  'w-full flex items-center gap-3 px-2 py-2 rounded-lg text-left transition-colors',
+                                  isSelf ? 'opacity-60 cursor-default' : 'hover:bg-gray-100 active:bg-gray-200'
+                                )}
+                              >
+                                <div className="w-9 h-9 rounded-full bg-secondary text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
+                                  {(p?.full_name ?? '?').charAt(0)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-gray-800 truncate">
+                                    {p?.full_name ?? 'Staff'}{isSelf ? ' (Saya)' : ''}
+                                  </p>
+                                  <p className="text-[10px] text-gray-400 capitalize">{p?.role ?? ''}</p>
+                                </div>
+                                {!isSelf && <MessageCircle size={14} className="text-primary flex-shrink-0" />}
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
                     )}
                     <button onClick={() => setRoomSheet('settings')}
@@ -1705,8 +1747,19 @@ function ChatPageInner() {
                       )
                     })()}
 
-                    {/* TEXT */}
-                    {msg.type === 'text' && <p className="leading-relaxed">{msg.content}</p>}
+                    {/* TEXT (dengan highlight @mention sesi 20) */}
+                    {msg.type === 'text' && (() => {
+                      const content = msg.content ?? ''
+                      // Split by pola "@<Nama Panjang> " — match nama huruf/spasi/titik/dash sampai space atau EOL
+                      const parts = content.split(/(@[A-Za-z][A-Za-z0-9._\- ]*?(?=\s|$|[.,!?]))/g)
+                      return (
+                        <p className="leading-relaxed whitespace-pre-wrap break-words">
+                          {parts.map((chunk, i) => chunk.startsWith('@')
+                            ? <span key={i} className={clsx('font-semibold rounded px-0.5', isMe ? 'text-primary bg-white/10' : 'text-secondary bg-secondary/10')}>{chunk}</span>
+                            : chunk)}
+                        </p>
+                      )
+                    })()}
 
                     {/* SALDO REQUEST (P2.3) */}
                     {msg.type === 'saldo_request' && (
@@ -1861,15 +1914,77 @@ function ChatPageInner() {
               )}
               <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
                 className="hidden" onChange={handleFileSelect} />
-              <input
-                type="text"
-                placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan...'}
-                value={text}
-                onChange={e => setText(e.target.value)}
-                onKeyDown={e => { if (e.key !== 'Enter') return; pendingFile ? sendWithAttachment() : sendMessage() }}
-                className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
-                disabled={uploading || sendingLocation || pollSending || uploadingAudio}
-              />
+              <div className="flex-1 relative">
+                {/* Dropdown mention autocomplete — muncul saat ketik @ diikuti nama */}
+                {mentionDropdown.open && (() => {
+                  const q = mentionDropdown.query.toLowerCase()
+                  const candidates = roomMembers
+                    .filter((m: any) => m.user_id !== user?.id)
+                    .filter((m: any) => (m.user_profiles?.full_name ?? '').toLowerCase().includes(q))
+                    .slice(0, 6)
+                  if (candidates.length === 0) return null
+                  return (
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-white rounded-xl shadow-lg border border-gray-100 max-h-56 overflow-y-auto z-10">
+                      {candidates.map((m: any) => {
+                        const p = m.user_profiles
+                        return (
+                          <button key={m.user_id}
+                            onClick={() => {
+                              const before = text.slice(0, mentionDropdown.startPos)
+                              const afterAt = text.slice(mentionDropdown.startPos + 1 + mentionDropdown.query.length)
+                              const inserted = `@${p?.full_name ?? 'Staff'} `
+                              const newText = before + inserted + afterAt
+                              setText(newText)
+                              setMentionsPending(prev => prev.includes(m.user_id) ? prev : [...prev, m.user_id])
+                              setMentionDropdown({ open: false, query: '', startPos: 0 })
+                              setTimeout(() => textInputRef.current?.focus(), 0)
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                          >
+                            <div className="w-7 h-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                              {(p?.full_name ?? '?').charAt(0)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-gray-800 truncate">{p?.full_name ?? 'Staff'}</p>
+                              <p className="text-[9px] text-gray-400 capitalize">{p?.role ?? ''}</p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+                <input
+                  ref={textInputRef}
+                  type="text"
+                  placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan... (@nama untuk tag)'}
+                  value={text}
+                  onChange={e => {
+                    const val = e.target.value
+                    setText(val)
+                    // Deteksi @ sebelum caret
+                    const caret = e.target.selectionStart ?? val.length
+                    const uptoCaret = val.slice(0, caret)
+                    const m = uptoCaret.match(/(?:^|\s)@([\w.\-]*)$/)
+                    if (m) {
+                      const startPos = caret - m[0].length + (m[0].startsWith(' ') ? 1 : 0)
+                      setMentionDropdown({ open: true, query: m[1] ?? '', startPos })
+                    } else {
+                      if (mentionDropdown.open) setMentionDropdown({ open: false, query: '', startPos: 0 })
+                    }
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape' && mentionDropdown.open) {
+                      setMentionDropdown({ open: false, query: '', startPos: 0 })
+                      return
+                    }
+                    if (e.key !== 'Enter') return
+                    pendingFile ? sendWithAttachment() : sendMessage()
+                  }}
+                  className="w-full bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
+                  disabled={uploading || sendingLocation || pollSending || uploadingAudio}
+                />
+              </div>
               {(text.trim() || pendingFile) ? (
                 <button
                   onClick={pendingFile ? sendWithAttachment : sendMessage}

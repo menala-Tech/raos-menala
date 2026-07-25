@@ -20,7 +20,7 @@ import {
   Copy, SmilePlus, MapPin, Navigation,
   BarChart2, CheckSquare, Square, Plus, Trash2, Lock,
   Mic, Trash, StopCircle, Wallet,
-  Check, CheckCheck,
+  Check, CheckCheck, Truck,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatPollOption, UserProfile } from '@/types'
@@ -151,6 +151,9 @@ function ChatPageInner() {
 
   // Data cabang ROOM aktif (bukan cabang user login) — untuk validasi tombol Isi Saldo
   const [activeRoomBranch, setActiveRoomBranch] = useState<{ id: string; slug: string | null; name: string | null; saldo_nominal_options: number[] } | null>(null)
+
+  // Daftar driver cabang ROOM aktif — untuk dropdown mention @
+  const [roomDrivers, setRoomDrivers] = useState<Array<{ id: string; driver_id: string; name: string }>>([])
 
   // Mention @nama (sesi 20) — track user_ids yang di-tag di message baru
   const [mentionsPending, setMentionsPending] = useState<string[]>([])
@@ -343,8 +346,15 @@ function ChatPageInner() {
             saldo_nominal_options: Array.isArray(data.saldo_nominal_options) ? data.saldo_nominal_options : [],
           })
         })
+      // Fetch driver cabang untuk dropdown mention @Driver
+      supabase.from('raos_drivers')
+        .select('id, driver_id, name')
+        .eq('is_active', true).eq('branch_id', roomBranchId)
+        .order('name')
+        .then(({ data }) => setRoomDrivers((data ?? []) as any[]))
     } else {
       setActiveRoomBranch(null)
+      setRoomDrivers([])
     }
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
@@ -1915,30 +1925,41 @@ function ChatPageInner() {
               <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
                 className="hidden" onChange={handleFileSelect} />
               <div className="flex-1 relative">
-                {/* Dropdown mention autocomplete — muncul saat ketik @ diikuti nama */}
+                {/* Dropdown mention autocomplete — muncul saat ketik @ diikuti nama.
+                    Include staff (roomMembers) + driver cabang (roomDrivers). */}
                 {mentionDropdown.open && (() => {
                   const q = mentionDropdown.query.toLowerCase()
-                  const candidates = roomMembers
+                  const staffCand = roomMembers
                     .filter((m: any) => m.user_id !== user?.id)
                     .filter((m: any) => (m.user_profiles?.full_name ?? '').toLowerCase().includes(q))
                     .slice(0, 6)
-                  if (candidates.length === 0) return null
+                  const driverCand = roomDrivers
+                    .filter(d => (d.name ?? '').toLowerCase().includes(q))
+                    .slice(0, 4)
+                  if (staffCand.length === 0 && driverCand.length === 0) return null
+
+                  function insertAt(name: string, extraSuffix = '', userId?: string) {
+                    const before = text.slice(0, mentionDropdown.startPos)
+                    const afterAt = text.slice(mentionDropdown.startPos + 1 + mentionDropdown.query.length)
+                    const inserted = `@${name}${extraSuffix} `
+                    setText(before + inserted + afterAt)
+                    if (userId) {
+                      setMentionsPending(prev => prev.includes(userId) ? prev : [...prev, userId])
+                    }
+                    setMentionDropdown({ open: false, query: '', startPos: 0 })
+                    setTimeout(() => textInputRef.current?.focus(), 0)
+                  }
+
                   return (
-                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-white rounded-xl shadow-lg border border-gray-100 max-h-56 overflow-y-auto z-10">
-                      {candidates.map((m: any) => {
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-white rounded-xl shadow-lg border border-gray-100 max-h-72 overflow-y-auto z-10">
+                      {staffCand.length > 0 && (
+                        <div className="px-3 pt-1.5 pb-0.5 text-[9px] font-bold text-gray-400 uppercase">Staff</div>
+                      )}
+                      {staffCand.map((m: any) => {
                         const p = m.user_profiles
                         return (
-                          <button key={m.user_id}
-                            onClick={() => {
-                              const before = text.slice(0, mentionDropdown.startPos)
-                              const afterAt = text.slice(mentionDropdown.startPos + 1 + mentionDropdown.query.length)
-                              const inserted = `@${p?.full_name ?? 'Staff'} `
-                              const newText = before + inserted + afterAt
-                              setText(newText)
-                              setMentionsPending(prev => prev.includes(m.user_id) ? prev : [...prev, m.user_id])
-                              setMentionDropdown({ open: false, query: '', startPos: 0 })
-                              setTimeout(() => textInputRef.current?.focus(), 0)
-                            }}
+                          <button key={`s-${m.user_id}`}
+                            onClick={() => insertAt(p?.full_name ?? 'Staff', '', m.user_id)}
                             className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
                           >
                             <div className="w-7 h-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
@@ -1951,6 +1972,23 @@ function ChatPageInner() {
                           </button>
                         )
                       })}
+                      {driverCand.length > 0 && (
+                        <div className="px-3 pt-2 pb-0.5 text-[9px] font-bold text-gray-400 uppercase border-t border-gray-50 mt-1">Driver Cabang Ini</div>
+                      )}
+                      {driverCand.map(d => (
+                        <button key={`d-${d.id}`}
+                          onClick={() => insertAt(d.name, ` (${d.driver_id})`)}
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                        >
+                          <div className="w-7 h-7 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center flex-shrink-0">
+                            <Truck size={12} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{d.name}</p>
+                            <p className="text-[9px] text-gray-400">ID {d.driver_id} · Driver</p>
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   )
                 })()}

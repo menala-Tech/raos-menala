@@ -1,0 +1,42 @@
+name: Deploy GAS via clasp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gas/**'
+  workflow_dispatch:  # bisa trigger manual dari Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Write .clasprc.json from secret
+        run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
+
+      - name: Verify clasp config
+        working-directory: gas
+        run: |
+          cat .clasp.json
+          clasp --version
+          clasp status || echo "status warn"
+
+      - name: Push GAS to Script Editor
+        working-directory: gas
+        run: clasp push --force
+
+      - name: Summary
+        run: |
+          echo "GAS pushed to scriptId=$(cat gas/.clasp.json | grep scriptId | cut -d'\"' -f4)"
+          echo "Next: run setupAllTriggers() manually from Script Editor to activate new intervals"

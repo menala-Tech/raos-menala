@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-07-25 (sesi 19 — Batch 3+4 bot pribadi progress + audit push saldo)*
+*Diupdate: 2026-07-25 (sesi 20 — 7-poin chat rooms feedback user)*
 
 ## COLLABORATION LOG
 
@@ -9,12 +9,117 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
-- [2026-07-25 23:30 Claude] feat(saldo) batch 3+4 — bot pribadi progress
-  (mig raos_049) + audit push submit/approve/reject (mig raos_050)
+- [2026-07-26 00:30 Claude] feat(chat) sesi 20 — 7 poin user feedback:
+  cleanup 4 stale room + auto-member 3 global (mig raos_051) + read
+  receipt per-message + pengumuman kategori (mig raos_052) + client UI
+  centang 1/2 + readers modal
+- [2026-07-25 23:30 Claude] c526771 feat(saldo) batch 3+4 — bot pribadi
+  progress (mig raos_049) + audit push submit/approve/reject (mig raos_050)
 - [2026-07-25 22:00 Claude] docs(collab) create docs/COLLABORATION.md + template
   Owner tracker di SESSION_PROMPT + template COLLABORATION LOG di STATUS.md
 - [2026-07-25 20:30 Claude] ed43184 docs(status) pending sesi 19 refined
 - [2026-07-25 18:00 Claude] 5d9af27 feat sesi 18 advisor lockdown + 5 icon variant
+
+---
+
+## SESI 20 (25 Juli 2026 malam / 26 Juli dinihari) — 7 poin chat rooms user feedback
+
+User kirim screenshot chat room + 7 requirement. Semua di-address dalam
+1 turn.
+
+### Migration Supabase sesi 20
+
+**`raos_051_room_cleanup_and_pengumuman_notif`** — 3 change:
+1. Soft-delete 4 room stale: `Soetta T1 — Ops`, `Soetta T2 — Ops`,
+   `Soetta T3 — Ops`, `Dukungan Driver` (tidak masuk 5 room wajib).
+2. Helper `raos_ensure_global_rooms_members()` — idempotent bulk-add
+   semua `user_profiles.is_active=true` ke 3 room global
+   (Umum/Pengumuman/Absensi). Backfill 29 staff × 3 room = 87 row.
+3. Extend trigger `raos_notify_new_chat_message`:
+   - Detect `lower(room.name) LIKE '%pengumuman%'` → kategori
+     `'pengumuman'` + title "📢 Pengumuman Baru" + tag
+     `pengumuman-<msgId>`. Push filter Settings hormat kategori
+     ini terpisah dari `chat_room`.
+   - Room lain tetap kategori `'chat_room'`.
+   - Preview per message.type: 📷 Foto / 🎤 Voice / 💰 Isi Saldo /
+     🚕 Antrian driver / 📊 Polling / 💬.
+
+**`raos_052_chat_message_reads`** — read receipt schema baru:
+- Tabel `chat_message_reads` (message_id, user_id, read_at) UNIQUE +
+  index message+user.
+- Policy `_insert_own` (user_id=auth.uid) + `_select` (bisa read row
+  untuk pesan yang bisa akses via chat_messages RLS).
+- RPC `mark_messages_read(uuid[])` — bulk insert ON CONFLICT DO NOTHING,
+  return jumlah baris baru.
+- RPC `get_message_read_summary(uuid[])` — return per pesan
+  {read_count, total_recipients} (total_recipients = jumlah member
+  room minus sender).
+- RPC `get_message_readers(uuid)` — join user_profiles, return list
+  {user_id, full_name, avatar_url, read_at} order ASC.
+- Realtime publication `ALTER PUBLICATION supabase_realtime ADD TABLE
+  chat_message_reads`.
+
+### Client sesi 20
+
+**`apps/pwa/src/app/chat/page.tsx`**:
+- Import `Check`, `CheckCheck` dari lucide-react.
+- State baru: `readSummary`, `readersModalMsgId`, `readersList`,
+  `readersLoading`, `markedReadRef: Set<string>`.
+- Callback `loadReadSummary(msgIds)` — batch RPC, update state.
+- Callback `markVisibleMessagesRead(msgIds)` — filter yg belum ada
+  di `markedReadRef`, fire-and-forget RPC.
+- Function `openReadersModal(msgId)` — set state + fetch readers.
+- `useEffect activeRoom` — reset `readSummary` + clear `markedReadRef`.
+- Realtime channel — tambah listener `chat_message_reads INSERT` →
+  `+1 read_count` di `readSummary` yang sesuai.
+- INSERT chat_messages listener — kalau `sender_id !== me` mark read,
+  kalau `=== me` load summary baru.
+- `loadMessages` — batch load: (a) `loadReadSummary` untuk pesan
+  sendiri, (b) `markVisibleMessagesRead` untuk pesan orang lain.
+- Bubble render — untuk `isMe`, next to time chip:
+  - 1 centang abu (`Check` text-white/50): `read_count = 0` (terkirim)
+  - 2 centang abu (`CheckCheck` text-white/50): partial
+  - 2 centang sky (`CheckCheck` text-sky-300): `read_count >=
+    total_recipients` (dibaca semua)
+  - Tap → `openReadersModal` (RPC list pembaca).
+- Modal baru "Dibaca oleh" — bottom-sheet + list nama + timestamp per
+  reader, tap luar untuk tutup.
+
+### Mapping user requirement → implementasi
+
+| # | Requirement | Status | Path |
+|---|---|---|---|
+| 1 | Room cabang lain tidak muncul | ✅ | RLS `is_branch_in_scope` (existing) + cleanup 4 stale |
+| 2 | 5 room wajib per cabang | ✅ | Sudah 3 global + 2 per-cabang, auto-member global |
+| 3 | Kuning hilang saat dibuka | ✅ | Existing — `mark_chat_room_read` fire on open |
+| 4 | Sender lihat pembaca | ✅ | Modal + RPC `get_message_readers` |
+| 5 | Centang 1 terkirim | ✅ | `Check` icon default |
+| 6 | Centang 2 dibaca semua | ✅ | `CheckCheck` sky bila `read_count >= total_recipients` |
+| 7 | Notif high-level Pengumuman | ✅ | Extended trigger — kategori `pengumuman` |
+
+### State akhir sesi 20
+
+- Migration Supabase: **52** (`raos_052_chat_message_reads`)
+- 4 room stale soft-deleted; 3 room global punya 29 member masing2
+- `chat_message_reads` tabel siap; 3 RPC baru; realtime publication ✓
+- Client chat/page.tsx bertambah ~90 line (state + callbacks + modal
+  + bubble render)
+- Trigger `raos_notify_new_chat_message` v2 — kategori dinamis per
+  room name
+
+### Pending sesi 21+
+
+- User test end-to-end di HP: (a) verify Bobby tidak lihat 4 room
+  stale lagi, (b) staff Batam login → hanya lihat 3 global + 2 Batam,
+  (c) Pengumuman post → verify high-level notif walau chat_room off,
+  (d) send chat + partner buka → verify centang jadi sky.
+- Kalau ada staff baru sync SSoT nanti, panggil manual sekali RPC
+  `raos_ensure_global_rooms_members()` supaya join 3 room global.
+  Untuk otomatis: bisa jadwalkan trigger AFTER INSERT/UPDATE on
+  user_profiles kalau is_active jadi true — di-defer sesi 21.
+- P5 rifim-os integration, P6 riwayat scope polish, P7 test HP.
+- Bot pribadi progress untuk Soeta staff (scan_orders validated) —
+  masih deferred dari sesi 19.
 
 ---
 

@@ -4,7 +4,7 @@
 > `C:\Projects\menala\RAOS`. Paste seluruh isi section
 > [🚀 PROMPT UNTUK PASTE](#-prompt-untuk-paste) ke Claude → dia baca
 > file ini + lanjutkan pekerjaan tepat dari checkpoint terakhir.
-> Update terakhir: 2026-07-25 (sesi 19 — Batch 3+4 sisipan Room chat pengisian saldo)
+> Update terakhir: 2026-07-25 (sesi 20 — 7-poin chat rooms user feedback)
 
 ---
 
@@ -177,6 +177,35 @@ Baca panduan lengkap di [docs/COLLABORATION.md](docs/COLLABORATION.md).
 ---
 
 ## 🎯 Checkpoint Terakhir
+
+**Sesi 20 (25 Juli 2026 malam) — 7-poin chat rooms feedback user**
+
+User kirim 7 requirement dari screenshot chat room:
+1. Room cabang lain tidak muncul di cabang lain ✅ (RLS `is_branch_in_scope`
+   sudah benar; stale room "Soetta T1/T2/T3 — Ops" + "Dukungan Driver"
+   di-soft-delete via migration `raos_051`; get_chat_rooms_for_user filter
+   `is_active=true`)
+2. 5 room wajib per cabang: Umum/Pengumuman/Absensi (global) + Pengisian
+   Saldo/Driver (per-cabang) ✅ (semua sudah ada; helper baru
+   `raos_ensure_global_rooms_members()` auto-attach semua active
+   user_profiles ke 3 room global; jalan sekali di migration 051,
+   backfill 29 staff × 3 room)
+3. Tanda kuning hilang saat room dibuka ✅ (verified existing —
+   `mark_chat_room_read` fire on open + on new message; loadRooms
+   re-fetch saat back ke list)
+4+5+6. Read receipt per-message ✅ (Migration `raos_052_chat_message_reads`
+   — tabel `chat_message_reads` UNIQUE(message_id,user_id) + 3 RPC
+   `mark_messages_read(uuid[])`, `get_message_read_summary(uuid[])`,
+   `get_message_readers(uuid)` + realtime publication. Client
+   `chat/page.tsx` — state `readSummary` + `markedReadRef` + auto-mark
+   pesan orang lain saat load + summary batch untuk pesan sendiri +
+   render Check/CheckCheck di bubble sender (1 centang abu =terkirim,
+   2 centang abu =partial, 2 centang sky = dibaca semua) + tap-to-open
+   modal daftar pembaca via `get_message_readers`)
+7. Notif high-level bila ada pesan di Room Pengumuman ✅ (Extend trigger
+   `raos_notify_new_chat_message` — detect `lower(room.name) LIKE
+   '%pengumuman%'` → kategori 'pengumuman' + title "📢 Pengumuman Baru"
+   + tag `pengumuman-<id>` untuk urgency high di SW)
 
 **Sesi 19 (25 Juli 2026 malam) — Batch 3+4 Room chat pengisian saldo**
 

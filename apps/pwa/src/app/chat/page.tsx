@@ -20,6 +20,7 @@ import {
   Copy, SmilePlus, MapPin, Navigation,
   BarChart2, CheckSquare, Square, Plus, Trash2, Lock,
   Mic, Trash, StopCircle, Wallet,
+  Check, CheckCheck,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatPollOption, UserProfile } from '@/types'
@@ -148,6 +149,13 @@ function ChatPageInner() {
   const [actionMenu, setActionMenu]     = useState<ActionMenu | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Read receipt (sesi 20 batch chat #4-6) — centang 1/2 + list pembaca
+  const [readSummary, setReadSummary] = useState<Record<string, { read_count: number; total_recipients: number }>>({})
+  const [readersModalMsgId, setReadersModalMsgId] = useState<string | null>(null)
+  const [readersList, setReadersList] = useState<Array<{ user_id: string; full_name: string; avatar_url: string | null; read_at: string }>>([])
+  const [readersLoading, setReadersLoading] = useState(false)
+  const markedReadRef = useRef<Set<string>>(new Set())
+
   // Voice recorder (Fase 8) — MediaRecorder blob → upload → message type 'audio'
   const [recording, setRecording]           = useState(false)
   const [recSeconds, setRecSeconds]         = useState(0)
@@ -169,6 +177,38 @@ function ChatPageInner() {
     const { data, error } = await supabase.rpc('get_chat_rooms_for_user')
     if (!error) setRooms((data ?? []) as ChatRoomWithMeta[])
   }, [])
+
+  // Read receipt (sesi 20) — snapshot centang 1/2 per pesan `isMe`
+  const loadReadSummary = useCallback(async (msgIds: string[]) => {
+    if (msgIds.length === 0) return
+    const { data } = await supabase.rpc('get_message_read_summary', { p_message_ids: msgIds })
+    if (data) {
+      setReadSummary(prev => {
+        const next = { ...prev }
+        for (const row of data as Array<{ message_id: string; read_count: number; total_recipients: number }>) {
+          next[row.message_id] = { read_count: row.read_count, total_recipients: row.total_recipients }
+        }
+        return next
+      })
+    }
+  }, [])
+
+  // Bulk mark pesan orang lain sebagai dibaca — fire-and-forget
+  const markVisibleMessagesRead = useCallback(async (msgIds: string[]) => {
+    const pending = msgIds.filter(id => !markedReadRef.current.has(id))
+    if (pending.length === 0) return
+    pending.forEach(id => markedReadRef.current.add(id))
+    void supabase.rpc('mark_messages_read', { p_message_ids: pending })
+  }, [])
+
+  async function openReadersModal(msgId: string) {
+    setReadersModalMsgId(msgId)
+    setReadersLoading(true)
+    setReadersList([])
+    const { data } = await supabase.rpc('get_message_readers', { p_message_id: msgId })
+    setReadersList((data ?? []) as any[])
+    setReadersLoading(false)
+  }
 
   useEffect(() => {
     async function init() {
@@ -196,9 +236,17 @@ function ChatPageInner() {
       .from('chat_messages')
       .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)')
       .eq('room_id', roomId).order('created_at').limit(50)
-    setMessages(data ?? [])
+    const rows = data ?? []
+    setMessages(rows)
     setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
-  }, [])
+    // Read receipt batch: (a) summary untuk pesan sendiri, (b) mark pesan orang lain sebagai dibaca
+    if (user?.id) {
+      const mine = rows.filter((m: any) => m.sender_id === user.id).map((m: any) => m.id)
+      const others = rows.filter((m: any) => m.sender_id !== user.id).map((m: any) => m.id)
+      if (mine.length) void loadReadSummary(mine)
+      if (others.length) void markVisibleMessagesRead(others)
+    }
+  }, [user?.id, loadReadSummary, markVisibleMessagesRead])
 
   async function loadReactions(roomId: string) {
     const { data } = await supabase
@@ -258,6 +306,8 @@ function ChatPageInner() {
     if (!activeRoom) return
     setReactions({})
     setPinnedMsg(null)
+    setReadSummary({})
+    markedReadRef.current = new Set()
     setRoomPrefs(getRoomPrefs(activeRoom.id))
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
@@ -274,6 +324,18 @@ function ChatPageInner() {
           setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
           supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
+          if (msg.sender_id !== user?.id) void markVisibleMessagesRead([msg.id])
+          else void loadReadSummary([msg.id])
+        })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chat_message_reads' },
+        payload => {
+          const r = payload.new as { message_id: string; user_id: string }
+          setReadSummary(prev => {
+            const cur = prev[r.message_id]
+            if (!cur) return prev
+            return { ...prev, [r.message_id]: { ...cur, read_count: cur.read_count + 1 } }
+          })
         })
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
@@ -939,6 +1001,47 @@ function ChatPageInner() {
             </div>
           )}
 
+          {/* ── Modal daftar pembaca (read receipt) ──────────────────────── */}
+          {readersModalMsgId && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center"
+              onClick={() => setReadersModalMsgId(null)}>
+              <div className="bg-white dark:bg-gray-800 w-full sm:w-[90%] sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-xl"
+                onClick={e => e.stopPropagation()}>
+                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-gray-800 dark:text-gray-100">Dibaca oleh</p>
+                    <p className="text-[10px] text-gray-400">Tap luar untuk tutup</p>
+                  </div>
+                  <button onClick={() => setReadersModalMsgId(null)} className="p-1 text-gray-400">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="max-h-[50vh] overflow-y-auto"
+                  style={{ paddingBottom: 'calc(20px + env(safe-area-inset-bottom))' }}>
+                  {readersLoading && <p className="text-center text-xs text-gray-400 py-6">Memuat...</p>}
+                  {!readersLoading && readersList.length === 0 && (
+                    <p className="text-center text-xs text-gray-400 py-6">Belum ada yang membaca</p>
+                  )}
+                  {readersList.map(r => (
+                    <div key={r.user_id} className="px-4 py-2 flex items-center gap-3 border-b border-gray-50 dark:border-gray-700/50">
+                      <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        {r.full_name?.[0]?.toUpperCase() ?? '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{r.full_name}</p>
+                      </div>
+                      <span className="text-[10px] text-gray-400 flex-shrink-0">
+                        {new Date(r.read_at).toLocaleString('id-ID', {
+                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Isi Saldo BottomSheet ─────────────────────────────────────── */}
           {isiSaldoSheet && activeRoom && user && (
             <IsiSaldoBottomSheet
@@ -1537,9 +1640,33 @@ function ChatPageInner() {
                       <DriverQueueCard raw={msg.content ?? ''} />
                     )}
 
-                    <p className={clsx('text-[9px] mt-1', isMe ? 'text-white/50' : 'text-gray-300')}>
-                      {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+                    <div className={clsx('flex items-center gap-1 mt-1', isMe ? 'justify-end' : 'justify-start')}>
+                      <p className={clsx('text-[9px]', isMe ? 'text-white/50' : 'text-gray-300')}>
+                        {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      {isMe && (() => {
+                        const summ = readSummary[msg.id]
+                        const total = summ?.total_recipients ?? 0
+                        const read = summ?.read_count ?? 0
+                        // 1 centang = terkirim, 2 abu = dibaca sebagian, 2 biru = dibaca semua
+                        // total=0 (chat pribadi baru dst) → tampil 1 centang saja
+                        const allRead = total > 0 && read >= total
+                        const partial = read > 0 && !allRead
+                        return (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openReadersModal(msg.id) }}
+                            className="flex items-center hover:opacity-80"
+                            title={total > 0 ? `${read}/${total} sudah baca` : 'Terkirim'}
+                          >
+                            {allRead
+                              ? <CheckCheck size={11} className="text-sky-300" />
+                              : partial
+                                ? <CheckCheck size={11} className="text-white/50" />
+                                : <Check size={11} className="text-white/50" />}
+                          </button>
+                        )
+                      })()}
+                    </div>
                   </div>
 
                   {/* Reaction bubbles */}

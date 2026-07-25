@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-07-26 dinihari (sesi 20 lengkap — 5 batch fitur chat)*
+*Diupdate: 2026-07-26 dinihari (sesi 20 SELESAI + 2 PR merged — production live)*
 
 ## COLLABORATION LOG
 
@@ -9,6 +9,11 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-07-26 02:36 Claude] e44d78f PR#2 merged (squash) — mention
+  dropdown include driver cabang + RPC raos_reseed_all_branch_room_members
+  (mig raos_056) + fix parser /isisaldo terima spasi
+- [2026-07-26 02:17 Claude] 1f37667 PR#1 merged (squash) — sesi 19-20
+  gabungan (5 batch chat + saldo bot). 8 commit squashed.
 - [2026-07-26 02:07 Claude] 2530442 feat(chat) daftar anggota lengkap +
   klik-buka-pribadi + mention @nama (mig raos_055)
 - [2026-07-26 02:00 Claude] fe6c27a feat(chat) 'Hapus Semua Pesan' jadi
@@ -115,6 +120,28 @@ User kirim screenshot chat room + 7 requirement. Semua di-address dalam
 - Trigger `raos_notify_new_chat_message` v2 — kategori dinamis per
   room name
 
+### Sesi 20 finalisasi (26 Juli 2026 dinihari) — 2 PR merged ke main
+
+**PR #1 merged** (squash commit `1f37667`, 02:16 UTC) — sesi 19-20
+gabungan (8 commit branch → 1 commit main):
+- Batch A: 7 poin feedback chat rooms (raos_051, raos_052)
+- Batch B: fix Wallet toggle cek nominal cabang ROOM
+- Batch C: retensi semua PWA + hapus per-pesan + hapus admin (raos_053)
+- Batch D: hapus lokal per user (raos_054)
+- Batch E: info room lengkap + mention @nama (raos_055)
+- Fix parser /isisaldo terima spasi/underscore/dash
+
+**PR #2 merged** (squash commit `e44d78f`, 02:36 UTC) — feedback
+screenshot dropdown @ kosong:
+- Migration `raos_056_reseed_room_members` — RPC
+  `raos_reseed_all_branch_room_members()` SECURITY DEFINER
+  admin/mgmt/direksi, idempotent, backfill member per-cabang room.
+- Client dropdown mention `@` split 2 section:
+  * Staff (dari roomMembers, track user_id ke mentionsPending)
+  * Driver Cabang Ini (dari raos_drivers WHERE branch_id + is_active)
+- Icon Truck orange untuk driver. Insert `@Nama (driver_id) ` tanpa
+  masuk mentionsPending karena driver bukan user_profile.
+
 ### Sesi 20 lanjutan (25-26 Juli 2026 dinihari) — 4 batch tambahan feedback user
 
 **Batch B — Fix Wallet toggle** (screenshot user room Pengisian Saldo Batam)
@@ -171,14 +198,14 @@ Room "ANGGOTA: Semua Staff" statis) — commit `2530442`, migration
   primary color + bg tint (WhatsApp-like).
 - Escape key close dropdown.
 
-### State akhir sesi 20 (setelah 5 batch)
+### State akhir sesi 20 (setelah 2 PR merged)
 
-- Migration Supabase: **55** (raos_055_chat_message_mentions)
-- Commit terakhir sesi 20: `2530442` (di branch
-  claude/raos-multi-cabang-upgrade-tehg2x)
-- PR #1 draft: 3 commit sesi 19 + 5 commit sesi 20 = 8 commits
-- Vercel preview `2530442` = Ready
-- GAS: tidak ada perubahan sesi 20 (sesi 20 murni PWA + Supabase)
+- Migration Supabase: **56** (raos_056_reseed_room_members)
+- GitHub main terakhir: `e44d78f` (PR #2 squash)
+  - Sebelumnya `1f37667` (PR #1 squash 8 commit)
+- Vercel production: auto-deploy setelah tiap PR merge, `raos-menala.vercel.app` live
+- Branch `claude/raos-multi-cabang-upgrade-tehg2x`: reset ke `origin/main` (siap sesi 21+)
+- GAS: tidak ada perubahan sesi 20 (murni PWA + Supabase)
 
 ### Pending sesi 21+
 

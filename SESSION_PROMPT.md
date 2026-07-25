@@ -4,7 +4,7 @@
 > `C:\Projects\menala\RAOS`. Paste seluruh isi section
 > [🚀 PROMPT UNTUK PASTE](#-prompt-untuk-paste) ke Claude → dia baca
 > file ini + lanjutkan pekerjaan tepat dari checkpoint terakhir.
-> Update terakhir: 2026-07-25 (sesi 20 lengkap — chat rooms feedback 3 batch + saldo bot + audit push)
+> Update terakhir: 2026-07-26 dinihari (sesi 20 fully merged — 2 PR ke main: sesi 19-20 fitur + mention driver)
 
 ---
 
@@ -178,11 +178,34 @@ Baca panduan lengkap di [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
 ## 🎯 Checkpoint Terakhir
 
-**Sesi 20 lengkap (25-26 Juli 2026) — 3 batch fitur chat + saldo bot + audit push**
+**Sesi 20 SELESAI + MERGED (26 Juli 2026 dinihari) — 2 PR ke main**
 
-Total commit sesi 20: 6 (dcec153, 1ce07e0, f0718cb, fe6c27a, 2530442) +
-1 dari sesi 19 (c526771).
-Total migration Supabase: 7 (raos_049 s/d raos_055).
+State platform akhir sesi 20:
+- **GitHub main**: `e44d78f` (PR #2 squash) — sebelumnya `1f37667` (PR #1 squash)
+- **Vercel production**: auto-deploy setelah tiap merge, `raos-menala.vercel.app` live dengan semua fitur
+- **Supabase migration**: **56** (`raos_056_reseed_room_members`)
+- **Branch `claude/raos-multi-cabang-upgrade-tehg2x`**: reset ke `origin/main` untuk sesi berikutnya
+
+**PR #2 sesi 20 lanjutan-2 (commit main `e44d78f`)** — feedback user dropdown @ kosong:
+- Migration `raos_056_reseed_room_members` — RPC `raos_reseed_all_branch_room_members()`
+  SECURITY DEFINER admin/mgmt/direksi. Loop semua per-cabang room → INSERT
+  member yang belum (staff cabang + admin/mgmt/direksi) ON CONFLICT DO NOTHING.
+  Idempotent — bisa dipanggil berkala saat staff baru sync dari SSoT.
+  Backfill manual dijalankan sekali (0 baris tambah — sudah sinkron).
+- Client dropdown mention `@` split 2 section:
+  * **Staff** (dari roomMembers) — user_profiles, insert `@Nama ` + track user_id
+  * **Driver Cabang Ini** (dari raos_drivers WHERE branch_id=activeRoom.branch_id)
+    — insert `@Nama (driver_id) ` tanpa track ke mentionsPending (driver bukan
+    user_profile → tidak fire push chat).
+- Icon Truck orange untuk driver di dropdown.
+- Fix parser `/isisaldo` support spasi/underscore/dash antara "isi" & "saldo"
+  (regex `^\/isi[\s_-]?saldo\s+(\S+)`).
+
+**PR #1 sesi 19+20 batch A-E (commit main `1f37667`)** — 5 batch fitur chat + saldo bot:
+
+Total commit branch sesi 20 (sebelum squash): 7 (dcec153, 1ce07e0,
+f0718cb, fe6c27a, 2530442, 6e6f653, beee9ed) + 1 dari sesi 19
+(c526771). Total migration Supabase: 8 (raos_049 s/d raos_056).
 
 **Batch A — Chat rooms feedback 7 poin user (screenshot 1)** — commit `dcec153`:
 - (1) Room cabang lain tidak muncul ✅

@@ -16,7 +16,8 @@ import { invokePush } from './pushClient'
  *  5. Link chat_message_id + chat_room_id ke request row
  */
 
-const CMD_REGEX = /^\/isisaldo\s+(\S+)/i
+// Match: /isisaldo 95000, /isi saldo 95000, /isi_saldo 95000, /isi-saldo 95000
+const CMD_REGEX = /^\/isi[\s_-]?saldo\s+(\S+)/i
 
 export interface ParsedCommand {
   raw: string

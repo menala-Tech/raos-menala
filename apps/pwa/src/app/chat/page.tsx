@@ -367,6 +367,13 @@ function ChatPageInner() {
           else setPinnedMsg(prev => prev?.id === updated.id ? null : prev)
         })
       .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
+        payload => {
+          const deleted = payload.old as { id: string }
+          setMessages(prev => prev.filter(m => m.id !== deleted.id))
+          setPinnedMsg(prev => prev?.id === deleted.id ? null : prev)
+        })
+      .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_message_reactions', filter: `room_id=eq.${activeRoom.id}` },
         payload => {
           const r = payload.new as ChatMessageReaction
@@ -886,16 +893,41 @@ function ChatPageInner() {
     setActiveRoom(null) // balik ke list, useEffect akan refresh loadRooms()
   }
 
-  // Fase 5 — admin set/ubah retensi pesan per room. Cron server-side
-  // (raos_delete_expired_chat_messages) menghormati kolom auto_delete_days.
+  // Retensi pesan per room — sesi 20 update: buka akses ke semua PWA (bukan admin-only).
+  // Pakai RPC set_chat_room_retention (SECURITY DEFINER) supaya bypass RLS admin-only
+  // policy chat_rooms_update_admin. RPC sendiri cek membership atau branch scope.
+  // Cron server-side (raos_delete_expired_chat_messages) menghormati auto_delete_days.
   // Kirim null = matikan retensi (pesan tidak dihapus otomatis).
   async function updateRetention(days: number | null) {
     if (!activeRoom || !user) return
-    if (!PIN_ROLES.includes(user.role)) return
-    const { error } = await supabase.from('chat_rooms')
-      .update({ auto_delete_days: days }).eq('id', activeRoom.id)
+    const { error } = await supabase.rpc('set_chat_room_retention', {
+      p_room_id: activeRoom.id, p_days: days,
+    })
     if (error) { alert('Gagal ubah retensi: ' + error.message); return }
     setActiveRoom({ ...activeRoom, auto_delete_days: days ?? undefined })
+  }
+
+  // Hapus pesan (sesi 20) — sender atau admin/mgmt/koord/direksi
+  async function deleteMessage(messageId: string) {
+    if (!confirm('Hapus pesan ini? Aksi tidak bisa di-undo.')) return
+    const { error } = await supabase.rpc('delete_chat_message', { p_message_id: messageId })
+    if (error) { alert('Gagal hapus pesan: ' + error.message); return }
+    setMessages(prev => prev.filter(m => m.id !== messageId))
+    setActionMenu(null)
+  }
+
+  // Hapus semua pesan di room (sesi 20) — admin/mgmt/direksi only, destructive
+  async function clearAllMessages() {
+    if (!activeRoom || !user) return
+    if (!confirm(`⚠️ HAPUS SEMUA PESAN di room "${activeRoom.name}"?\n\nTindakan ini tidak bisa di-undo. Semua pesan (termasuk yang di-pin) akan hilang permanen.`)) return
+    if (!confirm(`Konfirmasi kedua: ketik OK di prompt berikutnya untuk melanjutkan.`)) return
+    const confirmText = prompt('Ketik OK persis untuk konfirmasi:')
+    if (confirmText !== 'OK') { alert('Dibatalkan.'); return }
+    const { data, error } = await supabase.rpc('clear_chat_room_messages', { p_room_id: activeRoom.id })
+    if (error) { alert('Gagal hapus: ' + error.message); return }
+    alert(`Berhasil hapus ${data ?? 0} pesan.`)
+    setMessages([])
+    setRoomSheet('none')
   }
 
   // ── Reactions (Fase 4) ────────────────────────────────────────────────────
@@ -1226,6 +1258,17 @@ function ChatPageInner() {
                     </button>
                   )}
 
+                  {/* Hapus pesan (sesi 20) — sender atau admin/koord/direksi */}
+                  {(actionMenu.isMe || (user && PIN_ROLES.includes(user.role))) && (
+                    <button
+                      onClick={() => deleteMessage(actionMenu.msgId)}
+                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-red-50 transition-colors text-left"
+                    >
+                      <Trash2 size={18} className="text-red-500" />
+                      <span className="text-sm font-semibold text-red-500">Hapus Pesan</span>
+                    </button>
+                  )}
+
                   <button onClick={() => setActionMenu(null)}
                     className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left">
                     <X size={18} className="text-gray-400" />
@@ -1356,12 +1399,11 @@ function ChatPageInner() {
                           </p>
                         </div>
                       </div>
-                      {user && PIN_ROLES.includes(user.role) && (
-                        // Chip button — HINDARI native <select>. Native picker
-                        // di Android dismiss dengan back gesture, dan gesture
-                        // itu consume pushState dummy (baris 239) → popstate →
-                        // setActiveRoom(null) → keluar dari room. Chip = tap
-                        // langsung tanpa native picker.
+                      {/* Chip button — akses semua PWA (sesi 20). Update via RPC
+                          set_chat_room_retention (bypass RLS admin-only).
+                          HINDARI native <select> — Android back gesture consume
+                          pushState → keluar room. */}
+                      {user && (
                         <div className="flex gap-1.5 mt-3">
                           {([
                             { val: null, label: 'Tidak' },
@@ -1388,6 +1430,14 @@ function ChatPageInner() {
                         </div>
                       )}
                     </div>
+                    {/* Hapus semua pesan (sesi 20) — admin/mgmt/direksi only, destructive */}
+                    {user && ['admin','management','direksi'].includes(user.role) && (
+                      <button
+                        onClick={clearAllMessages}
+                        className="w-full flex items-center justify-center gap-2 text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
+                        <Trash2 size={16} /><span className="text-sm font-semibold">Hapus Semua Pesan Room</span>
+                      </button>
+                    )}
                     {canLeave && (
                       <button
                         onClick={leaveRoom}

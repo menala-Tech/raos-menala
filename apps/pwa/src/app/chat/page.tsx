@@ -242,6 +242,23 @@ function ChatPageInner() {
 
   useEffect(() => { if (activeRoom === null && user) loadRooms() }, [activeRoom, user, loadRooms])
 
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel('chat-rooms')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_rooms' }, () => { void loadRooms() })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_rooms' }, () => { void loadRooms() })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_rooms' }, () => { void loadRooms() })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, () => { void loadRooms() })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_messages' }, () => { void loadRooms() })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_room_members' }, () => { void loadRooms() })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_room_members' }, () => { void loadRooms() })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_room_members' }, () => { void loadRooms() })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [user, loadRooms])
+
   const loadMessages = useCallback(async (roomId: string) => {
     // Ambil cutoff hapus lokal (kalau user pernah "Hapus untuk Saya")
     let clearedBefore: string | null = null
@@ -458,14 +475,16 @@ function ChatPageInner() {
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [activeRoom, loadMessages])
+  }, [activeRoom, loadMessages, loadReadSummary, markVisibleMessagesRead, user?.id])
 
   // ── Messages ──────────────────────────────────────────────────────────────
 
-  async function sendMessage() {
-    if (!text.trim() || !activeRoom || !user) return
+  async function sendMessage(fileUrl?: string) {
+    if (!activeRoom || !user) return
+    const content = text.trim()
+    if (!content && !fileUrl) return
     setSending(true)
-    const content = text.trim(); setText('')
+    setText('')
     const clientId = crypto.randomUUID()
 
     // Chat command: /antri /panggil /selesai /keluar — driver queue (P3.3)
@@ -528,10 +547,16 @@ function ChatPageInner() {
     })
 
     const payload: any = {
-      room_id: activeRoom.id, sender_id: user.id, type: 'text', content, client_id: clientId,
+      room_id: activeRoom.id,
+      sender_id: user.id,
+      client_id: clientId,
+      type: fileUrl ? (fileUrl.includes('/voice-') ? 'audio' : 'file') : 'text',
     }
+    if (content) payload.content = content
+    if (fileUrl) payload.media_url = fileUrl
     if (mentionsArr.length > 0) payload.mentions = mentionsArr
 
+    // TODO: Trigger Supabase Edge Function `moderate-message` before insert.
     const { data, error } = await supabase.from('chat_messages').insert(payload)
       .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     setSending(false)
@@ -580,14 +605,14 @@ function ChatPageInner() {
     const { data: { session } } = await supabase.auth.getSession()
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const authToken = session?.access_token ?? anonKey
     const uploadUrl = `${supabaseUrl}/storage/v1/object/chat_attachments/${storagePath}`
 
     async function tryUpload() {
       return fetch(uploadUrl, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session?.access_token ?? anonKey}`,
-          'apikey': anonKey,
+        headers: {          
+          Authorization: `Bearer ${authToken}`,
           'Content-Type': pendingFile!.type || 'application/octet-stream',
           'x-upsert': 'false',
         },
@@ -2025,7 +2050,7 @@ function ChatPageInner() {
               </div>
               {(text.trim() || pendingFile) ? (
                 <button
-                  onClick={pendingFile ? sendWithAttachment : sendMessage}
+                  onClick={() => pendingFile ? sendWithAttachment() : sendMessage()}
                   disabled={sending || uploading}
                   className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0">
                   {uploading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} strokeWidth={2.5} />}

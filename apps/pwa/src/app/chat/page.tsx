@@ -8,6 +8,9 @@ import { parseIsiSaldoCommand, submitIsiSaldo } from '@/lib/saldoRequest'
 import SaldoRequestCard from '@/components/SaldoRequestCard'
 import IsiSaldoBottomSheet from '@/components/IsiSaldoBottomSheet'
 import { parseDriverQueueCommand, dispatchDriverQueue } from '@/lib/driverQueue'
+import { parseActionCard, type DriverPayload, type QueuePayload } from '@/lib/actionCardParser'
+import { DriverActionCard } from '@/components/DriverActionCard'
+import { QueueActionCard } from '@/components/QueueActionCard'
 import DriverQueueCard from '@/components/DriverQueueCard'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
@@ -113,6 +116,7 @@ function ChatPageInner() {
   const [rooms, setRooms]       = useState<ChatRoomWithMeta[]>([])
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [actionBusy, setActionBusy] = useState<Record<string, boolean>>({})
   const [text, setText]         = useState('')
   const [sending, setSending]   = useState(false)
   const [filterTab, setFilterTab] = useState<FilterTab>('semua')
@@ -577,6 +581,46 @@ function ChatPageInner() {
       setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])
       setMentionsPending([])
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
+  }
+
+  function setActionBusyFor(messageId: string, busy: boolean) {
+    setActionBusy(prev => ({ ...prev, [messageId]: busy }))
+  }
+
+  async function updateActionCardMessage(messageId: string, content: string) {
+    const current = messages.find(m => m.id === messageId)
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .update({ content })
+      .eq('id', messageId)
+      .select('*')
+      .single()
+
+    if (error) {
+      alert('Gagal memperbarui action card: ' + error.message)
+      return null
+    }
+
+    setMessages(prev => prev.map(m => m.id === messageId ? { ...current, ...(data as ChatMessage), content } : m))
+    return data as ChatMessage
+  }
+
+  async function handleDriverAction(messageId: string, status: 'approved' | 'rejected' | 'active', payload: DriverPayload) {
+    setActionBusyFor(messageId, true)
+    try {
+      await updateActionCardMessage(messageId, JSON.stringify({ ...payload, status }))
+    } finally {
+      setActionBusyFor(messageId, false)
+    }
+  }
+
+  async function handleQueueAction(messageId: string, status: 'approved' | 'rejected' | 'done', payload: QueuePayload) {
+    setActionBusyFor(messageId, true)
+    try {
+      await updateActionCardMessage(messageId, JSON.stringify({ ...payload, status }))
+    } finally {
+      setActionBusyFor(messageId, false)
     }
   }
 
@@ -1592,6 +1636,9 @@ function ChatPageInner() {
               const senderName = (msg as any).user_profiles?.full_name ?? 'Unknown'
               const senderRole = (msg as any).user_profiles?.role ?? ''
               const rxGroups   = groupedReactions(msg.id)
+              const actionCard = msg.content ? parseActionCard(msg.content) : null
+              const isDriverAction = msg.type === 'driver' || actionCard?.kind === 'driver'
+              const isQueueAction = msg.type === 'queue' || actionCard?.kind === 'queue'
 
               return (
                 <div key={msg.id}
@@ -1795,6 +1842,30 @@ function ChatPageInner() {
                         </p>
                       )
                     })()}
+
+                    {/* DRIVER ACTION CARD */}
+                    {isDriverAction && (
+                      <DriverActionCard
+                        rawContent={msg.content ?? ''}
+                        currentRole={user?.role}
+                        busy={actionBusy[msg.id] ?? false}
+                        onApprove={payload => handleDriverAction(msg.id, 'approved', payload)}
+                        onReject={payload => handleDriverAction(msg.id, 'rejected', payload)}
+                        onActivate={payload => handleDriverAction(msg.id, 'active', payload)}
+                      />
+                    )}
+
+                    {/* QUEUE ACTION CARD */}
+                    {isQueueAction && (
+                      <QueueActionCard
+                        rawContent={msg.content ?? ''}
+                        currentRole={user?.role}
+                        busy={actionBusy[msg.id] ?? false}
+                        onApprove={payload => handleQueueAction(msg.id, 'approved', payload)}
+                        onReject={payload => handleQueueAction(msg.id, 'rejected', payload)}
+                        onComplete={payload => handleQueueAction(msg.id, 'done', payload)}
+                      />
+                    )}
 
                     {/* SALDO REQUEST (P2.3) */}
                     {msg.type === 'saldo_request' && (

@@ -377,6 +377,12 @@ function ChatPageInner() {
       setActiveRoomBranch(null)
       setRoomDrivers([])
     }
+    // Load room members untuk dropdown mention @ (sebelumnya cuma di openInfoSheet
+    // sehingga dropdown kosong kalau user langsung ketik @ tanpa buka Info Sheet)
+    supabase.from('chat_room_members')
+      .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
+      .eq('room_id', activeRoom.id)
+      .then(({ data }) => setRoomMembers(data ?? []))
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
     loadPinnedMessage(activeRoom.id)

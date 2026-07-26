@@ -49,15 +49,16 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncSelfiePhotosToGDrive')
     .timeBased().everyMinutes(30).create()
 
-  // Sync driver airport (7 tab SSOT) setiap 10 menit — driver aktif diupdate
-  // sering (nama/status), roster PWA lain (radms-driver, isi-saldo) butuh
-  // fresh data.
+  // Sync driver airport (7 tab SSOT) — 2 JAM (dari 10 menit di sesi 18).
+  // GAS UrlFetchApp quota default 20,000/hari — 10 menit × 7 tab × banyak fetch
+  // bikin over-quota. 2 jam = 12x/hari, aman + admin bisa run manual kalau
+  // butuh cepat via menu 🚗 Driver → 🔄 Sync Driver Airport.
   ScriptApp.newTrigger('syncDriverAirportFromSSOT')
-    .timeBased().everyMinutes(10).create()
+    .timeBased().everyHours(2).create()
 
-  // Sync driver eksternal (Batam + Jambi Luar) setiap 10 menit — sama alasan
+  // Sync driver eksternal (Batam + Jambi Luar) — 2 JAM (dari 10 menit)
   ScriptApp.newTrigger('syncDriverExternalFromSSOT')
-    .timeBased().everyMinutes(10).create()
+    .timeBased().everyHours(2).create()
 
   // Sync staff (semua RIFIM dari MASTER DATA STAFF) setiap 6 jam — perubahan
   // roster/PIN/jabatan tidak sering, cukup 6 jam. Kalau butuh update cepat,
@@ -65,19 +66,22 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncStaffFromSSOT')
     .timeBased().everyHours(6).create()
 
-  // Sync pengajuan isi saldo ke tab "Form Isi Saldo" setiap 5 menit —
-  // user minta real-time. Refresh column checkbox otomatis.
+  // Sync pengajuan isi saldo ke tab "Form Isi Saldo" — 15 MENIT (dari 5 menit).
+  // Real-time berlebihan, isi saldo tidak sering. Onboarding manual via
+  // menu 💰 Isi Saldo → 🔄 Sync ke Sheet untuk instant refresh.
   ScriptApp.newTrigger('syncSaldoRequestsToSheet')
-    .timeBased().everyMinutes(5).create()
+    .timeBased().everyMinutes(15).create()
 
   // Reminder chat "SALDO BELUM DIPROSES" untuk request >5 menit yang belum
-  // dicentang. Cron 5 menit — post ke room Pengisian Saldo cabang.
+  // dicentang. Cron 15 MENIT (dari 5) — cukup, kirim reminder tetap tepat waktu.
   ScriptApp.newTrigger('reminderSaldoBelumDiisi')
-    .timeBased().everyMinutes(5).create()
-
-  // Sync raos_driver_queue → tab "Antrian Driver" setiap 15 menit
-  ScriptApp.newTrigger('syncDriverQueueToSheet')
     .timeBased().everyMinutes(15).create()
+
+  // Sync raos_driver_queue → tab "Antrian Driver" setiap 30 MENIT (dari 15).
+  // Antrian sudah realtime via /antrian-driver page + realtime subscribe,
+  // sheet-side cukup untuk backup/reporting.
+  ScriptApp.newTrigger('syncDriverQueueToSheet')
+    .timeBased().everyMinutes(30).create()
 
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')

@@ -16,8 +16,9 @@ interface SaldoContent {
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
   is_processed?: boolean
   driver_login_id?: string | null // baru — ID Login (mis. 200878173)
-  driver_name?: string | null     // baru — Nama Driver
-  requested_at?: string | null    // baru — Tanggal + Waktu ISO
+ driver_name?: string | null
+requested_at?: string | null
+processed_at?: string | null
 }
 
 interface Props {

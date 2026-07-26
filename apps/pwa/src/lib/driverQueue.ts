@@ -93,9 +93,13 @@ async function notifyQueueEvent(roomId: string, event: string, driverName?: stri
     supabase.from('chat_room_members').select('user_id').eq('room_id', roomId),
     supabase.from('chat_rooms').select('name').eq('id', roomId).maybeSingle(),
   ])
-  const userIds = [...new Set((membersData ?? []).map((row: any) => row.user_id).filter(Boolean))]
-  if (userIds.length === 0) return
-
+  const userIds = Array.from(
+  new Set(
+    (membersData ?? [])
+      .map((row: any) => row.user_id)
+      .filter(Boolean)
+  )
+)
   const titleMap: Record<string, string> = {
     joined: 'Driver masuk antrean',
     called: 'Driver dipanggil',

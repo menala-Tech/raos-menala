@@ -58,6 +58,29 @@ interface SubmitOpts {
   allowedNominals: number[]
 }
 
+async function postSaldoSystemMessage(opts: {
+  roomId: string
+  senderId: string
+  requestNo: string
+  nominal: number
+  status: 'approved' | 'rejected' | 'processed'
+  note?: string
+}) {
+  const label = opts.status === 'processed'
+    ? '✅ Saldo sudah diisi oleh admin.'
+    : opts.status === 'rejected'
+      ? '❌ Pengajuan saldo ditolak.'
+      : '✅ Pengajuan saldo disetujui.'
+  const content = `${label}\n${opts.requestNo} • Rp${Number(opts.nominal).toLocaleString('id-ID')}\n${opts.note ?? ''}`.trim()
+
+  await supabase.from('chat_messages').insert({
+    room_id: opts.roomId,
+    sender_id: opts.senderId,
+    type: 'text',
+    content,
+  })
+}
+
 function newRequestNo(nominal: number): string {
   const now = new Date()
   const yyyy = now.getFullYear()
@@ -138,15 +161,43 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
   return { ok: true, requestNo: request.request_no, requestId: request.id }
 }
 
-export async function approveSaldoRequest(requestId: string, approverId: string): Promise<{ ok: boolean; error?: string }> {
+async function syncSaldoRequestMessageStatus(messageId: string | undefined, status: string, extra: Record<string, unknown> = {}) {
+  if (!messageId) return
+  const { data: existingMsg, error: fetchErr } = await supabase
+    .from('chat_messages')
+    .select('content')
+    .eq('id', messageId)
+    .maybeSingle()
+  if (fetchErr || !existingMsg?.content) return
+  try {
+    const parsed = JSON.parse(existingMsg.content as string)
+    const nextPayload = JSON.stringify({ ...parsed, ...extra, status })
+    await supabase.from('chat_messages').update({ content: nextPayload }).eq('id', messageId)
+  } catch {
+    // ignore malformed content; keep request row update as source of truth
+  }
+}
+
+export async function approveSaldoRequest(requestId: string, approverId: string, messageId?: string): Promise<{ ok: boolean; error?: string }> {
   const { data: row, error } = await supabase
     .from('raos_saldo_requests')
     .update({ status: 'approved', approved_by: approverId, approved_at: new Date().toISOString() })
     .eq('id', requestId)
     .eq('status', 'pending')
-    .select('staff_id, request_no, nominal')
+    .select('staff_id, request_no, nominal, chat_room_id')
     .single()
   if (error) return { ok: false, error: error.message }
+  await syncSaldoRequestMessageStatus(messageId, 'approved')
+  if (row?.chat_room_id) {
+    void postSaldoSystemMessage({
+      roomId: row.chat_room_id,
+      senderId: approverId,
+      requestNo: row.request_no,
+      nominal: Number(row.nominal),
+      status: 'approved',
+      note: 'Pengajuan saldo telah disetujui oleh koordinator. Menunggu admin mengisi saldo.',
+    })
+  }
   if (row?.staff_id) {
     void invokePush({
       user_ids: [row.staff_id],
@@ -160,15 +211,26 @@ export async function approveSaldoRequest(requestId: string, approverId: string)
   return { ok: true }
 }
 
-export async function rejectSaldoRequest(requestId: string, approverId: string, reason: string): Promise<{ ok: boolean; error?: string }> {
+export async function rejectSaldoRequest(requestId: string, approverId: string, reason: string, messageId?: string): Promise<{ ok: boolean; error?: string }> {
   const { data: row, error } = await supabase
     .from('raos_saldo_requests')
     .update({ status: 'rejected', approved_by: approverId, approved_at: new Date().toISOString(), rejection_reason: reason })
     .eq('id', requestId)
     .eq('status', 'pending')
-    .select('staff_id, request_no, nominal')
+    .select('staff_id, request_no, nominal, chat_room_id')
     .single()
   if (error) return { ok: false, error: error.message }
+  await syncSaldoRequestMessageStatus(messageId, 'rejected', { rejection_reason: reason })
+  if (row?.chat_room_id) {
+    void postSaldoSystemMessage({
+      roomId: row.chat_room_id,
+      senderId: approverId,
+      requestNo: row.request_no,
+      nominal: Number(row.nominal),
+      status: 'rejected',
+      note: `Pengajuan saldo ditolak. Alasan: ${reason}`,
+    })
+  }
   if (row?.staff_id) {
     void invokePush({
       user_ids: [row.staff_id],
@@ -176,6 +238,44 @@ export async function rejectSaldoRequest(requestId: string, approverId: string, 
       body: `${row.request_no} Rp${Number(row.nominal).toLocaleString('id-ID')} ditolak. Alasan: ${reason}`,
       url: '/riwayat',
       tag: `saldo-rejected-${requestId}`,
+      kategori: 'pengumuman',
+    })
+  }
+  return { ok: true }
+}
+
+export async function markSaldoRequestProcessed(requestId: string, adminId: string, note?: string, messageId?: string): Promise<{ ok: boolean; error?: string }> {
+  const { data: row, error } = await supabase
+    .from('raos_saldo_requests')
+    .update({
+      status: 'approved',
+      is_processed: true,
+      processed_at: new Date().toISOString(),
+      processed_by: adminId,
+      admin_note: note ?? null,
+    })
+    .eq('id', requestId)
+    .select('staff_id, request_no, nominal, chat_room_id')
+    .single()
+  if (error) return { ok: false, error: error.message }
+  await syncSaldoRequestMessageStatus(messageId, 'approved', { is_processed: true, processed_at: new Date().toISOString(), processed_by: adminId, admin_note: note ?? null })
+  if (row?.chat_room_id) {
+    void postSaldoSystemMessage({
+      roomId: row.chat_room_id,
+      senderId: adminId,
+      requestNo: row.request_no,
+      nominal: Number(row.nominal),
+      status: 'processed',
+      note: note ?? 'Saldo sudah diisi oleh admin.',
+    })
+  }
+  if (row?.staff_id) {
+    void invokePush({
+      user_ids: [row.staff_id],
+      title: 'Saldo Sudah Diisi oleh Admin',
+      body: `${row.request_no} telah selesai diisi oleh admin.`,
+      url: '/riwayat',
+      tag: `saldo-processed-${requestId}`,
       kategori: 'pengumuman',
     })
   }

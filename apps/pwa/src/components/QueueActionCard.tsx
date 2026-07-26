@@ -43,7 +43,7 @@ export function QueueActionCard({
   if (!parsed || parsed.kind !== 'queue') return null
 
   const status = parsed.status ?? 'pending'
-  const canManage = ['admin', 'supervisor', 'operator', 'queue_manager'].includes((currentRole ?? '').toLowerCase())
+  const canManage = ['admin', 'management', 'direksi', 'koordinator', 'staff', 'supervisor', 'operator', 'queue_manager', 'driver_manager'].includes((currentRole ?? '').toLowerCase())
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">

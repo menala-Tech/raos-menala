@@ -43,7 +43,7 @@ export function DriverActionCard({
   if (!parsed || parsed.kind !== 'driver') return null
 
   const status = parsed.status ?? 'pending'
-  const canManage = ['admin', 'supervisor', 'hr', 'driver_manager'].includes((currentRole ?? '').toLowerCase())
+  const canManage = ['admin', 'management', 'direksi', 'koordinator', 'staff', 'supervisor', 'hr', 'driver_manager'].includes((currentRole ?? '').toLowerCase())
   const initials = parsed.name
     .split(/\s+/)
     .map(s => s[0])

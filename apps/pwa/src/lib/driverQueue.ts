@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { invokePush } from './pushClient'
 
 /**
  * Driver Queue commands (P3.3). Model dari radms-driver:
@@ -87,6 +88,37 @@ async function postQueueEventChat(opts: {
   })
 }
 
+async function notifyQueueEvent(roomId: string, event: string, driverName?: string, position?: number) {
+  const [{ data: membersData }, { data: roomData }] = await Promise.all([
+    supabase.from('chat_room_members').select('user_id').eq('room_id', roomId),
+    supabase.from('chat_rooms').select('name').eq('id', roomId).maybeSingle(),
+  ])
+  const userIds = [...new Set((membersData ?? []).map((row: any) => row.user_id).filter(Boolean))]
+  if (userIds.length === 0) return
+
+  const titleMap: Record<string, string> = {
+    joined: 'Driver masuk antrean',
+    called: 'Driver dipanggil',
+    completed: 'Antrian driver selesai',
+    left: 'Driver keluar antrean',
+  }
+  const bodyMap: Record<string, string> = {
+    joined: driverName ? `${driverName} masuk antrean${position ? ` di posisi #${position}` : ''}.` : 'Driver baru masuk antrean.',
+    called: driverName ? `${driverName} dipanggil${position ? ` untuk posisi #${position}` : ''}.` : 'Driver dipanggil.',
+    completed: driverName ? `${driverName} menyelesaikan antrean${position ? ` posisi #${position}` : ''}.` : 'Antrian driver selesai.',
+    left: driverName ? `${driverName} keluar antrean${position ? ` dari posisi #${position}` : ''}.` : 'Driver keluar antrean.',
+  }
+
+  void invokePush({
+    user_ids: userIds,
+    title: titleMap[event] ?? 'Update antrian driver',
+    body: `${roomData?.name ? `${roomData.name}: ` : ''}${bodyMap[event] ?? 'Ada update antrian driver.'}`,
+    url: '/chat',
+    tag: `queue-event-${roomId}-${event}`,
+    kategori: 'chat_room',
+  })
+}
+
 export async function dispatchDriverQueue(opts: DispatchOpts): Promise<DispatchResult> {
   const { userId, roomId, branchId, parsed, clientMsgId } = opts
 
@@ -107,6 +139,7 @@ export async function dispatchDriverQueue(opts: DispatchOpts): Promise<DispatchR
       event: 'joined', driverName: driver.name, driverId: driver.driver_id, position,
       extra: { queue_id: queueId },
     })
+    void notifyQueueEvent(roomId, 'joined', driver.name, position ?? undefined)
     return { ok: true, queueId, position }
   }
 
@@ -133,6 +166,7 @@ export async function dispatchDriverQueue(opts: DispatchOpts): Promise<DispatchR
       event: 'called', driverName: drv?.name, driverId: drv?.driver_id, position: pos,
       extra: { queue_id: data },
     })
+    void notifyQueueEvent(roomId, 'called', drv?.name, pos)
     return { ok: true, queueId: data as string, position: pos }
   }
 
@@ -156,6 +190,7 @@ export async function dispatchDriverQueue(opts: DispatchOpts): Promise<DispatchR
       event: 'completed', driverName: drv?.name, driverId: drv?.driver_id, position: pos,
       extra: { queue_id: queueId },
     })
+    void notifyQueueEvent(roomId, 'completed', drv?.name, pos)
     return { ok: true, queueId }
   }
 
@@ -177,6 +212,7 @@ export async function dispatchDriverQueue(opts: DispatchOpts): Promise<DispatchR
       event: 'left', driverName: driver.name, driverId: driver.driver_id, position: (qRow as any).position,
       extra: { queue_id: (qRow as any).id },
     })
+    void notifyQueueEvent(roomId, 'left', driver.name, (qRow as any).position)
     return { ok: true, queueId: (qRow as any).id }
   }
 

@@ -64,6 +64,12 @@ function matchesFilter(room: ChatRoomWithMeta, tab: FilterTab): boolean {
   return true
 }
 
+function isSaldoRoomContext(room: ChatRoom | null, branch: { saldo_nominal_options: number[] } | null): boolean {
+  if (!room || !branch) return false
+  const name = room.name?.toLowerCase() ?? ''
+  return (name.includes('saldo') || name.includes('pengisian')) && branch.saldo_nominal_options.length > 0
+}
+
 function formatTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -146,6 +152,8 @@ function ChatPageInner() {
   const [roomMembers, setRoomMembers] = useState<any[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
   const [roomPrefs, setRoomPrefs]     = useState<RoomPrefs>(DEFAULT_ROOM_PREFS)
+  const [queueSummary, setQueueSummary] = useState<{ waiting: number; called: number; completed: number; activeDriver: string | null; nextPosition: number | null; items: any[] } | null>(null)
+  const [queueHistory, setQueueHistory] = useState<any[]>([])
 
   // Fase 4 – reactions + pin
   const [reactions, setReactions]       = useState<Record<string, ChatMessageReaction[]>>({})
@@ -155,6 +163,7 @@ function ChatPageInner() {
 
   // Data cabang ROOM aktif (bukan cabang user login) — untuk validasi tombol Isi Saldo
   const [activeRoomBranch, setActiveRoomBranch] = useState<{ id: string; slug: string | null; name: string | null; saldo_nominal_options: number[] } | null>(null)
+  const showSaldoRequestButton = isSaldoRoomContext(activeRoom, activeRoomBranch)
 
   // Daftar driver cabang ROOM aktif — untuk dropdown mention @
   const [roomDrivers, setRoomDrivers] = useState<Array<{ id: string; driver_id: string; name: string }>>([])
@@ -327,6 +336,39 @@ function ChatPageInner() {
     setPolls(map)
   }
 
+  const loadQueueSummary = useCallback(async (branchId: string | null | undefined) => {
+    if (!branchId) {
+      setQueueSummary(null)
+      setQueueHistory([])
+      return
+    }
+    const { data, error } = await supabase
+      .from('raos_driver_queue')
+      .select('id, position, status, joined_at, called_at, driver:raos_drivers(id, driver_id, name)')
+      .eq('branch_id', branchId)
+      .order('position', { ascending: true })
+    if (error) {
+      setQueueSummary(null)
+      setQueueHistory([])
+      return
+    }
+    const items = (data ?? []) as any[]
+    const waiting = items.filter(item => item.status === 'waiting').length
+    const called = items.filter(item => item.status === 'called').length
+    const completed = items.filter(item => item.status === 'completed').length
+    const activeDriver = items.find(item => item.status === 'called')?.driver?.name ?? null
+    const nextPosition = items.find(item => item.status === 'waiting')?.position ?? null
+    setQueueSummary({ waiting, called, completed, activeDriver, nextPosition, items })
+
+    const { data: historyRows } = await supabase
+      .from('raos_driver_queue')
+      .select('id, position, status, joined_at, called_at, driver:raos_drivers(id, driver_id, name)')
+      .eq('branch_id', branchId)
+      .order('joined_at', { ascending: false })
+      .limit(6)
+    setQueueHistory((historyRows ?? []) as any[])
+  }, [])
+
   // Sinkron tombol back HP Android + browser desktop dengan close room.
   // pushState entry dummy saat open, popstate → setActiveRoom(null).
   // Swipe di wrapper langsung panggil setActiveRoom (bukan history.back)
@@ -347,7 +389,11 @@ function ChatPageInner() {
   }, [activeRoom])
 
   useEffect(() => {
-    if (!activeRoom) { setActiveRoomBranch(null); return }
+    if (!activeRoom) {
+      setActiveRoomBranch(null)
+      setIsiSaldoSheet(false)
+      return
+    }
     setReactions({})
     setPinnedMsg(null)
     setReadSummary({})
@@ -373,9 +419,11 @@ function ChatPageInner() {
         .eq('is_active', true).eq('branch_id', roomBranchId)
         .order('name')
         .then(({ data }) => setRoomDrivers((data ?? []) as any[]))
+      void loadQueueSummary(roomBranchId)
     } else {
       setActiveRoomBranch(null)
       setRoomDrivers([])
+      setQueueSummary(null)
     }
     // Load room members untuk dropdown mention @ (sebelumnya cuma di openInfoSheet
     // sehingga dropdown kosong kalau user langsung ketik @ tanpa buka Info Sheet)
@@ -401,6 +449,15 @@ function ChatPageInner() {
           if (msg.sender_id !== user?.id) void markVisibleMessagesRead([msg.id])
           else void loadReadSummary([msg.id])
         })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'raos_driver_queue', filter: `branch_id=eq.${(activeRoom as any).branch_id}` },
+        () => { if ((activeRoom as any).branch_id) void loadQueueSummary((activeRoom as any).branch_id) })
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'raos_driver_queue', filter: `branch_id=eq.${(activeRoom as any).branch_id}` },
+        () => { if ((activeRoom as any).branch_id) void loadQueueSummary((activeRoom as any).branch_id) })
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'raos_driver_queue', filter: `branch_id=eq.${(activeRoom as any).branch_id}` },
+        () => { if ((activeRoom as any).branch_id) void loadQueueSummary((activeRoom as any).branch_id) })
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_message_reads' },
         payload => {
@@ -485,7 +542,7 @@ function ChatPageInner() {
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [activeRoom, loadMessages, loadReadSummary, markVisibleMessagesRead, user?.id])
+  }, [activeRoom, loadMessages, loadReadSummary, markVisibleMessagesRead, user?.id, loadQueueSummary])
 
   // ── Messages ──────────────────────────────────────────────────────────────
 
@@ -525,15 +582,17 @@ function ChatPageInner() {
     // Chat command: /isisaldo <nominal> — pengajuan isi saldo (P2.3)
     const cmd = parseIsiSaldoCommand(content)
     if (cmd) {
-      const branches = (user as any).branches
-      const allowed: number[] = Array.isArray(branches?.saldo_nominal_options)
-        ? branches.saldo_nominal_options
-        : []
+      const resolvedBranchId = activeRoomBranch?.id ?? (activeRoom as any)?.branch_id ?? user.branch_id ?? null
+      const resolvedBranchSlug = activeRoomBranch?.slug ?? ((user as any).branches?.slug ?? null)
+      const resolvedBranchName = activeRoomBranch?.name ?? ((user as any).branches?.name ?? null)
+      const allowed: number[] = activeRoomBranch?.saldo_nominal_options ?? (Array.isArray((user as any).branches?.saldo_nominal_options)
+        ? (user as any).branches.saldo_nominal_options
+        : [])
       const result = await submitIsiSaldo({
         userId: user.id,
-        branchId: user.branch_id,
-        branchSlug: branches?.slug ?? null,
-        branchName: branches?.name ?? null,
+        branchId: resolvedBranchId,
+        branchSlug: resolvedBranchSlug,
+        branchName: resolvedBranchName,
         fullName: (user as any).full_name ?? 'Staff',
         roomId: activeRoom.id,
         clientMsgId: clientId,
@@ -1629,6 +1688,44 @@ function ChatPageInner() {
             </div>
           )}
 
+          {/* ── Queue monitor ───────────────────────────────────────────── */}
+          {queueSummary && activeRoom && ((activeRoom.name ?? '').toLowerCase().includes('driver') || (activeRoom.name ?? '').toLowerCase().includes('antrian')) && (
+            <div className="border-b border-amber-100 bg-amber-50/80 px-4 py-3 flex-shrink-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700">Queue Driver</p>
+                  <p className="text-sm font-semibold text-gray-800">{queueSummary.waiting} menunggu · {queueSummary.called} dipanggil · {queueSummary.completed} selesai</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">
+                    {queueSummary.activeDriver ? `Aktif: ${queueSummary.activeDriver}` : 'Belum ada driver dipanggil'}
+                    {queueSummary.nextPosition ? ` · posisi berikut: #${queueSummary.nextPosition}` : ''}
+                  </p>
+                </div>
+                <div className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-amber-700 shadow-sm">
+                  {queueSummary.called > 0 ? 'Live' : 'Siap'}
+                </div>
+              </div>
+              {queueHistory.length > 0 && (
+                <div className="mt-2 rounded-xl border border-amber-200 bg-white/70 p-2.5">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-700">Riwayat Terbaru</p>
+                  <div className="space-y-1.5">
+                    {queueHistory.map((item: any) => (
+                      <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-2 py-1.5">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-gray-800 truncate">{item.driver?.name ?? 'Driver'}</p>
+                          <p className="text-[10px] text-gray-500">Posisi #{item.position ?? '-'} · {(item.status ?? 'unknown').toUpperCase()}</p>
+                        </div>
+                        <p className="text-[10px] text-gray-500 whitespace-nowrap">
+                          {item.called_at ? new Date(item.called_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="mt-2 text-[10px] text-gray-500">Perintah cepat: /antri &lt;driver_id&gt; · /panggil &lt;posisi&gt; · /selesai &lt;posisi&gt; · /keluar &lt;driver_id&gt;</p>
+            </div>
+          )}
+
           {/* ── Messages ──────────────────────────────────────────────────── */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50">
             {messages.length === 0 && (
@@ -1877,6 +1974,7 @@ function ChatPageInner() {
                     {msg.type === 'saldo_request' && (
                       <SaldoRequestCard
                         raw={msg.content ?? ''}
+                        messageId={msg.id}
                         currentUserId={user!.id}
                         currentUserRole={user!.role}
                       />
@@ -2016,12 +2114,13 @@ function ChatPageInner() {
                 title="Buat polling">
                 <BarChart2 size={20} />
               </button>
-              {activeRoomBranch && activeRoomBranch.saldo_nominal_options.length > 0 && (
+              {showSaldoRequestButton && (
                 <button onClick={() => setIsiSaldoSheet(true)}
                   disabled={uploading || sendingLocation || pollSending || uploadingAudio}
-                  className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
+                  className="flex-shrink-0 flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors disabled:opacity-40"
                   title="Pengajuan Isi Saldo">
-                  <Wallet size={20} />
+                  <Wallet size={16} />
+                  <span>Kirim Saldo</span>
                 </button>
               )}
               <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"

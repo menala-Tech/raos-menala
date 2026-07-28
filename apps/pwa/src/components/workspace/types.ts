@@ -61,6 +61,18 @@ export function isSaldoRoomContext(
   return (name.includes('saldo') || name.includes('pengisian')) && branch.saldo_nominal_options.length > 0
 }
 
+/**
+ * Deteksi workspace bertema driver/antrean untuk konfigurasi tombol
+ * `+ Antrian Driver`. Room bertema driver harus punya branch_id supaya
+ * RPC `raos_join_queue` bisa dijalankan (butuh cabang spesifik).
+ */
+export function isDriverRoomContext(room: ChatRoom | null): boolean {
+  if (!room) return false
+  if (!(room as any).branch_id) return false
+  const name = room.name?.toLowerCase() ?? ''
+  return name.includes('driver') || name.includes('antrian') || name.includes('antrean')
+}
+
 export function formatTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)

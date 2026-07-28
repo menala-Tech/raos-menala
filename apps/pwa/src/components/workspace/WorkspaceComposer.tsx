@@ -28,6 +28,8 @@ interface Props {
   fileInputRef: React.RefObject<HTMLInputElement>
   textInputRef: React.RefObject<HTMLInputElement>
   showSaldoRequestButton: boolean
+  showQueueRequestButton: boolean
+  showPollButton: boolean
   mentionDropdown: MentionDropdownState
   roomMembers: WorkspaceMember[]
   roomDrivers: Array<{ id: string; driver_id: string; name: string }>
@@ -38,6 +40,7 @@ interface Props {
   onSendLocation: () => void
   onOpenPoll: () => void
   onOpenSaldo: () => void
+  onOpenQueue: () => void
   onStartRecording: () => void
   onStopRecording: () => void
   onCancelRecording: () => void
@@ -51,9 +54,10 @@ export default function WorkspaceComposer(props: Props) {
   const {
     text, onTextChange, disabled, sending, uploading, sendingLocation, pollSending, uploadingAudio,
     recording, recSeconds, voiceMaxSeconds, pendingFile, pendingPreview,
-    fileInputRef, textInputRef, showSaldoRequestButton,
+    fileInputRef, textInputRef,
+    showSaldoRequestButton, showQueueRequestButton, showPollButton,
     mentionDropdown, roomMembers, roomDrivers, currentUserId,
-    onPickFile, onFileSelect, onClearPendingFile, onSendLocation, onOpenPoll, onOpenSaldo,
+    onPickFile, onFileSelect, onClearPendingFile, onSendLocation, onOpenPoll, onOpenSaldo, onOpenQueue,
     onStartRecording, onStopRecording, onCancelRecording,
     onSubmit, onSubmitAttachment, onInsertMention, onCloseMentionDropdown,
   } = props
@@ -126,10 +130,13 @@ export default function WorkspaceComposer(props: Props) {
             disabled={quickActionsDisabled}
             sendingLocation={sendingLocation}
             showSaldoRequestButton={showSaldoRequestButton}
+            showQueueRequestButton={showQueueRequestButton}
+            showPollButton={showPollButton}
             onPickFile={onPickFile}
             onSendLocation={onSendLocation}
             onOpenPoll={onOpenPoll}
             onOpenSaldo={onOpenSaldo}
+            onOpenQueue={onOpenQueue}
           />
           <input
             ref={fileInputRef}

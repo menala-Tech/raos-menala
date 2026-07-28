@@ -10,6 +10,7 @@ import { parseIsiSaldoCommand, submitIsiSaldo } from '@/lib/saldoRequest'
 import { parseDriverQueueCommand, dispatchDriverQueue } from '@/lib/driverQueue'
 import type { DriverPayload, QueuePayload } from '@/lib/actionCardParser'
 import IsiSaldoBottomSheet from '@/components/IsiSaldoBottomSheet'
+import AntrianDriverBottomSheet from '@/components/AntrianDriverBottomSheet'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
@@ -42,6 +43,7 @@ import {
 import {
   DEFAULT_ROOM_PREFS,
   getRoomPrefs,
+  isDriverRoomContext,
   isSaldoRoomContext,
   saveRoomPrefs,
   type ActionMenu,
@@ -88,6 +90,7 @@ function ChatPageInner() {
   const [polls, setPolls] = useState<Record<string, { poll: ChatPoll; votes: ChatPollVote[] }>>({})
   const [pollSheet, setPollSheet] = useState(false)
   const [isiSaldoSheet, setIsiSaldoSheet] = useState(false)
+  const [antrianDriverSheet, setAntrianDriverSheet] = useState(false)
   const [pollQuestion, setPollQuestion] = useState('')
   const [pollOptions, setPollOptions] = useState(['', ''])
   const [pollMultiple, setPollMultiple] = useState(false)
@@ -109,6 +112,8 @@ function ChatPageInner() {
     id: string; slug: string | null; name: string | null; saldo_nominal_options: number[]
   } | null>(null)
   const showSaldoRequestButton = isSaldoRoomContext(activeRoom, activeRoomBranch)
+  const showQueueRequestButton = isDriverRoomContext(activeRoom)
+  const showPollButton = !showSaldoRequestButton && !showQueueRequestButton
 
   const [roomDrivers, setRoomDrivers] = useState<Array<{ id: string; driver_id: string; name: string }>>([])
 
@@ -324,6 +329,7 @@ function ChatPageInner() {
     if (!activeRoom) {
       setActiveRoomBranch(null)
       setIsiSaldoSheet(false)
+      setAntrianDriverSheet(false)
       return
     }
     setReactions({})
@@ -1131,6 +1137,16 @@ function ChatPageInner() {
             />
           )}
 
+          {antrianDriverSheet && activeRoom && (
+            <AntrianDriverBottomSheet
+              branchId={(activeRoom as any).branch_id ?? null}
+              branchName={activeRoomBranch?.name ?? null}
+              roomId={activeRoom.id}
+              onClose={() => setAntrianDriverSheet(false)}
+              onJoined={() => setAntrianDriverSheet(false)}
+            />
+          )}
+
           {pollSheet && (
             <WorkspacePollSheet
               pollQuestion={pollQuestion}
@@ -1243,6 +1259,8 @@ function ChatPageInner() {
             fileInputRef={fileInputRef}
             textInputRef={textInputRef}
             showSaldoRequestButton={showSaldoRequestButton}
+            showQueueRequestButton={showQueueRequestButton}
+            showPollButton={showPollButton}
             mentionDropdown={mentionDropdown}
             roomMembers={roomMembers}
             roomDrivers={roomDrivers}
@@ -1253,6 +1271,7 @@ function ChatPageInner() {
             onSendLocation={sendLocation}
             onOpenPoll={() => setPollSheet(true)}
             onOpenSaldo={() => setIsiSaldoSheet(true)}
+            onOpenQueue={() => setAntrianDriverSheet(true)}
             onStartRecording={startRecording}
             onStopRecording={stopRecording}
             onCancelRecording={cancelRecording}

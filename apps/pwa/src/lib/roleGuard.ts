@@ -7,15 +7,16 @@
  * query param.
  */
 
-export type Role = 'staff' | 'koordinator' | 'admin' | 'management' | 'direksi'
-export type InstallVariant = 'staff' | 'koord' | 'mgmt' | 'direksi' | 'driver'
+export type Role = 'staff' | 'koordinator' | 'admin' | 'management' | 'direksi' | 'driver_manager'
+export type InstallVariant = 'staff' | 'koord' | 'mgmt' | 'direksi' | 'driver' | 'dm'
 
 const ROLE_HOME: Record<string, string> = {
-  staff:        '/dashboard',
-  koordinator:  '/dashboard',
-  admin:        '/dashboard',
-  management:   '/dashboard',
-  direksi:      '/dashboard',
+  staff:          '/dashboard',
+  koordinator:    '/dashboard',
+  admin:          '/dashboard',
+  management:     '/dashboard',
+  direksi:        '/dashboard',
+  driver_manager: '/dashboard',
 }
 
 // Route mana yang boleh diakses per role. Kalau route tidak match, redirect
@@ -33,6 +34,12 @@ const ROLE_ROUTES: Record<string, string[]> = {
     '/settings', '/settings/bantuan', '/status', '/notifications',
     '/antrian-driver', '/validasi-saldo', '/kpi', '/laporan',
     '/drivers', '/reset-password',
+  ],
+  // driver_manager: fokus driver + antrean, tidak akses saldo/absensi/KPI
+  driver_manager: [
+    '/dashboard', '/chat', '/settings', '/settings/bantuan',
+    '/notifications', '/reset-password',
+    '/antrian-driver', '/drivers', '/admin/barcodes',
   ],
   // admin, management, direksi punya akses semua route
   admin:      ['*'],
@@ -61,10 +68,11 @@ export function canRoleAccessRoute(role: string | null | undefined, pathname: st
 /** Baca install variant dari query param `?role=` — dipakai manifest.ts. */
 export function parseInstallVariant(searchParams: URLSearchParams | null): InstallVariant {
   const raw = String(searchParams?.get('role') ?? '').toLowerCase()
-  if (raw === 'koord' || raw === 'koordinator') return 'koord'
-  if (raw === 'mgmt' || raw === 'management')   return 'mgmt'
-  if (raw === 'direksi')                        return 'direksi'
-  if (raw === 'driver')                         return 'driver'
+  if (raw === 'koord' || raw === 'koordinator')            return 'koord'
+  if (raw === 'mgmt' || raw === 'management')              return 'mgmt'
+  if (raw === 'direksi')                                   return 'direksi'
+  if (raw === 'driver')                                    return 'driver'
+  if (raw === 'dm' || raw === 'driver_manager')            return 'dm'
   return 'staff' // default
 }
 
@@ -75,6 +83,7 @@ export const VARIANT_LABEL: Record<InstallVariant, string> = {
   mgmt:    'Mgmt',
   direksi: 'Direksi',
   driver:  'Driver',
+  dm:      'Driver Mgr',
 }
 
 /** App name per variant untuk manifest. */

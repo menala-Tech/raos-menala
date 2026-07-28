@@ -26,6 +26,7 @@
 //   ADMIN                       → 'admin'
 //   MANAGEMENT                  → 'management'
 //   DIREKSI                     → 'direksi'
+//   DRIVER MANAGER              → 'driver_manager' (sesi 22)
 
 const MASTER_STAFF_SHEET_ID =
   PropertiesService.getScriptProperties().getProperty('MASTER_STAFF_SHEET_ID')
@@ -99,6 +100,7 @@ function mapJabatanToRole_(jabatan) {
   if (j === 'MANAGEMENT') return 'management'
   if (j === 'KOORDINATOR') return 'koordinator'
   if (j === 'ADMIN') return 'admin'
+  if (j === 'DRIVER MANAGER' || j === 'DRIVER MGR') return 'driver_manager'
   if (j === 'STAFF KONTER' || j === 'PICKUP POINT') return 'staff'
   return null // jabatan tidak dikenal → skip baris
 }

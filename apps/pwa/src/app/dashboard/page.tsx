@@ -10,7 +10,8 @@ import MiniCalendar from '@/components/MiniCalendar'
 import {
   ScanLine, Clock, UserCheck, MessageCircle,
   Target, CheckCircle2, AlertCircle, Bell,
-  TrendingUp, ShieldCheck, PieChart, Car, FileBarChart
+  TrendingUp, ShieldCheck, PieChart, Car, FileBarChart,
+  Wallet, ClipboardCheck,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
@@ -57,7 +58,11 @@ export default function DashboardPage() {
     load()
   }, [router])
 
-  const isAdmin = user && ['koordinator', 'admin', 'management', 'direksi'].includes(user.role)
+  const role = user?.role ?? ''
+  const isKoordPlus = ['koordinator', 'admin', 'management', 'direksi'].includes(role)
+  const isFinance   = ['admin', 'management', 'direksi'].includes(role)
+  const isAdmin     = isKoordPlus // legacy alias — kept untuk minimal diff
+  const isDriverMgr = role === 'driver_manager'
 
   const quick = [
     { href: '/scan',     icon: ScanLine,      label: 'Scan\nBarcode',    color: 'bg-blue-600',   bg: 'bg-blue-50' },
@@ -67,6 +72,15 @@ export default function DashboardPage() {
     { href: '/kpi',      icon: TrendingUp,    label: 'KPI\nSaya',        color: 'bg-pink-600',   bg: 'bg-pink-50' },
     { href: '/status',   icon: PieChart,      label: 'Status\nValidasi', color: 'bg-teal-600',   bg: 'bg-teal-50' },
     { href: '/drivers',  icon: Car,           label: 'Driver &\nKendaraan', color: 'bg-indigo-600', bg: 'bg-indigo-50' },
+    ...(isDriverMgr
+      ? [{ href: '/antrian-driver', icon: Car, label: 'Antrian\nDriver', color: 'bg-amber-600', bg: 'bg-amber-50' }]
+      : []),
+    ...(isKoordPlus
+      ? [{ href: '/validasi-saldo', icon: ClipboardCheck, label: 'Validasi\nSaldo', color: 'bg-amber-600', bg: 'bg-amber-50' }]
+      : []),
+    ...(isFinance
+      ? [{ href: '/finance', icon: Wallet, label: 'Finance\nDashboard', color: 'bg-sky-600', bg: 'bg-sky-50' }]
+      : []),
     ...(isAdmin
       ? [
           { href: '/admin',   icon: ShieldCheck,  label: 'Panel\nAdmin',     color: 'bg-secondary', bg: 'bg-gray-50' },

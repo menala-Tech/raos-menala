@@ -14,6 +14,7 @@ import clsx from 'clsx'
 import type { UserProfile, Branch } from '@/types'
 import { logActivity } from '@/lib/activity'
 import { invokePush } from '@/lib/pushClient'
+import AnnouncementBroadcast from '@/components/AnnouncementBroadcast'
 
 type Tab = 'validasi' | 'staff'
 type StaffRole = 'direksi' | 'admin' | 'management' | 'koordinator' | 'staff'
@@ -210,6 +211,13 @@ export default function AdminPage() {
           </>
         )}
       </div>
+
+      {/* Broadcast Pengumuman — admin/mgmt/direksi */}
+      {isAdmin && user && (
+        <div className="px-4 pt-3">
+          <AnnouncementBroadcast senderId={user.id} senderRole={user.role} />
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200 bg-white px-4">

@@ -8,7 +8,7 @@ import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import {
   ArrowLeft, Search, ScanLine, UserCheck, Filter, CheckCircle2, Clock,
-  X, BarChart3, MapPin, Car, User, Calendar
+  X, BarChart3, MapPin, Car, User, Calendar, Wallet, XCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
@@ -23,8 +23,13 @@ interface SaldoRequest {
   status: string
   is_processed: boolean
   requested_at: string
+  approved_at: string | null
   processed_at: string | null
   rejection_reason: string | null
+  note: string | null
+  driver_name: string | null
+  approved_by_user: { full_name: string } | null
+  processed_by_user: { full_name: string } | null
 }
 type StatusFilter = 'semua' | 'valid' | 'pending'
 type DateRange = 'hari-ini' | 'kemarin' | '7-hari' | '30-hari'
@@ -87,14 +92,19 @@ export default function RiwayatPage() {
           .gte('date', fromDate).lte('date', toDate)
           .order('date', { ascending: false }).limit(60),
         supabase.from('raos_saldo_requests')
-          .select('id, request_no, nominal, status, is_processed, requested_at, processed_at, rejection_reason')
+          .select(
+            'id, request_no, nominal, status, is_processed, requested_at,' +
+            'approved_at, processed_at, rejection_reason, note, driver_name,' +
+            'approved_by_user:user_profiles!approved_by(full_name),' +
+            'processed_by_user:user_profiles!processed_by(full_name)'
+          )
           .eq('staff_id', session.user.id)
           .gte('requested_at', fromIso).lte('requested_at', toIso)
           .order('requested_at', { ascending: false }).limit(200),
       ])
       setScans(scanData ?? [])
       setAbsensies(attData ?? [])
-      setSaldoRequests((saldoData ?? []) as SaldoRequest[])
+      setSaldoRequests((saldoData ?? []) as unknown as SaldoRequest[])
       setLoading(false)
     }
     load()
@@ -362,23 +372,18 @@ export default function RiwayatPage() {
           </button>
         ))}
 
-        {/* Isi Saldo list — pin kuning (belum diisi) / hijau (sudah) */}
+        {/* Isi Saldo list — 4-state lifecycle: Pending 🟡 → Approved 🟢 → Paid 🔵 / Rejected 🔴 */}
         {!loading && (tab === 'semua' || tab === 'saldo') && saldoRequests.map(req => {
-          const isDone = req.is_processed
-          const isRejected = req.status === 'rejected' || req.status === 'cancelled'
+          const meta = saldoLifecycleMeta(req)
+          const Icon = meta.icon
           return (
-            <div key={req.id} className="card flex items-center gap-3">
-              <div className={clsx(
-                'p-2.5 rounded-xl flex-shrink-0 relative',
-                isDone ? 'bg-green-50' : isRejected ? 'bg-red-50' : 'bg-amber-50'
-              )}>
-                <BarChart3 size={18} className={clsx(
-                  isDone ? 'text-green-600' : isRejected ? 'text-red-600' : 'text-amber-600'
-                )} />
-                {/* Pin status */}
+            <div key={req.id} className="card flex items-start gap-3">
+              <div className={clsx('p-2.5 rounded-xl flex-shrink-0 relative', meta.bgSoft)}>
+                <Icon size={18} className={meta.textStrong} />
                 <span className={clsx(
                   'absolute -top-1 -right-1 w-3 h-3 rounded-full ring-2 ring-white',
-                  isDone ? 'bg-green-500' : isRejected ? 'bg-red-500' : 'bg-amber-400 animate-pulse'
+                  meta.dot,
+                  meta.status === 'pending' && 'animate-pulse'
                 )} />
               </div>
               <div className="flex-1 min-w-0">
@@ -388,20 +393,36 @@ export default function RiwayatPage() {
                   </p>
                   <span className={clsx(
                     'text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap',
-                    isDone ? 'bg-green-100 text-green-700'
-                      : isRejected ? 'bg-red-100 text-red-700'
-                      : 'bg-amber-100 text-amber-700'
+                    meta.badgeCls
                   )}>
-                    {isDone ? 'SUDAH DIISI' : isRejected ? req.status.toUpperCase() : 'MENUNGGU'}
+                    {meta.emoji} {meta.label}
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-400 mt-0.5">
                   {req.request_no} · {new Date(req.requested_at).toLocaleString('id-ID', {
                     day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
                   })}
+                  {req.driver_name && <span className="text-gray-500"> · Driver: {req.driver_name}</span>}
                 </p>
-                {req.rejection_reason && (
-                  <p className="text-[11px] text-red-500 mt-0.5">Ditolak: {req.rejection_reason}</p>
+                {/* Info lifecycle sesuai state */}
+                {meta.status === 'approved' && req.approved_by_user?.full_name && (
+                  <p className="text-[11px] text-emerald-600 mt-0.5">
+                    Disetujui oleh {req.approved_by_user.full_name}
+                    {req.approved_at && ` · ${new Date(req.approved_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`}
+                    <span className="block text-[10px] text-gray-400">Menunggu Finance untuk melunasi.</span>
+                  </p>
+                )}
+                {meta.status === 'paid' && (
+                  <p className="text-[11px] text-sky-700 mt-0.5">
+                    Dilunasi{req.processed_by_user?.full_name ? ` oleh ${req.processed_by_user.full_name}` : ''}
+                    {req.processed_at && ` · ${new Date(req.processed_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`}
+                    {req.note && <span className="block text-[10px] text-gray-500">Catatan: {req.note}</span>}
+                  </p>
+                )}
+                {meta.status === 'rejected' && req.rejection_reason && (
+                  <p className="text-[11px] text-red-600 mt-0.5">
+                    Alasan: {req.rejection_reason}
+                  </p>
                 )}
               </div>
             </div>
@@ -594,6 +615,53 @@ export default function RiwayatPage() {
       )}
     </AppShell>
   )
+}
+
+interface SaldoLifecycleMeta {
+  status: 'pending' | 'approved' | 'paid' | 'rejected'
+  label: string
+  emoji: string
+  icon: typeof Wallet
+  badgeCls: string
+  bgSoft: string
+  textStrong: string
+  dot: string
+}
+
+/**
+ * 4-state lifecycle Isi Saldo — dipetakan dari kolom SSOT
+ * raos_saldo_requests (tidak ada kolom baru diperkenalkan):
+ *   🟡 Pending  = status='pending' && !is_processed
+ *   🟢 Approved = status='approved' && !is_processed (koord validasi, tunggu Finance)
+ *   🔵 Paid     = is_processed=true (Finance/admin lunasi)
+ *   🔴 Rejected = status='rejected' | 'cancelled'
+ */
+function saldoLifecycleMeta(req: {
+  status: string
+  is_processed: boolean
+}): SaldoLifecycleMeta {
+  if (req.is_processed) {
+    return {
+      status: 'paid', label: 'PAID', emoji: '🔵', icon: Wallet,
+      badgeCls: 'bg-sky-100 text-sky-700', bgSoft: 'bg-sky-50', textStrong: 'text-sky-600', dot: 'bg-sky-500',
+    }
+  }
+  if (req.status === 'rejected' || req.status === 'cancelled') {
+    return {
+      status: 'rejected', label: req.status.toUpperCase(), emoji: '🔴', icon: XCircle,
+      badgeCls: 'bg-red-100 text-red-700', bgSoft: 'bg-red-50', textStrong: 'text-red-600', dot: 'bg-red-500',
+    }
+  }
+  if (req.status === 'approved') {
+    return {
+      status: 'approved', label: 'APPROVED', emoji: '🟢', icon: CheckCircle2,
+      badgeCls: 'bg-emerald-100 text-emerald-700', bgSoft: 'bg-emerald-50', textStrong: 'text-emerald-600', dot: 'bg-emerald-500',
+    }
+  }
+  return {
+    status: 'pending', label: 'PENDING', emoji: '🟡', icon: Clock,
+    badgeCls: 'bg-amber-100 text-amber-700', bgSoft: 'bg-amber-50', textStrong: 'text-amber-600', dot: 'bg-amber-400',
+  }
 }
 
 function DetailRow({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {

@@ -6,8 +6,12 @@ import { ArrowLeft, Users } from 'lucide-react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
-import { parseIsiSaldoCommand, submitIsiSaldo } from '@/lib/saldoRequest'
-import { parseDriverQueueCommand, dispatchDriverQueue } from '@/lib/driverQueue'
+// Note: sesi 22 — parseIsiSaldoCommand & parseDriverQueueCommand tidak
+// lagi digunakan di composer sesuai spec RIFIM OS "tanpa teks command".
+// Interactive Action Cards (IsiSaldoBottomSheet, AntrianDriverBottomSheet)
+// menggantikan alur ini. Helper submit* tetap dipakai oleh bottom sheets.
+import { scanContent, formatModerationWarning } from '@/lib/moderation'
+import { logActivity } from '@/lib/activity'
 import type { DriverPayload, QueuePayload } from '@/lib/actionCardParser'
 import IsiSaldoBottomSheet from '@/components/IsiSaldoBottomSheet'
 import AntrianDriverBottomSheet from '@/components/AntrianDriverBottomSheet'
@@ -484,60 +488,24 @@ function ChatPageInner() {
     if (!activeRoom || !user) return
     const content = text.trim()
     if (!content && !fileUrl) return
+
+    // Moderasi konten client-side (sesi 22) — warn tapi tidak block.
+    // Kalau user tetap kirim, log ke activity_logs untuk audit koord/admin.
+    if (content) {
+      const hits = scanContent(content)
+      if (hits.length > 0) {
+        const proceed = confirm(formatModerationWarning(hits))
+        if (!proceed) return
+        void logActivity('chat_moderation_override', JSON.stringify({
+          room_id: activeRoom.id,
+          hits: hits.map(h => ({ kind: h.kind, match: h.match })),
+        }))
+      }
+    }
+
     setSending(true)
     setText('')
     const clientId = crypto.randomUUID()
-
-    const queueCmd = parseDriverQueueCommand(content)
-    if (queueCmd) {
-      const roomBranchId = (activeRoom as any).branch_id as string | null
-      if (!roomBranchId) {
-        alert('Command antrian hanya bisa di room dengan cabang spesifik. Buat room di /admin dengan pilih cabang.')
-        setSending(false)
-        setText(content)
-        return
-      }
-      const result = await dispatchDriverQueue({
-        userId: user.id,
-        roomId: activeRoom.id,
-        branchId: roomBranchId,
-        clientMsgId: clientId,
-        parsed: queueCmd,
-      })
-      setSending(false)
-      if (!result.ok) {
-        alert(result.error ?? 'Gagal proses command antrian')
-        setText(content)
-      }
-      return
-    }
-
-    const cmd = parseIsiSaldoCommand(content)
-    if (cmd) {
-      const resolvedBranchId = activeRoomBranch?.id ?? (activeRoom as any)?.branch_id ?? user.branch_id ?? null
-      const resolvedBranchSlug = activeRoomBranch?.slug ?? ((user as any).branches?.slug ?? null)
-      const resolvedBranchName = activeRoomBranch?.name ?? ((user as any).branches?.name ?? null)
-      const allowed: number[] = activeRoomBranch?.saldo_nominal_options ?? (Array.isArray((user as any).branches?.saldo_nominal_options)
-        ? (user as any).branches.saldo_nominal_options
-        : [])
-      const result = await submitIsiSaldo({
-        userId: user.id,
-        branchId: resolvedBranchId,
-        branchSlug: resolvedBranchSlug,
-        branchName: resolvedBranchName,
-        fullName: (user as any).full_name ?? 'Staff',
-        roomId: activeRoom.id,
-        clientMsgId: clientId,
-        nominal: cmd.nominal,
-        allowedNominals: allowed,
-      })
-      setSending(false)
-      if (!result.ok) {
-        alert(result.error ?? 'Gagal ajukan isi saldo')
-        setText(content)
-      }
-      return
-    }
 
     const mentionsArr = mentionsPending.filter(uid => {
       const member = roomMembers.find(m => m.user_id === uid)

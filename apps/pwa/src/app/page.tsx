@@ -35,9 +35,12 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) { setError('Email atau PIN salah.'); setLoading(false); return }
-    router.push('/dashboard')
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error || !data.user) { setError('Email atau PIN salah.'); setLoading(false); return }
+    // Route ke landing sesuai role (staff → /dashboard, driver → /driver-workspace, dst)
+    const { data: profile } = await supabase.from('user_profiles')
+      .select('role').eq('id', data.user.id).single()
+    router.push(defaultLandingForRole(profile?.role))
   }
 
   async function handleMagicLink(e: React.FormEvent) {

@@ -1,111 +1,59 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useState, useRef } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { ArrowLeft, Users } from 'lucide-react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import { parseIsiSaldoCommand, submitIsiSaldo } from '@/lib/saldoRequest'
-import SaldoRequestCard from '@/components/SaldoRequestCard'
-import IsiSaldoBottomSheet from '@/components/IsiSaldoBottomSheet'
 import { parseDriverQueueCommand, dispatchDriverQueue } from '@/lib/driverQueue'
-import { parseActionCard, type DriverPayload, type QueuePayload } from '@/lib/actionCardParser'
-import { DriverActionCard } from '@/components/DriverActionCard'
-import { QueueActionCard } from '@/components/QueueActionCard'
-import DriverQueueCard from '@/components/DriverQueueCard'
+import type { DriverPayload, QueuePayload } from '@/lib/actionCardParser'
+import IsiSaldoBottomSheet from '@/components/IsiSaldoBottomSheet'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
+import type {
+  ChatMessage,
+  ChatMessageReaction,
+  ChatPoll,
+  ChatPollOption,
+  ChatPollVote,
+  ChatRoom,
+  ChatRoomWithMeta,
+  UserProfile,
+} from '@/types'
 import {
-  ArrowLeft, Send, MessageCircle, Users, Bell, BellOff, Search,
-  Paperclip, FileText, X, Loader2, Download,
-  Info, Settings, ChevronRight, LogOut, Pin, PinOff,
-  Copy, SmilePlus, MapPin, Navigation,
-  BarChart2, CheckSquare, Square, Plus, Trash2, Lock,
-  Mic, Trash, StopCircle, Wallet,
-  Check, CheckCheck, Truck,
-} from 'lucide-react'
-import Link from 'next/link'
-import type { ChatRoom, ChatRoomWithMeta, ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatPollOption, UserProfile } from '@/types'
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
-const PIN_ROLES = ['admin', 'management', 'koordinator', 'direksi']
-
-type FilterTab = 'semua' | 'grup' | 'lokasi' | 'pribadi'
-type RoomSheet = 'none' | 'info' | 'settings'
-
-interface RoomPrefs { notif: boolean; pinned: boolean }
-const DEFAULT_ROOM_PREFS: RoomPrefs = { notif: true, pinned: false }
-
-interface ActionMenu { msgId: string; isMe: boolean; content?: string }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getRoomPrefs(roomId: string): RoomPrefs {
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(`raos_room_prefs_${roomId}`) : null
-    return raw ? { ...DEFAULT_ROOM_PREFS, ...JSON.parse(raw) } : DEFAULT_ROOM_PREFS
-  } catch { return DEFAULT_ROOM_PREFS }
-}
-function saveRoomPrefs(roomId: string, patch: Partial<RoomPrefs>) {
-  localStorage.setItem(`raos_room_prefs_${roomId}`, JSON.stringify({ ...getRoomPrefs(roomId), ...patch }))
-}
-
-const GRUP_CATEGORIES = ['umum', 'operasional', 'driver_support', 'proyek']
-const NON_DEFAULT_CATEGORIES = ['pribadi', 'proyek']
-
-function matchesFilter(room: ChatRoomWithMeta, tab: FilterTab): boolean {
-  if (tab === 'semua') return true
-  if (tab === 'lokasi') return room.category === 'lokasi'
-  if (tab === 'pribadi') return room.category === 'pribadi'
-  if (tab === 'grup') return GRUP_CATEGORIES.includes(room.category)
-  return true
-}
-
-function isSaldoRoomContext(room: ChatRoom | null, branch: { saldo_nominal_options: number[] } | null): boolean {
-  if (!room || !branch) return false
-  const name = room.name?.toLowerCase() ?? ''
-  return (name.includes('saldo') || name.includes('pengisian')) && branch.saldo_nominal_options.length > 0
-}
-
-function formatTime(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const now = new Date()
-  const sameDay = d.toDateString() === now.toDateString()
-  if (sameDay) return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-  const days = Math.floor((now.getTime() - d.getTime()) / 86400000)
-  if (days === 1) return 'Kemarin'
-  if (days < 7) return d.toLocaleDateString('id-ID', { weekday: 'short' })
-  return d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: '2-digit' })
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
-
-import clsx from 'clsx'
-
-const ROOM_COLORS: Record<string, { bg: string; text: string; label: string; lightBg: string }> = {
-  umum:        { bg: 'bg-green-600',  text: 'text-white',    label: 'U', lightBg: 'bg-green-100'  },
-  lokasi:      { bg: 'bg-primary',    text: 'text-secondary',label: 'L', lightBg: 'bg-yellow-100' },
-  operasional: { bg: 'bg-blue-600',   text: 'text-white',    label: 'O', lightBg: 'bg-blue-100'   },
-  driver:      { bg: 'bg-orange-500', text: 'text-white',    label: 'D', lightBg: 'bg-orange-100' },
-  proyek:      { bg: 'bg-purple-600', text: 'text-white',    label: 'P', lightBg: 'bg-purple-100' },
-}
-function getRoomStyle(category: string) {
-  const key = Object.keys(ROOM_COLORS).find(k => category.toLowerCase().includes(k)) ?? 'umum'
-  return ROOM_COLORS[key]
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  umum: 'Umum', operasional: 'Operasional', driver_support: 'Dukungan Driver',
-  lokasi: 'Lokasi', pribadi: 'Pribadi', proyek: 'Proyek',
-}
+  WorkspaceActionMenu,
+  WorkspaceComposer,
+  WorkspaceContactSheet,
+  WorkspaceHeader,
+  WorkspaceInfoSheet,
+  WorkspaceLightbox,
+  WorkspaceList,
+  WorkspacePinnedBanner,
+  WorkspacePollSheet,
+  WorkspaceQueueSummary,
+  WorkspaceReadersModal,
+  WorkspaceSearch,
+  WorkspaceTimeline,
+} from '@/components/workspace'
+import {
+  DEFAULT_ROOM_PREFS,
+  getRoomPrefs,
+  isSaldoRoomContext,
+  saveRoomPrefs,
+  type ActionMenu,
+  type FilterTab,
+  type QueueHistoryItem,
+  type QueueSummary,
+  type ReadSummaryEntry,
+  type RoomPrefs,
+  type RoomSheet,
+  type WorkspaceContact,
+  type WorkspaceMember,
+} from '@/components/workspace/types'
 
 // ─── Entry ────────────────────────────────────────────────────────────────────
 
@@ -118,81 +66,74 @@ export default function ChatPage() {
 function ChatPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [user, setUser]         = useState<UserProfile | null>(null)
-  const [rooms, setRooms]       = useState<ChatRoomWithMeta[]>([])
+  const [user, setUser] = useState<UserProfile | null>(null)
+  const [rooms, setRooms] = useState<ChatRoomWithMeta[]>([])
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [actionBusy, setActionBusy] = useState<Record<string, boolean>>({})
-  const [text, setText]         = useState('')
-  const [sending, setSending]   = useState(false)
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
   const [filterTab, setFilterTab] = useState<FilterTab>('semua')
   const [searchQuery, setSearchQuery] = useState('')
-  const bottomRef   = useRef<HTMLDivElement>(null)
-  const msgRefs     = useRef<Record<string, HTMLDivElement | null>>({})
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const msgRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  // Fase 2 – attachment
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [pendingFile, setPendingFile]       = useState<File | null>(null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [pendingPreview, setPendingPreview] = useState<string | null>(null)
-  const [uploading, setUploading]           = useState(false)
-  const [lightboxUrl, setLightboxUrl]       = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [sendingLocation, setSendingLocation] = useState(false)
 
-  // Fase 7 – polling
-  const [polls, setPolls]               = useState<Record<string, { poll: ChatPoll; votes: ChatPollVote[] }>>({})
-  const [pollSheet, setPollSheet]       = useState(false)
+  const [polls, setPolls] = useState<Record<string, { poll: ChatPoll; votes: ChatPollVote[] }>>({})
+  const [pollSheet, setPollSheet] = useState(false)
   const [isiSaldoSheet, setIsiSaldoSheet] = useState(false)
   const [pollQuestion, setPollQuestion] = useState('')
-  const [pollOptions, setPollOptions]   = useState(['', ''])
+  const [pollOptions, setPollOptions] = useState(['', ''])
   const [pollMultiple, setPollMultiple] = useState(false)
-  const [pollSending, setPollSending]   = useState(false)
+  const [pollSending, setPollSending] = useState(false)
 
-  // Fase 3 – sheets
-  const [roomSheet, setRoomSheet]     = useState<RoomSheet>('none')
-  const [roomMembers, setRoomMembers] = useState<any[]>([])
+  const [roomSheet, setRoomSheet] = useState<RoomSheet>('none')
+  const [roomMembers, setRoomMembers] = useState<WorkspaceMember[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
-  const [roomPrefs, setRoomPrefs]     = useState<RoomPrefs>(DEFAULT_ROOM_PREFS)
-  const [queueSummary, setQueueSummary] = useState<{ waiting: number; called: number; completed: number; activeDriver: string | null; nextPosition: number | null; items: any[] } | null>(null)
-  const [queueHistory, setQueueHistory] = useState<any[]>([])
+  const [roomPrefs, setRoomPrefs] = useState<RoomPrefs>(DEFAULT_ROOM_PREFS)
+  const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null)
+  const [queueHistory, setQueueHistory] = useState<QueueHistoryItem[]>([])
 
-  // Fase 4 – reactions + pin
-  const [reactions, setReactions]       = useState<Record<string, ChatMessageReaction[]>>({})
-  const [pinnedMsg, setPinnedMsg]       = useState<ChatMessage | null>(null)
-  const [actionMenu, setActionMenu]     = useState<ActionMenu | null>(null)
+  const [reactions, setReactions] = useState<Record<string, ChatMessageReaction[]>>({})
+  const [pinnedMsg, setPinnedMsg] = useState<ChatMessage | null>(null)
+  const [actionMenu, setActionMenu] = useState<ActionMenu | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Data cabang ROOM aktif (bukan cabang user login) — untuk validasi tombol Isi Saldo
-  const [activeRoomBranch, setActiveRoomBranch] = useState<{ id: string; slug: string | null; name: string | null; saldo_nominal_options: number[] } | null>(null)
+  const [activeRoomBranch, setActiveRoomBranch] = useState<{
+    id: string; slug: string | null; name: string | null; saldo_nominal_options: number[]
+  } | null>(null)
   const showSaldoRequestButton = isSaldoRoomContext(activeRoom, activeRoomBranch)
 
-  // Daftar driver cabang ROOM aktif — untuk dropdown mention @
   const [roomDrivers, setRoomDrivers] = useState<Array<{ id: string; driver_id: string; name: string }>>([])
 
-  // Mention @nama (sesi 20) — track user_ids yang di-tag di message baru
   const [mentionsPending, setMentionsPending] = useState<string[]>([])
   const [mentionDropdown, setMentionDropdown] = useState<{ open: boolean; query: string; startPos: number }>({ open: false, query: '', startPos: 0 })
-  const textInputRef = useRef<HTMLInputElement | null>(null)
+  const textInputRef = useRef<HTMLInputElement>(null)
 
-  // Read receipt (sesi 20 batch chat #4-6) — centang 1/2 + list pembaca
-  const [readSummary, setReadSummary] = useState<Record<string, { read_count: number; total_recipients: number }>>({})
+  const [readSummary, setReadSummary] = useState<Record<string, ReadSummaryEntry>>({})
   const [readersModalMsgId, setReadersModalMsgId] = useState<string | null>(null)
   const [readersList, setReadersList] = useState<Array<{ user_id: string; full_name: string; avatar_url: string | null; read_at: string }>>([])
   const [readersLoading, setReadersLoading] = useState(false)
   const markedReadRef = useRef<Set<string>>(new Set())
 
-  // Voice recorder (Fase 8) — MediaRecorder blob → upload → message type 'audio'
-  const [recording, setRecording]           = useState(false)
-  const [recSeconds, setRecSeconds]         = useState(0)
+  const [recording, setRecording] = useState(false)
+  const [recSeconds, setRecSeconds] = useState(0)
   const [uploadingAudio, setUploadingAudio] = useState(false)
   const mediaRecRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const VOICE_MAX_SECONDS = 60
 
-  // Kontak sheet — daftar staff untuk mulai chat pribadi
   const [contactSheet, setContactSheet] = useState(false)
-  const [contactList, setContactList]   = useState<Array<{ id: string; full_name: string; role: string; staff_id: string; branches?: { name: string } | null }>>([])
+  const [contactList, setContactList] = useState<WorkspaceContact[]>([])
   const [contactLoading, setContactLoading] = useState(false)
-  const [contactSearch, setContactSearch]   = useState('')
+  const [contactSearch, setContactSearch] = useState('')
   const [openingPribadi, setOpeningPribadi] = useState<string | null>(null)
 
   // ── Data loaders ──────────────────────────────────────────────────────────
@@ -202,7 +143,6 @@ function ChatPageInner() {
     if (!error) setRooms((data ?? []) as ChatRoomWithMeta[])
   }, [])
 
-  // Read receipt (sesi 20) — snapshot centang 1/2 per pesan `isMe`
   const loadReadSummary = useCallback(async (msgIds: string[]) => {
     if (msgIds.length === 0) return
     const { data } = await supabase.rpc('get_message_read_summary', { p_message_ids: msgIds })
@@ -217,7 +157,6 @@ function ChatPageInner() {
     }
   }, [])
 
-  // Bulk mark pesan orang lain sebagai dibaca — fire-and-forget
   const markVisibleMessagesRead = useCallback(async (msgIds: string[]) => {
     const pending = msgIds.filter(id => !markedReadRef.current.has(id))
     if (pending.length === 0) return
@@ -273,7 +212,6 @@ function ChatPageInner() {
   }, [user, loadRooms])
 
   const loadMessages = useCallback(async (roomId: string) => {
-    // Ambil cutoff hapus lokal (kalau user pernah "Hapus untuk Saya")
     let clearedBefore: string | null = null
     if (user?.id) {
       const { data: clr } = await supabase
@@ -292,7 +230,6 @@ function ChatPageInner() {
     const rows = data ?? []
     setMessages(rows)
     setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
-    // Read receipt batch: (a) summary untuk pesan sendiri, (b) mark pesan orang lain sebagai dibaca
     if (user?.id) {
       const mine = rows.filter((m: any) => m.sender_id === user.id).map((m: any) => m.id)
       const others = rows.filter((m: any) => m.sender_id !== user.id).map((m: any) => m.id)
@@ -366,14 +303,9 @@ function ChatPageInner() {
       .eq('branch_id', branchId)
       .order('joined_at', { ascending: false })
       .limit(6)
-    setQueueHistory((historyRows ?? []) as any[])
+    setQueueHistory((historyRows ?? []) as QueueHistoryItem[])
   }, [])
 
-  // Sinkron tombol back HP Android + browser desktop dengan close room.
-  // pushState entry dummy saat open, popstate → setActiveRoom(null).
-  // Swipe di wrapper langsung panggil setActiveRoom (bukan history.back)
-  // karena SwipeBackWrapper sudah punya module-level guard yang cegah
-  // outer AppShell wrapper ikut fire.
   useEffect(() => {
     if (!activeRoom) return
     const stateTag = { raosChatRoom: activeRoom.id }
@@ -399,7 +331,7 @@ function ChatPageInner() {
     setReadSummary({})
     markedReadRef.current = new Set()
     setRoomPrefs(getRoomPrefs(activeRoom.id))
-    // Fetch cabang ROOM (bukan cabang user) supaya tombol Isi Saldo muncul untuk semua role di room cabang tsb
+
     const roomBranchId = (activeRoom as any).branch_id as string | null | undefined
     if (roomBranchId) {
       supabase.from('branches')
@@ -413,7 +345,6 @@ function ChatPageInner() {
             saldo_nominal_options: Array.isArray(data.saldo_nominal_options) ? data.saldo_nominal_options : [],
           })
         })
-      // Fetch driver cabang untuk dropdown mention @Driver
       supabase.from('raos_drivers')
         .select('id, driver_id, name')
         .eq('is_active', true).eq('branch_id', roomBranchId)
@@ -425,12 +356,10 @@ function ChatPageInner() {
       setRoomDrivers([])
       setQueueSummary(null)
     }
-    // Load room members untuk dropdown mention @ (sebelumnya cuma di openInfoSheet
-    // sehingga dropdown kosong kalau user langsung ketik @ tanpa buka Info Sheet)
     supabase.from('chat_room_members')
       .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
       .eq('room_id', activeRoom.id)
-      .then(({ data }) => setRoomMembers(data ?? []))
+      .then(({ data }) => setRoomMembers((data ?? []) as unknown as WorkspaceMember[]))
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
     loadPinnedMessage(activeRoom.id)
@@ -473,7 +402,6 @@ function ChatPageInner() {
         payload => {
           const updated = payload.new as ChatMessage
           setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m))
-          // Update pinned banner
           if (updated.is_pinned) setPinnedMsg(updated)
           else setPinnedMsg(prev => prev?.id === updated.id ? null : prev)
         })
@@ -554,7 +482,6 @@ function ChatPageInner() {
     setText('')
     const clientId = crypto.randomUUID()
 
-    // Chat command: /antri /panggil /selesai /keluar — driver queue (P3.3)
     const queueCmd = parseDriverQueueCommand(content)
     if (queueCmd) {
       const roomBranchId = (activeRoom as any).branch_id as string | null
@@ -579,7 +506,6 @@ function ChatPageInner() {
       return
     }
 
-    // Chat command: /isisaldo <nominal> — pengajuan isi saldo (P2.3)
     const cmd = parseIsiSaldoCommand(content)
     if (cmd) {
       const resolvedBranchId = activeRoomBranch?.id ?? (activeRoom as any)?.branch_id ?? user.branch_id ?? null
@@ -607,10 +533,8 @@ function ChatPageInner() {
       return
     }
 
-    // Mention @nama (sesi 20) — filter mentionsPending yang masih ada di text
-    // supaya tidak kirim user_id yang sudah dihapus dari text setelah tag.
     const mentionsArr = mentionsPending.filter(uid => {
-      const member: any = roomMembers.find((m: any) => m.user_id === uid)
+      const member = roomMembers.find(m => m.user_id === uid)
       const name = member?.user_profiles?.full_name
       return name && content.includes(`@${name}`)
     })
@@ -625,14 +549,11 @@ function ChatPageInner() {
     if (fileUrl) payload.media_url = fileUrl
     if (mentionsArr.length > 0) payload.mentions = mentionsArr
 
-    // TODO: Trigger Supabase Edge Function `moderate-message` before insert.
     const { data, error } = await supabase.from('chat_messages').insert(payload)
       .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     setSending(false)
     if (error && isNetworkError(error)) {
       await enqueue('chat_message', payload)
-      // Optimistic append supaya user lihat message-nya langsung (dedup by
-      // client_id kalau realtime insert nyampe duluan setelah re-online).
       setMessages(prev => prev.some((m: any) => m.client_id === clientId) ? prev : [
         ...prev,
         { ...payload, id: `local-${clientId}`, created_at: new Date().toISOString(), user_profiles: { full_name: (user as any).full_name, role: user.role } } as any,
@@ -689,7 +610,7 @@ function ChatPageInner() {
     }
   }
 
-  // ── Attachment (Fase 2) ───────────────────────────────────────────────────
+  // ── Attachment ────────────────────────────────────────────────────────────
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return
@@ -707,10 +628,6 @@ function ChatPageInner() {
     const safeName = pendingFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const storagePath = `${user.id}/${activeRoom.id}/${Date.now()}-${safeName}`
 
-    // Direct fetch bypass Supabase SDK wrapper — beberapa versi SDK punya
-    // issue di Chrome mobile untuk PDF/file POST (SDK internal transform
-    // multipart yang kadang di-block browser). Direct fetch dengan
-    // Authorization + apikey header lebih andal.
     const { data: { session } } = await supabase.auth.getSession()
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -720,7 +637,7 @@ function ChatPageInner() {
     async function tryUpload() {
       return fetch(uploadUrl, {
         method: 'POST',
-        headers: {          
+        headers: {
           Authorization: `Bearer ${authToken}`,
           'Content-Type': pendingFile!.type || 'application/octet-stream',
           'x-upsert': 'false',
@@ -734,7 +651,6 @@ function ChatPageInner() {
       res = await tryUpload()
       if (!res.ok && res.status === 0) throw new Error('Failed to fetch')
     } catch (e: any) {
-      // Retry sekali kalau exception (network hiccup)
       console.warn('[attachment] retry after:', e?.message)
       await new Promise(r => setTimeout(r, 800))
       try {
@@ -770,7 +686,7 @@ function ChatPageInner() {
     clearPendingFile(); setUploading(false)
   }
 
-  // ── Kirim Lokasi (Fase 6) ────────────────────────────────────────────────
+  // ── Kirim Lokasi ─────────────────────────────────────────────────────────
 
   async function sendLocation() {
     if (!activeRoom || !user) return
@@ -804,7 +720,7 @@ function ChatPageInner() {
     )
   }
 
-  // ── Polling (Fase 7) ─────────────────────────────────────────────────────
+  // ── Polling ──────────────────────────────────────────────────────────────
 
   async function createPoll() {
     if (!activeRoom || !user) return
@@ -812,16 +728,11 @@ function ChatPageInner() {
     const opts = pollOptions.map(o => o.trim()).filter(Boolean)
     if (!q || opts.length < 2) return
     setPollSending(true)
-    const options: ChatPollOption[] = opts.map(text => ({
-      id: crypto.randomUUID(),
-      text,
-    }))
-    // Insert pesan dulu
+    const options: ChatPollOption[] = opts.map(t => ({ id: crypto.randomUUID(), text: t }))
     const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'poll', content: q,
     }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
     if (msgErr || !msg) { alert('Gagal buat polling'); setPollSending(false); return }
-    // Insert poll
     const { data: poll, error: pollErr } = await supabase.from('chat_polls').insert({
       room_id: activeRoom.id, message_id: msg.id, creator_id: user.id,
       question: q, options, is_multiple_choice: pollMultiple,
@@ -830,7 +741,6 @@ function ChatPageInner() {
     setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg as ChatMessage])
     setPolls(prev => ({ ...prev, [msg.id]: { poll: poll as ChatPoll, votes: [] } }))
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-    // Reset form
     setPollQuestion(''); setPollOptions(['', '']); setPollMultiple(false)
     setPollSheet(false); setPollSending(false)
   }
@@ -840,7 +750,6 @@ function ChatPageInner() {
     const myVotes = polls[poll.message_id]?.votes.filter(v => v.voter_id === user.id) ?? []
     const alreadyVoted = myVotes.find(v => v.option_id === optionId)
     if (alreadyVoted) {
-      // Cabut vote
       await supabase.from('chat_poll_votes').delete().eq('id', alreadyVoted.id)
       setPolls(prev => ({
         ...prev,
@@ -851,7 +760,6 @@ function ChatPageInner() {
       }))
     } else {
       if (!poll.is_multiple_choice) {
-        // Single choice: hapus vote sebelumnya
         const prev_vote = myVotes[0]
         if (prev_vote) {
           await supabase.from('chat_poll_votes').delete().eq('id', prev_vote.id)
@@ -892,7 +800,7 @@ function ChatPageInner() {
     }))
   }
 
-  // ── Room prefs (Fase 3) ───────────────────────────────────────────────────
+  // ── Room prefs ───────────────────────────────────────────────────────────
 
   function toggleNotif() {
     if (!activeRoom) return
@@ -911,10 +819,9 @@ function ChatPageInner() {
     const { data } = await supabase.from('chat_room_members')
       .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
       .eq('room_id', activeRoom.id)
-    setRoomMembers(data ?? []); setMembersLoading(false)
+    setRoomMembers((data ?? []) as unknown as WorkspaceMember[]); setMembersLoading(false)
   }
 
-  // Buka chat pribadi dengan anggota grup (dari daftar member) — sesi 20
   async function openPribadiWithMember(otherUserId: string) {
     if (!user || otherUserId === user.id) return
     const { data, error } = await supabase.rpc('get_or_create_pribadi_room', { p_other_user_id: otherUserId })
@@ -922,15 +829,13 @@ function ChatPageInner() {
     const { data: roomData } = await supabase.from('chat_rooms').select('*').eq('id', data).single()
     if (roomData) {
       setRoomSheet('none')
-      setActiveRoom(roomData as any)
+      setActiveRoom(roomData as ChatRoom)
     }
   }
 
-  // ── Voice recorder (Fase 8) ──────────────────────────────────────────────
-  const VOICE_MAX_SECONDS = 60
+  // ── Voice recorder ───────────────────────────────────────────────────────
 
   function pickAudioMime(): string {
-    // Chrome/Firefox: webm/opus. iOS Safari: mp4/aac. Fallback ke default.
     if (typeof MediaRecorder === 'undefined') return ''
     if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm'
     if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4'
@@ -949,9 +854,6 @@ function ChatPageInner() {
         stream.getTracks().forEach(t => t.stop())
         if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null }
         const blob = new Blob(audioChunksRef.current, { type: rec.mimeType || 'audio/webm' })
-        // Baca durasi FINAL dari state via functional setter (recSeconds via closure
-        // di sini sudah stale karena onstop diset di startRecording, sedangkan
-        // state ter-update lewat tick interval).
         let finalSeconds = 0
         setRecSeconds(s => { finalSeconds = s; return s })
         if (blob.size < 500) {
@@ -970,7 +872,7 @@ function ChatPageInner() {
           return s + 1
         })
       }, 1000)
-    } catch (err: any) {
+    } catch {
       alert('Tidak bisa akses mikrofon. Cek izin mic di setelan browser.')
     }
   }
@@ -986,7 +888,7 @@ function ChatPageInner() {
     if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null }
     const rec = mediaRecRef.current
     if (rec && rec.state !== 'inactive') {
-      audioChunksRef.current = [] // clear chunks supaya onstop skip upload
+      audioChunksRef.current = []
       rec.stop()
     }
     setRecording(false)
@@ -997,8 +899,6 @@ function ChatPageInner() {
   async function uploadVoiceMessage(blob: Blob, mimeRaw: string, seconds: number) {
     if (!activeRoom || !user) return
     setUploadingAudio(true)
-    // Strip parameter (mis. "audio/webm;codecs=opus" → "audio/webm") supaya
-    // match strict whitelist bucket allowed_mime_types.
     const mime = mimeRaw.split(';')[0].trim() || 'audio/webm'
     const ext = mime.includes('mp4') ? 'm4a' : (mime.includes('webm') ? 'webm' : (mime.includes('mpeg') ? 'mp3' : 'ogg'))
     const storagePath = `${user.id}/${activeRoom.id}/voice-${Date.now()}.${ext}`
@@ -1039,7 +939,6 @@ function ChatPageInner() {
     setUploadingAudio(false)
   }
 
-  // Kontak sheet — daftar staff aktif untuk mulai chat pribadi
   async function openContactSheet() {
     setContactSheet(true)
     setContactLoading(true)
@@ -1048,11 +947,10 @@ function ChatPageInner() {
       .select('id, full_name, role, staff_id, branches(name)')
       .eq('is_active', true)
       .order('full_name')
-    setContactList((data ?? []).filter(u => u.id !== user?.id) as any)
+    setContactList((data ?? []).filter(u => u.id !== user?.id) as unknown as WorkspaceContact[])
     setContactLoading(false)
   }
 
-  // Mulai / buka chat pribadi dengan staff lain. RPC handle dedup (idempotent).
   async function startPribadiChat(otherUserId: string) {
     setOpeningPribadi(otherUserId)
     const { data: roomId, error } = await supabase.rpc('get_or_create_pribadi_room', { p_other_user_id: otherUserId })
@@ -1065,24 +963,16 @@ function ChatPageInner() {
     }
   }
 
-  // Fase 3 — keluar dari room (untuk kategori pribadi/proyek, bukan default channel).
-  // Delete membership user → RLS `chat_room_members_delete_own` (migration raos_023)
-  // memastikan user cuma bisa hapus baris miliknya sendiri.
   async function leaveRoom() {
     if (!activeRoom || !user) return
-    if (!confirm(`Tinggalkan room "${activeRoom.name}"? Anda tidak akan menerima pesan baru sampai diundang ulang.`)) return
+    if (!confirm(`Tinggalkan workspace "${activeRoom.name}"? Anda tidak akan menerima pesan baru sampai diundang ulang.`)) return
     const { error } = await supabase.from('chat_room_members')
       .delete().eq('room_id', activeRoom.id).eq('user_id', user.id)
-    if (error) { alert('Gagal keluar room: ' + error.message); return }
+    if (error) { alert('Gagal keluar workspace: ' + error.message); return }
     setRoomSheet('none')
-    setActiveRoom(null) // balik ke list, useEffect akan refresh loadRooms()
+    setActiveRoom(null)
   }
 
-  // Retensi pesan per room — sesi 20 update: buka akses ke semua PWA (bukan admin-only).
-  // Pakai RPC set_chat_room_retention (SECURITY DEFINER) supaya bypass RLS admin-only
-  // policy chat_rooms_update_admin. RPC sendiri cek membership atau branch scope.
-  // Cron server-side (raos_delete_expired_chat_messages) menghormati auto_delete_days.
-  // Kirim null = matikan retensi (pesan tidak dihapus otomatis).
   async function updateRetention(days: number | null) {
     if (!activeRoom || !user) return
     const { error } = await supabase.rpc('set_chat_room_retention', {
@@ -1092,7 +982,6 @@ function ChatPageInner() {
     setActiveRoom({ ...activeRoom, auto_delete_days: days ?? undefined })
   }
 
-  // Hapus pesan (sesi 20) — sender atau admin/mgmt/koord/direksi
   async function deleteMessage(messageId: string) {
     if (!confirm('Hapus pesan ini? Aksi tidak bisa di-undo.')) return
     const { error } = await supabase.rpc('delete_chat_message', { p_message_id: messageId })
@@ -1101,20 +990,16 @@ function ChatPageInner() {
     setActionMenu(null)
   }
 
-  // Hapus semua pesan di room — versi LOKAL per user (sesi 20 refine).
-  // Hanya sembunyi di device sendiri; user lain di room tetap lihat pesan.
-  // Server simpan cutoff timestamp di chat_room_local_clears; loadMessages
-  // filter created_at > cleared_before_at.
   async function clearAllMessages() {
     if (!activeRoom || !user) return
-    if (!confirm(`Sembunyikan semua pesan di room "${activeRoom.name}" hanya untuk Anda?\n\nPesan tetap ada untuk anggota lain. Pesan baru setelah ini akan tetap muncul.`)) return
+    if (!confirm(`Sembunyikan semua pesan di workspace "${activeRoom.name}" hanya untuk Anda?\n\nPesan tetap ada untuk anggota lain. Pesan baru setelah ini akan tetap muncul.`)) return
     const { error } = await supabase.rpc('clear_chat_room_for_me', { p_room_id: activeRoom.id })
     if (error) { alert('Gagal hapus: ' + error.message); return }
     setMessages([])
     setRoomSheet('none')
   }
 
-  // ── Reactions (Fase 4) ────────────────────────────────────────────────────
+  // ── Reactions ─────────────────────────────────────────────────────────────
 
   async function toggleReaction(messageId: string, emoji: string) {
     if (!user || !activeRoom) return
@@ -1140,7 +1025,7 @@ function ChatPageInner() {
     setActionMenu(null)
   }
 
-  // ── Pin message (Fase 4) ──────────────────────────────────────────────────
+  // ── Pin ───────────────────────────────────────────────────────────────────
 
   async function pinMessage(messageId: string) {
     if (!user) return
@@ -1164,7 +1049,7 @@ function ChatPageInner() {
     setPinnedMsg(null)
   }
 
-  // ── Long press ────────────────────────────────────────────────────────────
+  // ── Long press / copy ────────────────────────────────────────────────────
 
   function startLongPress(msgId: string, isMe: boolean, content?: string) {
     longPressTimer.current = setTimeout(() => {
@@ -1175,110 +1060,63 @@ function ChatPageInner() {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
   }
 
-  // ── Copy ──────────────────────────────────────────────────────────────────
-
-  function copyText(text?: string) {
-    if (!text) return
-    navigator.clipboard.writeText(text).catch(() => {})
+  function copyText(t?: string) {
+    if (!t) return
+    navigator.clipboard.writeText(t).catch(() => {})
     setActionMenu(null)
   }
 
-  // ── Reaction display helpers ──────────────────────────────────────────────
+  // ── Composer text change / mention dropdown ──────────────────────────────
 
-  function groupedReactions(msgId: string): { emoji: string; count: number; mine: boolean }[] {
-    const list = reactions[msgId] ?? []
-    const map: Record<string, { count: number; mine: boolean }> = {}
-    list.forEach(r => {
-      if (!map[r.emoji]) map[r.emoji] = { count: 0, mine: false }
-      map[r.emoji].count++
-      if (r.user_id === user?.id) map[r.emoji].mine = true
-    })
-    return Object.entries(map).map(([emoji, v]) => ({ emoji, ...v }))
+  function handleComposerTextChange(val: string, caret: number) {
+    setText(val)
+    const uptoCaret = val.slice(0, caret)
+    const m = uptoCaret.match(/(?:^|\s)@([\w.\-]*)$/)
+    if (m) {
+      const startPos = caret - m[0].length + (m[0].startsWith(' ') ? 1 : 0)
+      setMentionDropdown({ open: true, query: m[1] ?? '', startPos })
+    } else if (mentionDropdown.open) {
+      setMentionDropdown({ open: false, query: '', startPos: 0 })
+    }
   }
 
-  const canPin = PIN_ROLES.includes(user?.role ?? '')
+  function insertMention(name: string, extraSuffix: string, userId?: string) {
+    const before = text.slice(0, mentionDropdown.startPos)
+    const afterAt = text.slice(mentionDropdown.startPos + 1 + mentionDropdown.query.length)
+    const inserted = `@${name}${extraSuffix} `
+    setText(before + inserted + afterAt)
+    if (userId) {
+      setMentionsPending(prev => prev.includes(userId) ? prev : [...prev, userId])
+    }
+    setMentionDropdown({ open: false, query: '', startPos: 0 })
+    setTimeout(() => textInputRef.current?.focus(), 0)
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
-  /* ===== ROOM CHAT VIEW ===== */
+  /* ===== WORKSPACE (in-room) VIEW ===== */
   // ─────────────────────────────────────────────────────────────────────────
 
   if (activeRoom) {
-    const style    = getRoomStyle(activeRoom.category)
-    const catLabel = CATEGORY_LABELS[activeRoom.category] ?? activeRoom.category
-    const canLeave = NON_DEFAULT_CATEGORIES.includes(activeRoom.category)
+    const showQueueSummary = Boolean(
+      queueSummary &&
+      ((activeRoom.name ?? '').toLowerCase().includes('driver') || (activeRoom.name ?? '').toLowerCase().includes('antrian'))
+    )
+    const composerDisabled = uploading || sendingLocation || pollSending || uploadingAudio
 
     return (
       <SwipeBackWrapper onBack={() => setActiveRoom(null)}>
         <div className="flex flex-col h-screen max-w-md mx-auto">
 
-          {/* ── Lightbox ──────────────────────────────────────────────────── */}
-          {lightboxUrl && (
-            <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center"
-              onClick={() => setLightboxUrl(null)}>
-              <button
-                onClick={() => setLightboxUrl(null)}
-                aria-label="Tutup"
-                className="absolute top-5 right-5 w-11 h-11 rounded-full bg-white/10 backdrop-blur-sm
-                           text-white flex items-center justify-center active:scale-95">
-                <X size={22} />
-              </button>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={lightboxUrl} alt="Preview"
-                className="max-w-[92vw] max-h-[80vh] object-contain rounded-xl shadow-2xl"
-                onClick={e => e.stopPropagation()} />
-              <a href={lightboxUrl} target="_blank" rel="noopener noreferrer" download
-                onClick={e => e.stopPropagation()}
-                style={{ bottom: 'calc(28px + env(safe-area-inset-bottom))' }}
-                className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2
-                           bg-primary hover:bg-primary/90 text-secondary text-sm font-bold
-                           px-6 py-3 rounded-full shadow-lg active:scale-95 transition-transform">
-                <Download size={18} /> Unduh Gambar
-              </a>
-            </div>
-          )}
+          {lightboxUrl && <WorkspaceLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
 
-          {/* ── Modal daftar pembaca (read receipt) ──────────────────────── */}
           {readersModalMsgId && (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center"
-              onClick={() => setReadersModalMsgId(null)}>
-              <div className="bg-white dark:bg-gray-800 w-full sm:w-[90%] sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-xl"
-                onClick={e => e.stopPropagation()}>
-                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-bold text-gray-800 dark:text-gray-100">Dibaca oleh</p>
-                    <p className="text-[10px] text-gray-400">Tap luar untuk tutup</p>
-                  </div>
-                  <button onClick={() => setReadersModalMsgId(null)} className="p-1 text-gray-400">
-                    <X size={16} />
-                  </button>
-                </div>
-                <div className="max-h-[50vh] overflow-y-auto"
-                  style={{ paddingBottom: 'calc(20px + env(safe-area-inset-bottom))' }}>
-                  {readersLoading && <p className="text-center text-xs text-gray-400 py-6">Memuat...</p>}
-                  {!readersLoading && readersList.length === 0 && (
-                    <p className="text-center text-xs text-gray-400 py-6">Belum ada yang membaca</p>
-                  )}
-                  {readersList.map(r => (
-                    <div key={r.user_id} className="px-4 py-2 flex items-center gap-3 border-b border-gray-50 dark:border-gray-700/50">
-                      <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
-                        {r.full_name?.[0]?.toUpperCase() ?? '?'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{r.full_name}</p>
-                      </div>
-                      <span className="text-[10px] text-gray-400 flex-shrink-0">
-                        {new Date(r.read_at).toLocaleString('id-ID', {
-                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                        })}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <WorkspaceReadersModal
+              loading={readersLoading}
+              readers={readersList}
+              onClose={() => setReadersModalMsgId(null)}
+            />
           )}
 
-          {/* ── Isi Saldo BottomSheet ─────────────────────────────────────── */}
           {isiSaldoSheet && activeRoom && user && activeRoomBranch && (
             <IsiSaldoBottomSheet
               userId={user.id}
@@ -1289,975 +1127,159 @@ function ChatPageInner() {
               branchNominalOptions={activeRoomBranch.saldo_nominal_options}
               roomId={activeRoom.id}
               onClose={() => setIsiSaldoSheet(false)}
-              onSubmitted={() => { setIsiSaldoSheet(false) }}
+              onSubmitted={() => setIsiSaldoSheet(false)}
             />
           )}
 
-          {/* ── Poll Sheet ───────────────────────────────────────────────── */}
           {pollSheet && (
-            <div className="fixed inset-0 z-40 flex flex-col justify-end"
-              onClick={() => { if (!pollSending) setPollSheet(false) }}>
-              <div className="bg-white rounded-t-3xl shadow-2xl max-h-[85vh] overflow-y-auto"
-                onClick={e => e.stopPropagation()}>
-                <div className="flex justify-center pt-3 pb-1">
-                  <div className="w-10 h-1 bg-gray-200 rounded-full" />
-                </div>
-                <div className="px-5 pb-8">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <BarChart2 size={18} className="text-secondary" />
-                      <p className="font-bold text-gray-800 text-base">Buat Polling</p>
-                    </div>
-                    <button onClick={() => setPollSheet(false)} disabled={pollSending}>
-                      <X size={20} className="text-gray-400" />
-                    </button>
-                  </div>
-
-                  {/* Pertanyaan */}
-                  <div className="mb-4">
-                    <label className="text-xs font-semibold text-gray-500 mb-1.5 block">Pertanyaan</label>
-                    <input
-                      type="text" maxLength={200}
-                      placeholder="Tulis pertanyaan polling..."
-                      value={pollQuestion} onChange={e => setPollQuestion(e.target.value)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-secondary"
-                    />
-                  </div>
-
-                  {/* Opsi */}
-                  <div className="mb-3">
-                    <label className="text-xs font-semibold text-gray-500 mb-1.5 block">
-                      Pilihan ({pollOptions.length}/4)
-                    </label>
-                    <div className="space-y-2">
-                      {pollOptions.map((opt, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <input
-                            type="text" maxLength={100}
-                            placeholder={`Pilihan ${i + 1}`}
-                            value={opt} onChange={e => {
-                              const next = [...pollOptions]
-                              next[i] = e.target.value
-                              setPollOptions(next)
-                            }}
-                            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-secondary"
-                          />
-                          {pollOptions.length > 2 && (
-                            <button onClick={() => setPollOptions(pollOptions.filter((_, j) => j !== i))}
-                              className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0">
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    {pollOptions.length < 4 && (
-                      <button onClick={() => setPollOptions([...pollOptions, ''])}
-                        className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-secondary">
-                        <Plus size={13} /> Tambah pilihan
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Toggle multi pilihan */}
-                  <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 mb-5">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-700">Boleh pilih banyak</p>
-                      <p className="text-[10px] text-gray-400">Peserta bisa memilih lebih dari satu opsi</p>
-                    </div>
-                    <button onClick={() => setPollMultiple(!pollMultiple)}
-                      className={clsx('relative w-11 h-6 rounded-full transition-colors flex-shrink-0', pollMultiple ? 'bg-secondary' : 'bg-gray-200')}>
-                      <span className={clsx('absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform', pollMultiple ? 'translate-x-5' : 'translate-x-0.5')} />
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={createPoll}
-                    disabled={pollSending || !pollQuestion.trim() || pollOptions.filter(o => o.trim()).length < 2}
-                    className="w-full bg-secondary text-white font-bold py-3 rounded-2xl disabled:opacity-40 transition-opacity flex items-center justify-center gap-2">
-                    {pollSending
-                      ? <><Loader2 size={16} className="animate-spin" /> Membuat...</>
-                      : <><BarChart2 size={16} /> Buat Polling</>}
-                  </button>
-                </div>
-              </div>
-            </div>
+            <WorkspacePollSheet
+              pollQuestion={pollQuestion}
+              pollOptions={pollOptions}
+              pollMultiple={pollMultiple}
+              pollSending={pollSending}
+              onQuestionChange={setPollQuestion}
+              onOptionsChange={setPollOptions}
+              onToggleMultiple={() => setPollMultiple(!pollMultiple)}
+              onCreate={createPoll}
+              onClose={() => setPollSheet(false)}
+            />
           )}
 
-          {/* ── Action menu (long press) ───────────────────────────────────── */}
           {actionMenu && (
-            <div className="fixed inset-0 z-40 flex flex-col justify-end"
-              onClick={() => setActionMenu(null)}>
-              <div className="bg-white rounded-t-3xl shadow-2xl pb-8"
-                onClick={e => e.stopPropagation()}>
-                {/* Drag handle */}
-                <div className="flex justify-center pt-3 pb-2">
-                  <div className="w-10 h-1 bg-gray-200 rounded-full" />
-                </div>
-
-                {/* Quick emoji row */}
-                <div className="px-4 py-2">
-                  <p className="text-[10px] text-gray-400 font-semibold mb-2 text-center">Reaksi Cepat</p>
-                  <div className="flex justify-center gap-2">
-                    {QUICK_EMOJIS.map(emoji => {
-                      const list = reactions[actionMenu.msgId] ?? []
-                      const mine = list.some(r => r.user_id === user?.id && r.emoji === emoji)
-                      return (
-                        <button key={emoji}
-                          onClick={() => toggleReaction(actionMenu.msgId, emoji)}
-                          className={clsx(
-                            'w-11 h-11 rounded-2xl text-2xl flex items-center justify-center transition-transform active:scale-95',
-                            mine ? 'bg-primary/20 ring-2 ring-primary/40' : 'bg-gray-100 hover:bg-gray-200'
-                          )}>
-                          {emoji}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-100 mx-4 my-2" />
-
-                {/* Actions */}
-                <div className="px-4 space-y-1">
-                  {/* Pin — hanya admin/koordinator/direksi */}
-                  {canPin && (
-                    <button
-                      onClick={() => pinMessage(actionMenu.msgId)}
-                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
-                    >
-                      <Pin size={18} className="text-secondary" />
-                      <span className="text-sm font-semibold text-gray-700">Sematkan Pesan</span>
-                    </button>
-                  )}
-
-                  {/* Copy teks */}
-                  {actionMenu.content && (
-                    <button
-                      onClick={() => copyText(actionMenu.content)}
-                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
-                    >
-                      <Copy size={18} className="text-gray-500" />
-                      <span className="text-sm font-semibold text-gray-700">Salin Teks</span>
-                    </button>
-                  )}
-
-                  {/* Hapus pesan (sesi 20) — sender atau admin/koord/direksi */}
-                  {(actionMenu.isMe || (user && PIN_ROLES.includes(user.role))) && (
-                    <button
-                      onClick={() => deleteMessage(actionMenu.msgId)}
-                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-red-50 transition-colors text-left"
-                    >
-                      <Trash2 size={18} className="text-red-500" />
-                      <span className="text-sm font-semibold text-red-500">Hapus Pesan</span>
-                    </button>
-                  )}
-
-                  <button onClick={() => setActionMenu(null)}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left">
-                    <X size={18} className="text-gray-400" />
-                    <span className="text-sm font-medium text-gray-400">Batal</span>
-                  </button>
-                </div>
-              </div>
-            </div>
+            <WorkspaceActionMenu
+              actionMenu={actionMenu}
+              user={user}
+              reactions={reactions}
+              onClose={() => setActionMenu(null)}
+              onToggleReaction={toggleReaction}
+              onPin={pinMessage}
+              onCopy={copyText}
+              onDelete={deleteMessage}
+            />
           )}
 
-          {/* ── Info / Settings Sheet (Fase 3) ────────────────────────────── */}
           {roomSheet !== 'none' && (
-            <div className="fixed inset-0 z-40 flex flex-col justify-end"
-              onClick={() => setRoomSheet('none')}>
-              <div className="bg-white rounded-t-3xl shadow-2xl max-h-[80vh] overflow-y-auto"
-                onClick={e => e.stopPropagation()}>
-                <div className="flex justify-center pt-3 pb-1">
-                  <div className="w-10 h-1 bg-gray-200 rounded-full" />
-                </div>
-
-                {/* INFO */}
-                {roomSheet === 'info' && (
-                  <div className="px-5 pb-8">
-                    <div className="flex items-center justify-between mb-5">
-                      <p className="font-bold text-gray-800 text-base">Info Room</p>
-                      <button onClick={() => setRoomSheet('none')}><X size={20} className="text-gray-400" /></button>
-                    </div>
-                    <div className="flex flex-col items-center mb-6">
-                      <div className={`w-20 h-20 rounded-full flex items-center justify-center font-black text-3xl shadow-md mb-3 ${style.bg} ${style.text}`}>
-                        {activeRoom.name.charAt(0)}
-                      </div>
-                      <p className="font-black text-gray-900 text-lg text-center">{activeRoom.name}</p>
-                      <span className={`mt-1.5 px-3 py-0.5 rounded-full text-xs font-semibold ${style.lightBg}`}>{catLabel}</span>
-                    </div>
-                    {activeRoom.description && (
-                      <div className="bg-gray-50 rounded-2xl px-4 py-3 mb-4">
-                        <p className="text-xs font-semibold text-gray-500 mb-1">Deskripsi</p>
-                        <p className="text-sm text-gray-700 leading-relaxed">{activeRoom.description}</p>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      <div className="bg-gray-50 rounded-2xl px-4 py-3 text-center">
-                        <p className="text-[10px] text-gray-400 font-semibold mb-0.5">STATUS</p>
-                        <p className="text-sm font-bold text-green-600">Aktif</p>
-                      </div>
-                      <div className="bg-gray-50 rounded-2xl px-4 py-3 text-center">
-                        <p className="text-[10px] text-gray-400 font-semibold mb-0.5">ANGGOTA</p>
-                        {membersLoading
-                          ? <Loader2 size={14} className="animate-spin mx-auto text-gray-400" />
-                          : <p className="text-sm font-bold text-gray-700">
-                              {roomMembers.length > 0 ? roomMembers.length + ' staff' : 'Semua Staff'}
-                            </p>}
-                      </div>
-                    </div>
-                    {roomMembers.length > 0 && (
-                      <div className="mb-4">
-                        <p className="text-xs font-semibold text-gray-500 mb-2">Anggota ({roomMembers.length})</p>
-                        <div className="max-h-[280px] overflow-y-auto space-y-1 pr-1">
-                          {roomMembers.map((m: any) => {
-                            const p = m.user_profiles
-                            const isSelf = m.user_id === user?.id
-                            return (
-                              <button
-                                key={m.user_id}
-                                onClick={() => !isSelf && openPribadiWithMember(m.user_id)}
-                                disabled={isSelf}
-                                className={clsx(
-                                  'w-full flex items-center gap-3 px-2 py-2 rounded-lg text-left transition-colors',
-                                  isSelf ? 'opacity-60 cursor-default' : 'hover:bg-gray-100 active:bg-gray-200'
-                                )}
-                              >
-                                <div className="w-9 h-9 rounded-full bg-secondary text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
-                                  {(p?.full_name ?? '?').charAt(0)}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-semibold text-gray-800 truncate">
-                                    {p?.full_name ?? 'Staff'}{isSelf ? ' (Saya)' : ''}
-                                  </p>
-                                  <p className="text-[10px] text-gray-400 capitalize">{p?.role ?? ''}</p>
-                                </div>
-                                {!isSelf && <MessageCircle size={14} className="text-primary flex-shrink-0" />}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    <button onClick={() => setRoomSheet('settings')}
-                      className="w-full flex items-center gap-3 bg-gray-50 hover:bg-gray-100 rounded-2xl px-4 py-3.5 transition-colors">
-                      <Settings size={18} className="text-gray-500" />
-                      <span className="flex-1 text-sm font-semibold text-gray-700 text-left">Pengaturan Room</span>
-                      <ChevronRight size={16} className="text-gray-400" />
-                    </button>
-                  </div>
-                )}
-
-                {/* SETTINGS */}
-                {roomSheet === 'settings' && (
-                  <div className="px-5 pb-8">
-                    <div className="flex items-center gap-3 mb-5">
-                      <button onClick={() => setRoomSheet('info')}><ArrowLeft size={20} className="text-gray-500" /></button>
-                      <p className="font-bold text-gray-800 text-base flex-1">Pengaturan Room</p>
-                      <button onClick={() => setRoomSheet('none')}><X size={20} className="text-gray-400" /></button>
-                    </div>
-                    <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mb-5">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}>
-                        {activeRoom.name.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm text-gray-800">{activeRoom.name}</p>
-                        <p className="text-[10px] text-gray-400 capitalize">{catLabel}</p>
-                      </div>
-                    </div>
-                    <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden mb-4">
-                      {[
-                        { key: 'notif', icon: roomPrefs.notif ? Bell : BellOff, label: 'Notifikasi', sub: roomPrefs.notif ? 'Aktif' : 'Nonaktif — tanpa notifikasi', val: roomPrefs.notif, fn: toggleNotif },
-                        { key: 'pin',   icon: roomPrefs.pinned ? Pin : PinOff,  label: 'Sematkan Room', sub: roomPrefs.pinned ? 'Disematkan di daftar' : 'Tidak disematkan', val: roomPrefs.pinned, fn: togglePinned },
-                      ].map((item, i) => (
-                        <div key={item.key} className={clsx('flex items-center gap-3 px-4 py-4', i === 0 && 'border-b border-gray-50')}>
-                          <item.icon size={18} className={item.val ? 'text-primary flex-shrink-0' : 'text-gray-400 flex-shrink-0'} />
-                          <div className="flex-1">
-                            <p className="text-sm font-semibold text-gray-800">{item.label}</p>
-                            <p className="text-[10px] text-gray-400">{item.sub}</p>
-                          </div>
-                          <button onClick={item.fn}
-                            className={clsx('relative w-11 h-6 rounded-full transition-colors flex-shrink-0', item.val ? 'bg-primary' : 'bg-gray-200')}>
-                            <span className={clsx('absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform', item.val ? 'translate-x-5' : 'translate-x-0.5')} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    {/* Retensi pesan — read-only untuk semua, dropdown edit khusus admin/koordinator/direksi */}
-                    <div className="bg-yellow-50 border border-yellow-100 rounded-2xl px-4 py-3 mb-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-yellow-700">Retensi Pesan</p>
-                          <p className="text-[11px] text-yellow-600 mt-0.5">
-                            {activeRoom.auto_delete_days
-                              ? `Otomatis dihapus setelah ${activeRoom.auto_delete_days} hari (pesan yang di-pin tetap disimpan)`
-                              : 'Tidak aktif — pesan disimpan selamanya'}
-                          </p>
-                        </div>
-                      </div>
-                      {/* Chip button — akses semua PWA (sesi 20). Update via RPC
-                          set_chat_room_retention (bypass RLS admin-only).
-                          HINDARI native <select> — Android back gesture consume
-                          pushState → keluar room. */}
-                      {user && (
-                        <div className="flex gap-1.5 mt-3">
-                          {([
-                            { val: null, label: 'Tidak' },
-                            { val: 7,    label: '7 hari' },
-                            { val: 30,   label: '30 hari' },
-                            { val: 90,   label: '90 hari' },
-                          ]).map(opt => {
-                            const isActive = (activeRoom.auto_delete_days ?? null) === opt.val
-                            return (
-                              <button
-                                key={opt.label}
-                                onClick={() => updateRetention(opt.val)}
-                                className={clsx(
-                                  'flex-1 text-[11px] font-bold py-1.5 rounded-lg transition-colors',
-                                  isActive
-                                    ? 'bg-yellow-500 text-white'
-                                    : 'bg-white border border-yellow-200 text-yellow-800'
-                                )}
-                              >
-                                {opt.label}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                    {/* Hapus semua pesan (sesi 20 refine) — LOKAL per user, semua role.
-                        Hanya sembunyi di device sendiri; user lain tetap lihat pesan. */}
-                    {user && (
-                      <button
-                        onClick={clearAllMessages}
-                        className="w-full flex items-center justify-center gap-2 text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
-                        <Trash2 size={16} /><span className="text-sm font-semibold">Hapus Semua Pesan (untuk Saya)</span>
-                      </button>
-                    )}
-                    {canLeave && (
-                      <button
-                        onClick={leaveRoom}
-                        className="w-full flex items-center justify-center gap-2 text-red-500 border border-red-100 bg-red-50 hover:bg-red-100 rounded-2xl px-4 py-3.5 transition-colors mt-2">
-                        <LogOut size={16} /><span className="text-sm font-semibold">Tinggalkan Room</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
+            <WorkspaceInfoSheet
+              sheet={roomSheet}
+              room={activeRoom}
+              user={user}
+              prefs={roomPrefs}
+              members={roomMembers}
+              membersLoading={membersLoading}
+              onOpenPribadi={openPribadiWithMember}
+              onToggleNotif={toggleNotif}
+              onTogglePinned={togglePinned}
+              onUpdateRetention={updateRetention}
+              onClearAllMessages={clearAllMessages}
+              onLeaveRoom={leaveRoom}
+              onGotoInfo={() => setRoomSheet('info')}
+              onGotoSettings={() => setRoomSheet('settings')}
+              onClose={() => setRoomSheet('none')}
+            />
           )}
 
-          {/* ── Header ────────────────────────────────────────────────────── */}
-          <div className="bg-secondary text-white px-4 pt-10 pb-3 flex items-center gap-3 flex-shrink-0">
-            <button onClick={() => setActiveRoom(null)} className="text-white/70"><ArrowLeft size={22} /></button>
-            <button onClick={openInfoSheet}
-              className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}>
-              {style.label}
-            </button>
-            <button onClick={openInfoSheet} className="flex-1 min-w-0 text-left">
-              <p className="font-bold text-sm truncate">{activeRoom.name}</p>
-              <p className="text-white/40 text-xs capitalize">{catLabel}</p>
-            </button>
-            <button onClick={openInfoSheet} className="text-white/50 hover:text-white/80 transition-colors" title="Info Room">
-              <Info size={18} />
-            </button>
-            <button onClick={() => { setRoomSheet('settings'); setMembersLoading(false) }}
-              className={clsx('transition-colors', roomPrefs.notif ? 'text-white/50 hover:text-white/80' : 'text-white/30')}
-              title="Pengaturan Room">
-              {roomPrefs.notif ? <Bell size={18} /> : <BellOff size={16} />}
-            </button>
-          </div>
+          <WorkspaceHeader
+            room={activeRoom}
+            prefs={roomPrefs}
+            onBack={() => setActiveRoom(null)}
+            onOpenInfo={openInfoSheet}
+            onOpenSettings={() => { setRoomSheet('settings'); setMembersLoading(false) }}
+          />
 
-          {/* ── Pinned message banner ─────────────────────────────────────── */}
           {pinnedMsg && (
-            <div className="bg-primary/10 border-b border-primary/20 px-4 py-2 flex items-center gap-2 flex-shrink-0">
-              <Pin size={12} className="text-primary flex-shrink-0" />
-              <button
-                onClick={() => msgRefs.current[pinnedMsg.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                className="flex-1 min-w-0 text-left">
-                <p className="text-[10px] font-bold text-primary">Pesan Disematkan</p>
-                <p className="text-xs text-gray-600 truncate">{pinnedMsg.content || (pinnedMsg.type === 'image' ? '📷 Gambar' : pinnedMsg.type === 'audio' ? '🎤 Pesan suara' : '📎 File')}</p>
-              </button>
-              {canPin && (
-                <button onClick={unpinMessage} className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
+            <WorkspacePinnedBanner
+              pinned={pinnedMsg}
+              canUnpin={['admin', 'management', 'koordinator', 'direksi'].includes(user?.role ?? '')}
+              onScrollTo={() => msgRefs.current[pinnedMsg.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+              onUnpin={unpinMessage}
+            />
           )}
 
-          {/* ── Queue monitor ───────────────────────────────────────────── */}
-          {queueSummary && activeRoom && ((activeRoom.name ?? '').toLowerCase().includes('driver') || (activeRoom.name ?? '').toLowerCase().includes('antrian')) && (
-            <div className="border-b border-amber-100 bg-amber-50/80 px-4 py-3 flex-shrink-0">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700">Queue Driver</p>
-                  <p className="text-sm font-semibold text-gray-800">{queueSummary.waiting} menunggu · {queueSummary.called} dipanggil · {queueSummary.completed} selesai</p>
-                  <p className="text-[11px] text-gray-600 mt-0.5">
-                    {queueSummary.activeDriver ? `Aktif: ${queueSummary.activeDriver}` : 'Belum ada driver dipanggil'}
-                    {queueSummary.nextPosition ? ` · posisi berikut: #${queueSummary.nextPosition}` : ''}
-                  </p>
-                </div>
-                <div className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-amber-700 shadow-sm">
-                  {queueSummary.called > 0 ? 'Live' : 'Siap'}
-                </div>
-              </div>
-              {queueHistory.length > 0 && (
-                <div className="mt-2 rounded-xl border border-amber-200 bg-white/70 p-2.5">
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-700">Riwayat Terbaru</p>
-                  <div className="space-y-1.5">
-                    {queueHistory.map((item: any) => (
-                      <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-2 py-1.5">
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-semibold text-gray-800 truncate">{item.driver?.name ?? 'Driver'}</p>
-                          <p className="text-[10px] text-gray-500">Posisi #{item.position ?? '-'} · {(item.status ?? 'unknown').toUpperCase()}</p>
-                        </div>
-                        <p className="text-[10px] text-gray-500 whitespace-nowrap">
-                          {item.called_at ? new Date(item.called_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <p className="mt-2 text-[10px] text-gray-500">Perintah cepat: /antri &lt;driver_id&gt; · /panggil &lt;posisi&gt; · /selesai &lt;posisi&gt; · /keluar &lt;driver_id&gt;</p>
-            </div>
+          {showQueueSummary && queueSummary && (
+            <WorkspaceQueueSummary summary={queueSummary} history={queueHistory} />
           )}
 
-          {/* ── Messages ──────────────────────────────────────────────────── */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50">
-            {messages.length === 0 && (
-              <div className="text-center py-10 text-gray-400">
-                <MessageCircle size={32} className="mx-auto mb-2 opacity-30" />
-                <p className="text-sm">Belum ada pesan di room ini</p>
-              </div>
-            )}
-            {messages.map(msg => {
-              const isMe       = msg.sender_id === user?.id
-              const senderName = (msg as any).user_profiles?.full_name ?? 'Unknown'
-              const senderRole = (msg as any).user_profiles?.role ?? ''
-              const rxGroups   = groupedReactions(msg.id)
-              const actionCard = msg.content ? parseActionCard(msg.content) : null
-              const isDriverAction = msg.type === 'driver' || actionCard?.kind === 'driver'
-              const isQueueAction = msg.type === 'queue' || actionCard?.kind === 'queue'
-
-              return (
-                <div key={msg.id}
-                  ref={el => { msgRefs.current[msg.id] = el }}
-                  className={clsx('flex flex-col', isMe ? 'items-end' : 'items-start')}>
-
-                  {/* Sender label */}
-                  {!isMe && (
-                    <p className="text-[10px] font-bold text-primary ml-1 mb-0.5 capitalize">
-                      {senderName} · {senderRole}
-                    </p>
-                  )}
-
-                  {/* Bubble */}
-                  <div
-                    onTouchStart={() => startLongPress(msg.id, isMe, msg.content)}
-                    onTouchEnd={cancelLongPress}
-                    onTouchMove={cancelLongPress}
-                    onContextMenu={e => { e.preventDefault(); setActionMenu({ msgId: msg.id, isMe, content: msg.content }) }}
-                    className={clsx(
-                      'max-w-[78%] px-3 py-2 rounded-2xl text-sm cursor-pointer select-none',
-                      isMe ? 'bg-secondary text-white rounded-br-sm' : 'bg-white text-gray-800 shadow-sm rounded-bl-sm',
-                      msg.is_pinned && 'ring-1 ring-primary/40'
-                    )}
-                  >
-                    {msg.is_pinned && (
-                      <div className="flex items-center gap-1 mb-1 opacity-60">
-                        <Pin size={9} className={isMe ? 'text-primary' : 'text-primary'} />
-                        <span className="text-[9px] font-semibold text-primary">Disematkan</span>
-                      </div>
-                    )}
-
-                    {/* IMAGE */}
-                    {msg.type === 'image' && msg.media_url && (
-                      <button onClick={() => setLightboxUrl(msg.media_url!)} className="block mb-1.5 rounded-xl overflow-hidden">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={msg.media_url} alt={msg.content || 'Gambar'} className="max-w-[200px] w-full object-cover rounded-xl" />
-                      </button>
-                    )}
-
-                    {/* FILE */}
-                    {msg.type === 'file' && msg.media_url && (
-                      <a href={msg.media_url} target="_blank" rel="noopener noreferrer" download
-                        className={clsx('flex items-center gap-2.5 rounded-xl px-3 py-2 mb-1.5 transition-colors',
-                          isMe ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-100 hover:bg-gray-200')}>
-                        <FileText size={20} className={clsx('flex-shrink-0', isMe ? 'text-primary' : 'text-blue-500')} />
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold truncate max-w-[140px]">{msg.content || 'File'}</p>
-                          <p className={clsx('text-[10px]', isMe ? 'text-white/50' : 'text-gray-400')}>Ketuk untuk unduh</p>
-                        </div>
-                        <Download size={14} className={isMe ? 'text-white/50' : 'text-gray-400'} />
-                      </a>
-                    )}
-
-                    {/* AUDIO / VOICE MESSAGE (Fase 8) */}
-                    {msg.type === 'audio' && msg.media_url && (
-                      <div className={clsx('flex items-center gap-2 rounded-xl px-3 py-2 mb-1.5',
-                        isMe ? 'bg-white/10' : 'bg-gray-100')}>
-                        <Mic size={16} className={clsx('flex-shrink-0', isMe ? 'text-primary' : 'text-red-500')} />
-                        <audio controls preload="metadata" src={msg.media_url}
-                          className="h-8 min-w-[160px] max-w-[200px]" />
-                        <a href={msg.media_url} download target="_blank" rel="noopener noreferrer"
-                          className={clsx('flex-shrink-0', isMe ? 'text-white/60 hover:text-white' : 'text-gray-400 hover:text-gray-600')}
-                          title="Unduh pesan suara">
-                          <Download size={14} />
-                        </a>
-                      </div>
-                    )}
-
-                    {/* LOCATION */}
-                    {msg.type === 'location' && (() => {
-                      let loc = { lat: 0, lng: 0, accuracy: 0 }
-                      try { loc = JSON.parse(msg.content ?? '{}') } catch {}
-                      const mapsUrl = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`
-                      return (
-                        <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-                          className={clsx(
-                            'flex items-start gap-2.5 rounded-xl px-3 py-2.5 mb-1 transition-colors no-underline',
-                            isMe ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-50 hover:bg-gray-100'
-                          )}>
-                          <MapPin size={18} className={clsx('mt-0.5 flex-shrink-0', isMe ? 'text-primary' : 'text-red-500')} />
-                          <div className="min-w-0">
-                            <p className={clsx('text-xs font-bold', isMe ? 'text-white' : 'text-gray-800')}>
-                              📍 Lokasi Saat Ini
-                            </p>
-                            <p className={clsx('text-[10px] mt-0.5', isMe ? 'text-white/60' : 'text-gray-500')}>
-                              {loc.lat.toFixed(6)}, {loc.lng.toFixed(6)}
-                            </p>
-                            {loc.accuracy > 0 && (
-                              <p className={clsx('text-[9px] mt-0.5', isMe ? 'text-white/40' : 'text-gray-400')}>
-                                Akurasi ±{loc.accuracy} m
-                              </p>
-                            )}
-                            <p className={clsx('text-[9px] mt-1 font-semibold', isMe ? 'text-primary' : 'text-blue-500')}>
-                              Ketuk untuk buka Maps →
-                            </p>
-                          </div>
-                        </a>
-                      )
-                    })()}
-
-                    {/* POLL */}
-                    {msg.type === 'poll' && (() => {
-                      const entry = polls[msg.id]
-                      if (!entry) return (
-                        <div className="flex items-center gap-2 py-1 opacity-60">
-                          <BarChart2 size={14} /><span className="text-xs">Polling</span>
-                        </div>
-                      )
-                      const { poll, votes } = entry
-                      const totalVotes = votes.length
-                      const myVotes    = votes.filter(v => v.voter_id === user?.id).map(v => v.option_id)
-                      const canClose   = !poll.is_closed && (poll.creator_id === user?.id || canPin)
-                      return (
-                        <div className={clsx(
-                          'rounded-xl overflow-hidden mb-1 min-w-[200px]',
-                          isMe ? 'bg-white/10' : 'bg-gray-50 border border-gray-100'
-                        )}>
-                          <div className="px-3 pt-2.5 pb-1">
-                            <div className="flex items-start gap-1.5 mb-2">
-                              <BarChart2 size={13} className={clsx('mt-0.5 flex-shrink-0', isMe ? 'text-primary' : 'text-secondary')} />
-                              <p className={clsx('text-xs font-bold leading-tight', isMe ? 'text-white' : 'text-gray-800')}>
-                                {poll.question}
-                              </p>
-                            </div>
-                            {poll.options.map(opt => {
-                              const count   = votes.filter(v => v.option_id === opt.id).length
-                              const pct     = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0
-                              const voted   = myVotes.includes(opt.id)
-                              return (
-                                <button key={opt.id} disabled={poll.is_closed}
-                                  onClick={() => !poll.is_closed && votePoll(poll, opt.id)}
-                                  className={clsx(
-                                    'w-full text-left mb-1.5 rounded-lg overflow-hidden transition-opacity',
-                                    poll.is_closed ? 'cursor-default' : 'active:opacity-70'
-                                  )}>
-                                  <div className={clsx(
-                                    'relative px-2.5 py-1.5',
-                                    isMe
-                                      ? (voted ? 'bg-primary/30' : 'bg-white/10')
-                                      : (voted ? 'bg-secondary/10' : 'bg-gray-100')
-                                  )}>
-                                    {/* progress bar */}
-                                    <div
-                                      className={clsx(
-                                        'absolute inset-0 origin-left transition-all duration-500',
-                                        isMe ? 'bg-primary/20' : 'bg-secondary/10'
-                                      )}
-                                      style={{ transform: `scaleX(${pct / 100})` }}
-                                    />
-                                    <div className="relative flex items-center justify-between gap-2">
-                                      <div className="flex items-center gap-1.5 min-w-0">
-                                        {voted
-                                          ? <CheckSquare size={12} className={isMe ? 'text-primary flex-shrink-0' : 'text-secondary flex-shrink-0'} />
-                                          : <Square size={12} className={clsx('flex-shrink-0', isMe ? 'text-white/40' : 'text-gray-400')} />}
-                                        <span className={clsx('text-[11px] font-semibold truncate', isMe ? 'text-white' : 'text-gray-700')}>
-                                          {opt.text}
-                                        </span>
-                                      </div>
-                                      <span className={clsx('text-[10px] font-bold flex-shrink-0', isMe ? 'text-primary' : 'text-secondary')}>
-                                        {pct}%
-                                      </span>
-                                    </div>
-                                  </div>
-                                </button>
-                              )
-                            })}
-                          </div>
-                          <div className={clsx(
-                            'px-3 py-1.5 flex items-center justify-between',
-                            isMe ? 'bg-white/5' : 'bg-gray-100/80'
-                          )}>
-                            <span className={clsx('text-[9px]', isMe ? 'text-white/40' : 'text-gray-400')}>
-                              {totalVotes} suara · {poll.is_multiple_choice ? 'multi pilihan' : '1 pilihan'}
-                            </span>
-                            {poll.is_closed
-                              ? <span className="flex items-center gap-0.5 text-[9px] text-red-400 font-semibold">
-                                  <Lock size={8} /> Ditutup
-                                </span>
-                              : canClose && (
-                                  <button onClick={() => closePoll(poll)}
-                                    className={clsx('text-[9px] font-semibold', isMe ? 'text-primary' : 'text-secondary')}>
-                                    Tutup Polling
-                                  </button>
-                                )}
-                          </div>
-                        </div>
-                      )
-                    })()}
-
-                    {/* TEXT (dengan highlight @mention sesi 20) */}
-                    {msg.type === 'text' && (() => {
-                      const content = msg.content ?? ''
-                      // Split by pola "@<Nama Panjang> " — match nama huruf/spasi/titik/dash sampai space atau EOL
-                      const parts = content.split(/(@[A-Za-z][A-Za-z0-9._\- ]*?(?=\s|$|[.,!?]))/g)
-                      return (
-                        <p className="leading-relaxed whitespace-pre-wrap break-words">
-                          {parts.map((chunk, i) => chunk.startsWith('@')
-                            ? <span key={i} className={clsx('font-semibold rounded px-0.5', isMe ? 'text-primary bg-white/10' : 'text-secondary bg-secondary/10')}>{chunk}</span>
-                            : chunk)}
-                        </p>
-                      )
-                    })()}
-
-                    {/* DRIVER ACTION CARD */}
-                    {isDriverAction && (
-                      <DriverActionCard
-                        rawContent={msg.content ?? ''}
-                        currentRole={user?.role}
-                        busy={actionBusy[msg.id] ?? false}
-                        onApprove={payload => handleDriverAction(msg.id, 'approved', payload)}
-                        onReject={payload => handleDriverAction(msg.id, 'rejected', payload)}
-                        onActivate={payload => handleDriverAction(msg.id, 'active', payload)}
-                      />
-                    )}
-
-                    {/* QUEUE ACTION CARD */}
-                    {isQueueAction && (
-                      <QueueActionCard
-                        rawContent={msg.content ?? ''}
-                        currentRole={user?.role}
-                        busy={actionBusy[msg.id] ?? false}
-                        onApprove={payload => handleQueueAction(msg.id, 'approved', payload)}
-                        onReject={payload => handleQueueAction(msg.id, 'rejected', payload)}
-                        onComplete={payload => handleQueueAction(msg.id, 'done', payload)}
-                      />
-                    )}
-
-                    {/* SALDO REQUEST (P2.3) */}
-                    {msg.type === 'saldo_request' && (
-                      <SaldoRequestCard
-                        raw={msg.content ?? ''}
-                        messageId={msg.id}
-                        currentUserId={user!.id}
-                        currentUserRole={user!.role}
-                      />
-                    )}
-
-                    {/* DRIVER QUEUE (P3.3) */}
-                    {msg.type === 'driver_queue' && (
-                      <DriverQueueCard raw={msg.content ?? ''} />
-                    )}
-
-                    <div className={clsx('flex items-center gap-1 mt-1', isMe ? 'justify-end' : 'justify-start')}>
-                      <p className={clsx('text-[9px]', isMe ? 'text-white/50' : 'text-gray-300')}>
-                        {new Date(msg.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                      {isMe && (() => {
-                        const summ = readSummary[msg.id]
-                        const total = summ?.total_recipients ?? 0
-                        const read = summ?.read_count ?? 0
-                        // 1 centang = terkirim, 2 abu = dibaca sebagian, 2 biru = dibaca semua
-                        // total=0 (chat pribadi baru dst) → tampil 1 centang saja
-                        const allRead = total > 0 && read >= total
-                        const partial = read > 0 && !allRead
-                        return (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openReadersModal(msg.id) }}
-                            className="flex items-center hover:opacity-80"
-                            title={total > 0 ? `${read}/${total} sudah baca` : 'Terkirim'}
-                          >
-                            {allRead
-                              ? <CheckCheck size={11} className="text-sky-300" />
-                              : partial
-                                ? <CheckCheck size={11} className="text-white/50" />
-                                : <Check size={11} className="text-white/50" />}
-                          </button>
-                        )
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* Reaction bubbles */}
-                  {rxGroups.length > 0 && (
-                    <div className={clsx('flex flex-wrap gap-1 mt-1', isMe ? 'justify-end' : 'justify-start')}>
-                      {rxGroups.map(({ emoji, count, mine }) => (
-                        <button
-                          key={emoji}
-                          onClick={() => toggleReaction(msg.id, emoji)}
-                          className={clsx(
-                            'flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-colors',
-                            mine
-                              ? 'bg-primary/20 text-secondary ring-1 ring-primary/40'
-                              : 'bg-white shadow-sm text-gray-600 hover:bg-gray-100'
-                          )}>
-                          <span>{emoji}</span>
-                          {count > 1 && <span>{count}</span>}
-                        </button>
-                      ))}
-                      {/* Tambah reaksi */}
-                      <button
-                        onClick={() => setActionMenu({ msgId: msg.id, isMe, content: msg.content })}
-                        className="flex items-center px-1.5 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
-                        <SmilePlus size={12} className="text-gray-400" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* ── Attachment preview ────────────────────────────────────────── */}
-          {pendingFile && (
-            <div className="bg-gray-50 border-t border-gray-200 px-3 py-2 flex-shrink-0">
-              {pendingPreview ? (
-                <div className="relative w-20 h-20">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={pendingPreview} alt="preview" className="w-full h-full object-cover rounded-xl shadow" />
-                  <button onClick={clearPendingFile}
-                    className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center shadow">
-                    <X size={11} strokeWidth={3} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 shadow-sm max-w-xs">
-                  <FileText size={18} className="text-blue-500 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-gray-700 truncate">{pendingFile.name}</p>
-                    <p className="text-[10px] text-gray-400">{formatFileSize(pendingFile.size)}</p>
-                  </div>
-                  <button onClick={clearPendingFile}><X size={14} className="text-gray-400" /></button>
-                </div>
-              )}
-            </div>
+          {user && (
+            <WorkspaceTimeline
+              ref={bottomRef}
+              messages={messages}
+              user={user}
+              reactions={reactions}
+              polls={polls}
+              readSummary={readSummary}
+              actionBusy={actionBusy}
+              registerMessageRef={(id, el) => { msgRefs.current[id] = el }}
+              onOpenLightbox={setLightboxUrl}
+              onOpenReadersModal={openReadersModal}
+              onVotePoll={votePoll}
+              onClosePoll={closePoll}
+              onToggleReaction={toggleReaction}
+              onOpenActionMenu={setActionMenu}
+              onStartLongPress={startLongPress}
+              onCancelLongPress={cancelLongPress}
+              onDriverApprove={(id, p) => handleDriverAction(id, 'approved', p)}
+              onDriverReject={(id, p) => handleDriverAction(id, 'rejected', p)}
+              onDriverActivate={(id, p) => handleDriverAction(id, 'active', p)}
+              onQueueApprove={(id, p) => handleQueueAction(id, 'approved', p)}
+              onQueueReject={(id, p) => handleQueueAction(id, 'rejected', p)}
+              onQueueComplete={(id, p) => handleQueueAction(id, 'done', p)}
+            />
           )}
 
-          {/* ── Input bar ─────────────────────────────────────────────────── */}
-          {recording ? (
-            <div className="bg-red-50 border-t border-red-100 px-4 py-3 flex items-center gap-3 flex-shrink-0">
-              <button onClick={cancelRecording}
-                className="text-red-500 hover:text-red-700 flex-shrink-0"
-                title="Batal rekam">
-                <Trash size={22} />
-              </button>
-              <div className="flex-1 flex items-center gap-2 text-red-700 font-semibold">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
-                </span>
-                <span className="text-sm tabular-nums">
-                  {String(Math.floor(recSeconds / 60)).padStart(2, '0')}:
-                  {String(recSeconds % 60).padStart(2, '0')}
-                </span>
-                <span className="text-xs text-red-500">/ 01:00</span>
-              </div>
-              <button onClick={stopRecording}
-                className="bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-2xl flex-shrink-0"
-                title="Kirim rekaman">
-                <StopCircle size={20} />
-              </button>
-            </div>
-          ) : (
-            <div className="bg-white border-t border-gray-100 px-3 py-2.5 flex items-center gap-2 flex-shrink-0">
-              <button onClick={() => fileInputRef.current?.click()} disabled={uploading || sendingLocation || uploadingAudio}
-                className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
-                title="Kirim foto / file">
-                <Paperclip size={20} />
-              </button>
-              <button onClick={sendLocation} disabled={uploading || sendingLocation || pollSending || uploadingAudio}
-                className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-40 flex-shrink-0"
-                title="Kirim lokasi">
-                {sendingLocation
-                  ? <Loader2 size={18} className="animate-spin text-red-400" />
-                  : <MapPin size={20} />}
-              </button>
-              <button onClick={() => setPollSheet(true)} disabled={uploading || sendingLocation || pollSending || uploadingAudio}
-                className="text-gray-400 hover:text-secondary transition-colors disabled:opacity-40 flex-shrink-0"
-                title="Buat polling">
-                <BarChart2 size={20} />
-              </button>
-              {showSaldoRequestButton && (
-                <button onClick={() => setIsiSaldoSheet(true)}
-                  disabled={uploading || sendingLocation || pollSending || uploadingAudio}
-                  className="flex-shrink-0 flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors disabled:opacity-40"
-                  title="Pengajuan Isi Saldo">
-                  <Wallet size={16} />
-                  <span>Kirim Saldo</span>
-                </button>
-              )}
-              <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-                className="hidden" onChange={handleFileSelect} />
-              <div className="flex-1 relative">
-                {/* Dropdown mention autocomplete — muncul saat ketik @ diikuti nama.
-                    Include staff (roomMembers) + driver cabang (roomDrivers). */}
-                {mentionDropdown.open && (() => {
-                  const q = mentionDropdown.query.toLowerCase()
-                  const staffCand = roomMembers
-                    .filter((m: any) => m.user_id !== user?.id)
-                    .filter((m: any) => (m.user_profiles?.full_name ?? '').toLowerCase().includes(q))
-                    .slice(0, 6)
-                  const driverCand = roomDrivers
-                    .filter(d => (d.name ?? '').toLowerCase().includes(q))
-                    .slice(0, 4)
-                  if (staffCand.length === 0 && driverCand.length === 0) return null
-
-                  function insertAt(name: string, extraSuffix = '', userId?: string) {
-                    const before = text.slice(0, mentionDropdown.startPos)
-                    const afterAt = text.slice(mentionDropdown.startPos + 1 + mentionDropdown.query.length)
-                    const inserted = `@${name}${extraSuffix} `
-                    setText(before + inserted + afterAt)
-                    if (userId) {
-                      setMentionsPending(prev => prev.includes(userId) ? prev : [...prev, userId])
-                    }
-                    setMentionDropdown({ open: false, query: '', startPos: 0 })
-                    setTimeout(() => textInputRef.current?.focus(), 0)
-                  }
-
-                  return (
-                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-white rounded-xl shadow-lg border border-gray-100 max-h-72 overflow-y-auto z-10">
-                      {staffCand.length > 0 && (
-                        <div className="px-3 pt-1.5 pb-0.5 text-[9px] font-bold text-gray-400 uppercase">Staff</div>
-                      )}
-                      {staffCand.map((m: any) => {
-                        const p = m.user_profiles
-                        return (
-                          <button key={`s-${m.user_id}`}
-                            onClick={() => insertAt(p?.full_name ?? 'Staff', '', m.user_id)}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
-                          >
-                            <div className="w-7 h-7 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
-                              {(p?.full_name ?? '?').charAt(0)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-gray-800 truncate">{p?.full_name ?? 'Staff'}</p>
-                              <p className="text-[9px] text-gray-400 capitalize">{p?.role ?? ''}</p>
-                            </div>
-                          </button>
-                        )
-                      })}
-                      {driverCand.length > 0 && (
-                        <div className="px-3 pt-2 pb-0.5 text-[9px] font-bold text-gray-400 uppercase border-t border-gray-50 mt-1">Driver Cabang Ini</div>
-                      )}
-                      {driverCand.map(d => (
-                        <button key={`d-${d.id}`}
-                          onClick={() => insertAt(d.name, ` (${d.driver_id})`)}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
-                        >
-                          <div className="w-7 h-7 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center flex-shrink-0">
-                            <Truck size={12} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-gray-800 truncate">{d.name}</p>
-                            <p className="text-[9px] text-gray-400">ID {d.driver_id} · Driver</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )
-                })()}
-                <input
-                  ref={textInputRef}
-                  type="text"
-                  placeholder={pendingFile ? 'Tambah caption (opsional)...' : 'Ketik pesan... (@nama untuk tag)'}
-                  value={text}
-                  onChange={e => {
-                    const val = e.target.value
-                    setText(val)
-                    // Deteksi @ sebelum caret
-                    const caret = e.target.selectionStart ?? val.length
-                    const uptoCaret = val.slice(0, caret)
-                    const m = uptoCaret.match(/(?:^|\s)@([\w.\-]*)$/)
-                    if (m) {
-                      const startPos = caret - m[0].length + (m[0].startsWith(' ') ? 1 : 0)
-                      setMentionDropdown({ open: true, query: m[1] ?? '', startPos })
-                    } else {
-                      if (mentionDropdown.open) setMentionDropdown({ open: false, query: '', startPos: 0 })
-                    }
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Escape' && mentionDropdown.open) {
-                      setMentionDropdown({ open: false, query: '', startPos: 0 })
-                      return
-                    }
-                    if (e.key !== 'Enter') return
-                    pendingFile ? sendWithAttachment() : sendMessage()
-                  }}
-                  className="w-full bg-gray-100 rounded-2xl px-4 py-2.5 text-sm focus:outline-none"
-                  disabled={uploading || sendingLocation || pollSending || uploadingAudio}
-                />
-              </div>
-              {(text.trim() || pendingFile) ? (
-                <button
-                  onClick={() => pendingFile ? sendWithAttachment() : sendMessage()}
-                  disabled={sending || uploading}
-                  className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0">
-                  {uploading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} strokeWidth={2.5} />}
-                </button>
-              ) : (
-                <button
-                  onClick={startRecording} disabled={uploadingAudio}
-                  className="bg-primary text-secondary p-2.5 rounded-2xl disabled:opacity-40 transition-opacity flex-shrink-0"
-                  title="Rekam suara (max 60 detik)">
-                  {uploadingAudio ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} strokeWidth={2.5} />}
-                </button>
-              )}
-            </div>
-          )}
+          <WorkspaceComposer
+            text={text}
+            onTextChange={handleComposerTextChange}
+            disabled={composerDisabled}
+            sending={sending}
+            uploading={uploading}
+            sendingLocation={sendingLocation}
+            pollSending={pollSending}
+            uploadingAudio={uploadingAudio}
+            recording={recording}
+            recSeconds={recSeconds}
+            voiceMaxSeconds={VOICE_MAX_SECONDS}
+            pendingFile={pendingFile}
+            pendingPreview={pendingPreview}
+            fileInputRef={fileInputRef}
+            textInputRef={textInputRef}
+            showSaldoRequestButton={showSaldoRequestButton}
+            mentionDropdown={mentionDropdown}
+            roomMembers={roomMembers}
+            roomDrivers={roomDrivers}
+            currentUserId={user?.id}
+            onPickFile={() => fileInputRef.current?.click()}
+            onFileSelect={handleFileSelect}
+            onClearPendingFile={clearPendingFile}
+            onSendLocation={sendLocation}
+            onOpenPoll={() => setPollSheet(true)}
+            onOpenSaldo={() => setIsiSaldoSheet(true)}
+            onStartRecording={startRecording}
+            onStopRecording={stopRecording}
+            onCancelRecording={cancelRecording}
+            onSubmit={() => sendMessage()}
+            onSubmitAttachment={sendWithAttachment}
+            onInsertMention={insertMention}
+            onCloseMentionDropdown={() => setMentionDropdown({ open: false, query: '', startPos: 0 })}
+          />
         </div>
       </SwipeBackWrapper>
     )
   }
 
-  /* ===== ROOM LIST VIEW ===== */
+  /* ===== WORKSPACE DIRECTORY VIEW ===== */
   return (
     <AppShell>
       <div className="bg-secondary text-white px-4 pt-10 pb-5 sticky top-0 z-30">
         <div className="flex items-center gap-3 mb-3">
-          <Link href="/dashboard"><ArrowLeft size={22} className="text-white/70" /></Link>
+          <Link href="/dashboard" aria-label="Kembali ke dashboard">
+            <ArrowLeft size={22} className="text-white/70" />
+          </Link>
           <div className="flex-1"><MenalaLogo size={28} showText /></div>
         </div>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="font-black text-xl">Chat Room Staff</h1>
-            <p className="text-white/50 text-xs mt-0.5">Komunikasi cepat, koordinasi akurat</p>
+            <h1 className="font-black text-xl">Workspace Kolaborasi</h1>
+            <p className="text-white/50 text-xs mt-0.5">Koordinasi lintas cabang untuk operasi Saldo, Antrian, Driver, dan Absensi</p>
           </div>
           <div className="flex items-start gap-2 flex-shrink-0">
             <DateTimeStack />
@@ -2265,143 +1287,39 @@ function ChatPageInner() {
               onClick={openContactSheet}
               aria-label="Mulai chat pribadi dengan staff"
               title="Mulai chat pribadi"
-              className="bg-white/10 hover:bg-white/20 rounded-xl p-2 active:scale-95 transition-transform">
+              className="bg-white/10 hover:bg-white/20 rounded-xl p-2 active:scale-95 transition-transform"
+            >
               <Users size={18} className="text-white" />
             </button>
           </div>
         </div>
-        <div className="relative mt-3">
-          <Search className="absolute left-3 top-2.5 text-white/40" size={16} />
-          <input type="text" placeholder="Cari room atau pesan..." value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-white/10 text-white placeholder-white/40 text-sm pl-9 pr-3 py-2 rounded-xl border border-white/20 focus:outline-none" />
+        <div className="mt-3">
+          <WorkspaceSearch
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Cari workspace atau pesan..."
+          />
         </div>
       </div>
 
-      <div className="bg-white border-b border-gray-100 px-4 py-2 flex gap-2 overflow-x-auto sticky top-[8.5rem] z-20">
-        {(['semua', 'grup', 'lokasi', 'pribadi'] as FilterTab[]).map(cat => (
-          <button key={cat} onClick={() => setFilterTab(cat)}
-            className={clsx('flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold capitalize transition-colors',
-              filterTab === cat ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-500')}>
-            {cat}
-          </button>
-        ))}
-      </div>
+      <WorkspaceList
+        rooms={rooms}
+        filterTab={filterTab}
+        onFilterChange={setFilterTab}
+        searchQuery={searchQuery}
+        onOpenRoom={setActiveRoom}
+      />
 
-      <div className="px-4 py-3 space-y-2">
-        {(() => {
-          const q = searchQuery.trim().toLowerCase()
-          const filtered = rooms
-            .filter(r => matchesFilter(r, filterTab))
-            .filter(r => !q || r.name.toLowerCase().includes(q) || (r.last_message_content ?? '').toLowerCase().includes(q))
-          if (filtered.length === 0) {
-            return (
-              <div className="text-center py-10 text-gray-400">
-                <MessageCircle size={32} className="mx-auto mb-2 opacity-30" />
-                <p className="text-sm">{rooms.length === 0 ? 'Tidak ada room aktif' : 'Tidak ada room yang cocok'}</p>
-              </div>
-            )
-          }
-          return filtered.map(room => {
-            const style = getRoomStyle(room.category)
-            const prefs = getRoomPrefs(room.id)
-            const preview = room.last_message_content
-              ? (room.last_message_sender ? `${room.last_message_sender}: ${room.last_message_content}` : room.last_message_content)
-              : (room.description ?? 'Belum ada pesan')
-            return (
-              <button key={room.id} onClick={() => setActiveRoom(room)}
-                className="card w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform">
-                <div className={`w-11 h-11 rounded-full flex items-center justify-center font-black text-base flex-shrink-0 shadow-sm ${style.bg} ${style.text}`}>
-                  {room.name.charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {prefs.pinned && <Pin size={10} className="text-primary flex-shrink-0" />}
-                      {!prefs.notif && <BellOff size={10} className="text-gray-300 flex-shrink-0" />}
-                      <p className={clsx('font-bold text-sm truncate', room.unread_count > 0 ? 'text-gray-900' : 'text-gray-800')}>
-                        {room.name}
-                      </p>
-                    </div>
-                    <span className={clsx('text-[10px] flex-shrink-0', room.unread_count > 0 ? 'text-primary font-bold' : 'text-gray-400')}>
-                      {formatTime(room.last_message_at)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 mt-0.5">
-                    <p className={clsx('text-xs truncate flex-1', room.unread_count > 0 ? 'text-gray-700 font-semibold' : 'text-gray-400')}>
-                      {preview}
-                    </p>
-                    {room.unread_count > 0 && (
-                      <span className="flex-shrink-0 bg-primary text-secondary text-[10px] font-bold min-w-[18px] h-[18px] px-1.5 rounded-full flex items-center justify-center">
-                        {room.unread_count > 99 ? '99+' : room.unread_count}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
-            )
-          })
-        })()}
-        <div className="pt-4 text-center">
-          <p className="text-[10px] text-gray-400">Hanya peserta yang diundang dapat bergabung • Data terenkripsi end-to-end</p>
-        </div>
-      </div>
-
-      {/* Kontak sheet — daftar staff aktif untuk mulai chat pribadi */}
       {contactSheet && (
-        <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={() => setContactSheet(false)}>
-          <div
-            className="bg-white rounded-t-3xl w-full max-w-md mx-auto pt-4 max-h-[85vh] flex flex-col"
-            style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="flex justify-center pb-2">
-              <div className="w-10 h-1 bg-gray-200 rounded-full" />
-            </div>
-            <div className="px-5 flex items-center justify-between mb-3">
-              <div>
-                <h2 className="font-bold text-gray-800">Kontak Staff</h2>
-                <p className="text-[11px] text-gray-400">Ketuk untuk mulai chat pribadi</p>
-              </div>
-              <button onClick={() => setContactSheet(false)}><X size={20} className="text-gray-400" /></button>
-            </div>
-            <div className="px-5 pb-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-2.5 text-gray-400" />
-                <input type="text" placeholder="Cari nama / ID staff..." value={contactSearch}
-                  onChange={e => setContactSearch(e.target.value)}
-                  className="input pl-9 text-sm w-full" />
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto px-3">
-              {contactLoading && <p className="text-center text-gray-400 text-sm py-6">Memuat...</p>}
-              {!contactLoading && (() => {
-                const filtered = contactList.filter(u =>
-                  !contactSearch ||
-                  u.full_name.toLowerCase().includes(contactSearch.toLowerCase()) ||
-                  u.staff_id.toLowerCase().includes(contactSearch.toLowerCase())
-                )
-                if (filtered.length === 0) {
-                  return <p className="text-center text-gray-400 text-sm py-6">Tidak ada staff cocok.</p>
-                }
-                return filtered.map(u => (
-                  <button key={u.id} onClick={() => startPribadiChat(u.id)} disabled={openingPribadi === u.id}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 active:bg-gray-100 disabled:opacity-60 text-left">
-                    <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
-                      {u.full_name?.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{u.full_name}</p>
-                      <p className="text-[11px] text-gray-400 capitalize truncate">{u.staff_id} • {u.role} • {u.branches?.name ?? '—'}</p>
-                    </div>
-                    {openingPribadi === u.id
-                      ? <Loader2 size={16} className="animate-spin text-primary flex-shrink-0" />
-                      : <MessageCircle size={16} className="text-gray-300 flex-shrink-0" />}
-                  </button>
-                ))
-              })()}
-            </div>
-          </div>
-        </div>
+        <WorkspaceContactSheet
+          loading={contactLoading}
+          contacts={contactList}
+          search={contactSearch}
+          openingId={openingPribadi}
+          onSearchChange={setContactSearch}
+          onStartPribadi={startPribadiChat}
+          onClose={() => setContactSheet(false)}
+        />
       )}
     </AppShell>
   )

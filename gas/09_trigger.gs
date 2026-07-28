@@ -160,11 +160,12 @@ function onEdit(e) {
     logActivity(user, 'edit_absensi', `Cell: ${e.range.getA1Notation()}`)
   } else if (sheet === CONFIG.SHEETS.ORDER) {
     logActivity(user, 'edit_order', `Cell: ${e.range.getA1Notation()}`)
-  } else if (sheet === 'Form Isi Saldo') {
-    // Hook admin centang checkbox "Sudah Diisi" (kolom G).
-    // handleSaldoCheckboxEdit_ di 16_saldo_sync.gs handle detail.
-    try { handleSaldoCheckboxEdit_(e) } catch (err) {
-      logSistem('error', 'onEdit:saldo', 'error', err.message)
-    }
   }
+  // Sesi 22 — Hook `handleSaldoCheckboxEdit_` DIHAPUS dari onEdit.
+  // Alur "admin centang di sheet → PATCH Supabase" tidak lagi jadi
+  // jalur CRUD operasional (spec baru: sheet cuma otomatisasi dokumen
+  // pasif). Finance Dashboard PWA /finance mengambil alih peran ini.
+  // Function-nya sendiri di 16_saldo_sync.gs sengaja disimpan sebagai
+  // referensi historis + kalau perlu bulk backfill manual, tapi tidak
+  // lagi dipanggil dari onEdit.
 }

@@ -151,12 +151,24 @@ function syncSaldoRequestsToSheet() {
 }
 
 /**
- * onEdit checkbox "Sudah Diisi" — dipanggil dari onEdit trigger `onEdit`
- * di 09_trigger.gs (sudah ada, extend). Kalau centang kolom G ("Sudah Diisi")
+ * @deprecated sesi 22 — jalur "admin centang sheet → PATCH Supabase" TIDAK
+ * lagi dipakai. Finance Dashboard PWA /finance yang menangani centang
+ * "Lunas" via `markSaldoRequestProcessed`. Function ini disimpan sebagai
+ * referensi historis + boleh dipanggil manual dari Script Editor untuk
+ * backfill; tidak lagi wire ke onEdit di 09_trigger.gs.
+ *
+ * onEdit checkbox "Sudah Diisi" — kalau centang kolom G ("Sudah Diisi")
  * berubah ke true, PATCH is_processed=true di Supabase (trigger DB akan
- * dispatch push + auto-chat + update TARGET STAFF nanti).
+ * dispatch push + auto-chat + update TARGET STAFF).
  */
 function handleSaldoCheckboxEdit_(e) {
+  // Guard: kalau dipanggil dari onEdit sesudah sesi 22, log deprecation.
+  // Manual invocation (bulk backfill) tetap dilewatkan.
+  if (e && e.triggerUid) {
+    logSistem('warning', 'handleSaldoCheckboxEdit_', 'deprecated',
+      'Sheet write-back sudah dinonaktifkan. Pakai Finance Dashboard /finance.')
+    return
+  }
   try {
     const sheet = e.range.getSheet()
     if (sheet.getName() !== SALDO_SHEET_NAME) return

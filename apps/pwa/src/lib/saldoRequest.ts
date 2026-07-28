@@ -244,6 +244,20 @@ export async function rejectSaldoRequest(requestId: string, approverId: string, 
   return { ok: true }
 }
 
+/**
+ * Tandai pengajuan saldo LUNAS oleh Finance/admin.
+ *
+ * SSOT lifecycle Paid ada di kolom `is_processed`, `processed_at`,
+ * `processed_by`, `note`. Trigger DB `raos_saldo_after_processed`
+ * (SECURITY DEFINER) mengambil alih efek samping "kelas Paid":
+ *   - push notif langsung ke staff pemilik request
+ *   - auto-chat "Terima kasih" ke room driver cabang
+ *   - snapshot progress KPI ke chat pribadi staff
+ *
+ * Client tetap post system message ke room Saldo tempat request
+ * berada (chat_room_id) supaya history di room itu utuh. Jangan
+ * invokePush langsung — akan double dengan trigger.
+ */
 export async function markSaldoRequestProcessed(requestId: string, adminId: string, note?: string, messageId?: string): Promise<{ ok: boolean; error?: string }> {
   const { data: row, error } = await supabase
     .from('raos_saldo_requests')
@@ -252,13 +266,18 @@ export async function markSaldoRequestProcessed(requestId: string, adminId: stri
       is_processed: true,
       processed_at: new Date().toISOString(),
       processed_by: adminId,
-      admin_note: note ?? null,
+      note: note ?? null,
     })
     .eq('id', requestId)
     .select('staff_id, request_no, nominal, chat_room_id')
     .single()
   if (error) return { ok: false, error: error.message }
-  await syncSaldoRequestMessageStatus(messageId, 'approved', { is_processed: true, processed_at: new Date().toISOString(), processed_by: adminId, admin_note: note ?? null })
+  await syncSaldoRequestMessageStatus(messageId, 'approved', {
+    is_processed: true,
+    processed_at: new Date().toISOString(),
+    processed_by: adminId,
+    note: note ?? null,
+  })
   if (row?.chat_room_id) {
     void postSaldoSystemMessage({
       roomId: row.chat_room_id,
@@ -267,16 +286,6 @@ export async function markSaldoRequestProcessed(requestId: string, adminId: stri
       nominal: Number(row.nominal),
       status: 'processed',
       note: note ?? 'Saldo sudah diisi oleh admin.',
-    })
-  }
-  if (row?.staff_id) {
-    void invokePush({
-      user_ids: [row.staff_id],
-      title: 'Saldo Sudah Diisi oleh Admin',
-      body: `${row.request_no} telah selesai diisi oleh admin.`,
-      url: '/riwayat',
-      tag: `saldo-processed-${requestId}`,
-      kategori: 'pengumuman',
     })
   }
   return { ok: true }

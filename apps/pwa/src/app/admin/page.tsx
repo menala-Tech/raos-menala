@@ -15,6 +15,7 @@ import type { UserProfile, Branch } from '@/types'
 import { logActivity } from '@/lib/activity'
 import { invokePush } from '@/lib/pushClient'
 import AnnouncementBroadcast from '@/components/AnnouncementBroadcast'
+import NotificationStatsPanel from '@/components/NotificationStatsPanel'
 
 type Tab = 'validasi' | 'staff'
 type StaffRole = 'direksi' | 'admin' | 'management' | 'koordinator' | 'staff'
@@ -211,6 +212,13 @@ export default function AdminPage() {
           </>
         )}
       </div>
+
+      {/* Notification Engine metrics — admin/mgmt/direksi */}
+      {isAdmin && (
+        <div className="px-4 pt-3">
+          <NotificationStatsPanel />
+        </div>
+      )}
 
       {/* Broadcast Pengumuman — admin/mgmt/direksi */}
       {isAdmin && user && (

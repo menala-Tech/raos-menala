@@ -16,9 +16,10 @@ interface SaldoContent {
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
   is_processed?: boolean
   driver_login_id?: string | null // baru — ID Login (mis. 200878173)
- driver_name?: string | null
-requested_at?: string | null
-processed_at?: string | null
+  driver_name?: string | null
+  driver_branch_name?: string | null // baru — cabang driver (bisa beda dari cabang staff)
+  requested_at?: string | null
+  processed_at?: string | null
 }
 
 interface Props {
@@ -138,16 +139,16 @@ export default function SaldoRequestCard({ raw, messageId, currentUserId, curren
         </span>
       </div>
       <div className="space-y-0.5 text-xs">
-        <div className="flex justify-between"><span className="text-gray-500">Staff</span><span className="font-medium">{data.staff_name}</span></div>
-        {data.branch_name && (
-          <div className="flex justify-between"><span className="text-gray-500">Cabang</span><span className="font-medium truncate max-w-[160px] text-right">{data.branch_name}</span></div>
+        {live.driver_login_id && (
+          <div className="flex justify-between"><span className="text-gray-500">ID Driver</span><span className="font-mono text-[11px]">{live.driver_login_id}</span></div>
         )}
         {live.driver_name && (
-          <div className="flex justify-between"><span className="text-gray-500">Driver</span><span className="font-medium truncate max-w-[160px] text-right">{live.driver_name}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Nama Driver</span><span className="font-medium truncate max-w-[160px] text-right">{live.driver_name}</span></div>
         )}
-        {live.driver_login_id && (
-          <div className="flex justify-between"><span className="text-gray-500">ID Login</span><span className="font-mono text-[11px]">{live.driver_login_id}</span></div>
+        {(data.driver_branch_name || data.branch_name) && (
+          <div className="flex justify-between"><span className="text-gray-500">Cabang</span><span className="font-medium truncate max-w-[160px] text-right">{data.driver_branch_name ?? data.branch_name}</span></div>
         )}
+        <div className="flex justify-between"><span className="text-gray-500">Staff</span><span className="font-medium">{data.staff_name}</span></div>
         {data.requested_at && (
           <div className="flex justify-between">
             <span className="text-gray-500">Waktu</span>

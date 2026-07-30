@@ -1,11 +1,18 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { X, Wallet, Loader2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { X, Wallet, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { submitIsiSaldo } from '@/lib/saldoRequest'
 
-interface Driver { id: string; driver_id: string; name: string; branch_id: string | null }
+interface DriverLookup {
+  id: string
+  driver_id: string
+  name: string
+  branch_id: string | null
+  branches?: { name: string | null } | null
+}
+
 interface Props {
   userId: string
   userFullName: string
@@ -19,47 +26,60 @@ interface Props {
 }
 
 /**
- * BottomSheet form Pengajuan Isi Saldo (mirip Polling toggle).
- * Field:
- * - Nominal picker (dari branches.saldo_nominal_options)
- * - Driver dropdown (raos_drivers WHERE branch_id = user.branch_id, is_active)
- *   → auto-fill Nama + ID Login saat pilih
- * - Nama Staff (auto-filled, read-only)
- * - Cabang (auto-filled, read-only)
+ * BottomSheet form Pengajuan Isi Saldo (input manual driver ID + auto-lookup).
+ * Per feedback user 30 Juli 2026 sore, dropdown driver diganti input teks:
+ *  - ID Driver (input manual — mis. "M6X1U")
+ *  - Nama Driver (otomatis dari lookup raos_drivers.driver_id)
+ *  - Cabang Driver (otomatis)
+ *  - Staff (otomatis dari user login)
+ *  - Nominal (pilihan chip sesuai branches.saldo_nominal_options)
+ *
+ * Kalau ID Driver tidak ketemu di raos_drivers, submit di-block.
  */
 export default function IsiSaldoBottomSheet({
   userId, userFullName, branchId, branchSlug, branchName,
   branchNominalOptions, roomId, onClose, onSubmitted,
 }: Props) {
-  const [drivers, setDrivers] = useState<Driver[]>([])
-  const [loadingDrivers, setLoadingDrivers] = useState(true)
-  const [selectedDriverId, setSelectedDriverId] = useState('')
+  const [driverIdInput, setDriverIdInput] = useState('')
+  const [driver, setDriver] = useState<DriverLookup | null>(null)
+  const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle')
   const [selectedNominal, setSelectedNominal] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const debounceRef = useRef<number | null>(null)
+
   const branchSlugStr = branchSlug ?? undefined
   const branchNameStr = branchName ?? undefined
 
   useEffect(() => {
-    if (!branchId) { setLoadingDrivers(false); return }
-    supabase.from('raos_drivers')
-      .select('id, driver_id, name, branch_id')
-      .eq('is_active', true)
-      .eq('branch_id', branchId)
-      .order('name')
-      .then(({ data }) => {
-        setDrivers((data ?? []) as Driver[])
-        setLoadingDrivers(false)
-      })
-  }, [branchId])
-
-  const selectedDriver = drivers.find(d => d.id === selectedDriverId) ?? null
+    if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    const q = driverIdInput.trim()
+    if (!q) { setDriver(null); setLookupState('idle'); return }
+    setLookupState('searching')
+    debounceRef.current = window.setTimeout(async () => {
+      const { data } = await supabase
+        .from('raos_drivers')
+        .select('id, driver_id, name, branch_id, branches(name)')
+        .eq('is_active', true)
+        .ilike('driver_id', q)
+        .limit(1)
+        .maybeSingle()
+      if (data) {
+        setDriver(data as unknown as DriverLookup)
+        setLookupState('found')
+      } else {
+        setDriver(null)
+        setLookupState('not_found')
+      }
+    }, 400)
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current) }
+  }, [driverIdInput])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    if (!driver) { setError('ID Driver tidak valid. Cek ejaan atau minta admin daftarkan driver dulu.'); return }
     if (!selectedNominal) { setError('Pilih nominal dulu.'); return }
-    if (!selectedDriver) { setError('Pilih driver dulu.'); return }
     setSubmitting(true)
 
     const clientMsgId = crypto.randomUUID()
@@ -68,21 +88,15 @@ export default function IsiSaldoBottomSheet({
       fullName: userFullName, roomId, clientMsgId,
       nominal: selectedNominal,
       allowedNominals: branchNominalOptions,
+      driverIdRef: driver.id,
+      driverLoginId: driver.driver_id,
+      driverName: driver.name,
+      driverBranchName: driver.branches?.name ?? null,
     })
     if (!result.ok) {
       setSubmitting(false)
       setError(result.error ?? 'Gagal ajukan isi saldo')
       return
-    }
-    // Update row dengan driver info (submit lib default null)
-    if (result.requestId) {
-      await supabase.from('raos_saldo_requests')
-        .update({
-          driver_id: selectedDriver.id,
-          driver_login_id: selectedDriver.driver_id,
-          driver_name: selectedDriver.name,
-        })
-        .eq('id', result.requestId)
     }
     setSubmitting(false)
     onSubmitted()
@@ -104,43 +118,53 @@ export default function IsiSaldoBottomSheet({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Staff + Cabang auto-filled read-only */}
+          {/* ID Driver — input manual */}
+          <div>
+            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+              ID Driver *
+            </label>
+            <input
+              type="text"
+              value={driverIdInput}
+              onChange={e => setDriverIdInput(e.target.value.toUpperCase())}
+              placeholder="Contoh: M6X1U"
+              className="input font-mono"
+              autoFocus
+              autoComplete="off"
+            />
+            {lookupState === 'searching' && (
+              <p className="text-[11px] text-gray-400 mt-1 flex items-center gap-1">
+                <Loader2 size={11} className="animate-spin" /> Mencari driver...
+              </p>
+            )}
+            {lookupState === 'found' && driver && (
+              <div className="mt-1.5 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-3 py-2 flex items-start gap-2">
+                <CheckCircle2 size={14} className="text-green-600 mt-0.5 flex-shrink-0" />
+                <div className="text-[11px] leading-tight">
+                  <p className="font-semibold text-green-800 dark:text-green-200">{driver.name}</p>
+                  <p className="text-green-700 dark:text-green-300">
+                    Cabang: {driver.branches?.name ?? 'tidak diketahui'}
+                  </p>
+                </div>
+              </div>
+            )}
+            {lookupState === 'not_found' && (
+              <p className="text-[11px] text-red-600 mt-1 flex items-center gap-1">
+                <AlertCircle size={11} /> ID Driver tidak ditemukan. Cek ejaan.
+              </p>
+            )}
+          </div>
+
+          {/* Staff + Cabang Staff auto */}
           <div className="grid grid-cols-2 gap-2">
             <div className="card !p-2.5">
               <p className="text-[10px] font-bold text-gray-500 uppercase">Staff</p>
               <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{userFullName}</p>
             </div>
             <div className="card !p-2.5">
-              <p className="text-[10px] font-bold text-gray-500 uppercase">Cabang</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase">Cabang Staff</p>
               <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{branchName ?? '-'}</p>
             </div>
-          </div>
-
-          {/* Driver picker */}
-          <div>
-            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
-              Driver *
-            </label>
-            <select
-              value={selectedDriverId}
-              onChange={e => setSelectedDriverId(e.target.value)}
-              disabled={loadingDrivers}
-              className="input">
-              <option value="">{loadingDrivers ? 'Memuat driver...' : `Pilih driver (${drivers.length})`}</option>
-              {drivers.map(d => (
-                <option key={d.id} value={d.id}>{d.name} — {d.driver_id}</option>
-              ))}
-            </select>
-            {selectedDriver && (
-              <p className="text-[11px] text-gray-500 mt-1">
-                ID Login: <span className="font-mono">{selectedDriver.driver_id}</span>
-              </p>
-            )}
-            {!loadingDrivers && drivers.length === 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">
-                Tidak ada driver aktif di cabang ini. Hubungi admin untuk sync SSOT.
-              </p>
-            )}
           </div>
 
           {/* Nominal picker */}
@@ -171,7 +195,7 @@ export default function IsiSaldoBottomSheet({
           {error && <p className="text-red-500 text-xs bg-red-50 py-2 px-3 rounded-lg">{error}</p>}
 
           <button type="submit"
-            disabled={submitting || !selectedDriver || !selectedNominal}
+            disabled={submitting || !driver || !selectedNominal}
             className="btn-primary flex items-center justify-center gap-2 disabled:opacity-50">
             {submitting ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
             {submitting ? 'Mengirim...' : 'Kirim Pengajuan'}

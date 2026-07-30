@@ -56,6 +56,13 @@ interface SubmitOpts {
   clientMsgId: string
   nominal: number
   allowedNominals: number[]
+  // Driver info — wajib per feedback 30 Juli 2026 sore. Input manual driver_id
+  // di IsiSaldoBottomSheet, di-lookup dulu ke raos_drivers. Kalau null berarti
+  // caller belum lookup — di sini kita validate & block.
+  driverIdRef?: string | null       // raos_drivers.id (UUID)
+  driverLoginId?: string | null     // raos_drivers.driver_id (text yang di-input user)
+  driverName?: string | null        // raos_drivers.name
+  driverBranchName?: string | null  // opsional snapshot cabang driver
 }
 
 async function postSaldoSystemMessage(opts: {
@@ -94,10 +101,14 @@ function newRequestNo(nominal: number): string {
 }
 
 export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
-  const { userId, branchId, branchSlug, branchName, fullName, roomId, clientMsgId, nominal, allowedNominals } = opts
+  const { userId, branchId, branchSlug, branchName, fullName, roomId, clientMsgId, nominal, allowedNominals,
+          driverIdRef, driverLoginId, driverName, driverBranchName } = opts
 
   if (!branchId) {
     return { ok: false, error: 'Cabang tidak diketahui — hubungi admin untuk set branch di /admin.' }
+  }
+  if (!driverIdRef || !driverLoginId || !driverName) {
+    return { ok: false, error: 'Driver wajib diisi. Ketik ID Driver dulu (mis. M6X1U) untuk auto-lookup nama & cabang.' }
   }
   if (allowedNominals.length > 0 && !allowedNominals.includes(nominal)) {
     return {
@@ -135,6 +146,9 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
       nominal,
       status: 'pending',
       chat_room_id: targetRoomId,
+      driver_id: driverIdRef,
+      driver_login_id: driverLoginId,
+      driver_name: driverName,
     })
     .select('id, request_no')
     .single()
@@ -153,6 +167,10 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
     nominal,
     status: 'pending',
     requested_at: new Date().toISOString(),
+    // Driver snapshot untuk render card tanpa join tambahan di client
+    driver_login_id: driverLoginId,
+    driver_name: driverName,
+    driver_branch_name: driverBranchName ?? null,
   })
 
   const { data: msg, error: msgErr } = await supabase

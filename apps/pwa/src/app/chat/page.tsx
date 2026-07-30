@@ -131,6 +131,9 @@ function ChatPageInner() {
   const [readersList, setReadersList] = useState<Array<{ user_id: string; full_name: string; avatar_url: string | null; read_at: string }>>([])
   const [readersLoading, setReadersLoading] = useState(false)
   const markedReadRef = useRef<Set<string>>(new Set())
+  // Track current room id untuk race-guard di loadMessages — kalau user
+  // sudah pindah room sebelum fetch return, jangan set state room lama.
+  const activeRoomIdRef = useRef<string | null>(null)
 
   const [recording, setRecording] = useState(false)
   const [recSeconds, setRecSeconds] = useState(0)
@@ -239,6 +242,9 @@ function ChatPageInner() {
     if (clearedBefore) q = q.gt('created_at', clearedBefore)
     const { data } = await q.order('created_at').limit(50)
     const rows = data ?? []
+    // Race guard: kalau user sudah pindah ke room lain sebelum fetch return,
+    // jangan setMessages pakai data room lama (bikin bubble stale).
+    if (activeRoomIdRef.current !== roomId) return
     setMessages(rows)
     setTimeout(() => bottomRef.current?.scrollIntoView(), 100)
     if (user?.id) {
@@ -333,13 +339,20 @@ function ChatPageInner() {
 
   useEffect(() => {
     if (!activeRoom) {
+      activeRoomIdRef.current = null
       setActiveRoomBranch(null)
       setIsiSaldoSheet(false)
       setAntrianDriverSheet(false)
       return
     }
-    setReactions({})
-    setPinnedMsg(null)
+    // Update roomId ref (dipakai loadMessages sebagai race-guard supaya
+    // fetch late dari room sebelumnya tidak setMessages ke UI room baru).
+    activeRoomIdRef.current = activeRoom.id
+    // Jangan reset messages/reactions/pinned di sini — bikin UI kosong ~200ms
+    // sampai loadMessages selesai fetch dari network (lag pindah room feel).
+    // loadMessages akan panggil setMessages(rows) yang overwrite full array.
+    // Reset kecil (readSummary, markedReadRef) tetap dibutuhkan karena
+    // itu per-message dan bisa clash antar room.
     setReadSummary({})
     markedReadRef.current = new Set()
     setRoomPrefs(getRoomPrefs(activeRoom.id))

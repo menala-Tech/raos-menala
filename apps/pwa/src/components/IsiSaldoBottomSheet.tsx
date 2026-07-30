@@ -10,7 +10,7 @@ interface DriverLookup {
   driver_id: string
   name: string
   branch_id: string | null
-  branches?: { name: string | null } | null
+  branch_name?: string | null
 }
 
 interface Props {
@@ -57,15 +57,25 @@ export default function IsiSaldoBottomSheet({
     if (!q) { setDriver(null); setLookupState('idle'); return }
     setLookupState('searching')
     debounceRef.current = window.setTimeout(async () => {
+      // Simple query — no branches join (join bisa gagal silently kalau RLS
+      // branches block, atau kalau tidak ada FK relationship di schema
+      // cache Supabase). Fetch branch name terpisah setelah driver ketemu.
       const { data } = await supabase
         .from('raos_drivers')
-        .select('id, driver_id, name, branch_id, branches(name)')
+        .select('id, driver_id, name, branch_id')
         .eq('is_active', true)
         .ilike('driver_id', q)
         .limit(1)
         .maybeSingle()
       if (data) {
-        setDriver(data as unknown as DriverLookup)
+        // Fetch branch name terpisah (silent kalau gagal)
+        let branchName: string | null = null
+        if (data.branch_id) {
+          const { data: br } = await supabase
+            .from('branches').select('name').eq('id', data.branch_id).maybeSingle()
+          branchName = br?.name ?? null
+        }
+        setDriver({ ...(data as DriverLookup), branch_name: branchName })
         setLookupState('found')
       } else {
         setDriver(null)
@@ -91,7 +101,7 @@ export default function IsiSaldoBottomSheet({
       driverIdRef: driver.id,
       driverLoginId: driver.driver_id,
       driverName: driver.name,
-      driverBranchName: driver.branches?.name ?? null,
+      driverBranchName: driver.branch_name ?? null,
     })
     if (!result.ok) {
       setSubmitting(false)

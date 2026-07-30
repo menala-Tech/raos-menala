@@ -365,13 +365,36 @@ function ChatPageInner() {
       void loadQueueSummary(roomBranchId)
     } else {
       setActiveRoomBranch(null)
-      setRoomDrivers([])
+      // Room global (Umum/Absensi/Pengumuman): mention pool = SEMUA driver
+      // aktif supaya @ dropdown tetap workable.
+      supabase.from('raos_drivers')
+        .select('id, driver_id, name')
+        .eq('is_active', true)
+        .order('name').limit(200)
+        .then(({ data }) => setRoomDrivers((data ?? []) as any[]))
       setQueueSummary(null)
     }
-    supabase.from('chat_room_members')
-      .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
-      .eq('room_id', activeRoom.id)
-      .then(({ data }) => setRoomMembers((data ?? []) as unknown as WorkspaceMember[]))
+    // Mention pool STAFF — ambil dari user_profiles scoped ke branch room
+    // + admin/mgmt/direksi (lintas cabang). Bukan dari chat_room_members
+    // (feedback 30 Juli malam: nama staff tidak muncul di @ dropdown).
+    // Untuk room global (branch_id null): semua staff aktif.
+    ;(async () => {
+      let q = supabase
+        .from('user_profiles')
+        .select('id, full_name, role, staff_id, branch_id')
+        .eq('is_active', true)
+        .order('full_name')
+      if (roomBranchId) {
+        // staff cabang OR role privileged (lintas cabang tetap bisa di-tag)
+        q = q.or(`branch_id.eq.${roomBranchId},role.in.(admin,management,direksi)`)
+      }
+      const { data } = await q.limit(200)
+      const asMembers: WorkspaceMember[] = (data ?? []).map((u: any) => ({
+        user_id: u.id,
+        user_profiles: { full_name: u.full_name, role: u.role, staff_id: u.staff_id },
+      }))
+      setRoomMembers(asMembers)
+    })()
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
     loadPinnedMessage(activeRoom.id)
@@ -1222,7 +1245,13 @@ function ChatPageInner() {
           )}
 
           {showQueueSummary && queueSummary && (
-            <WorkspaceQueueSummary summary={queueSummary} history={queueHistory} />
+            <WorkspaceQueueSummary
+              summary={queueSummary}
+              history={queueHistory}
+              branchId={(activeRoom as any).branch_id ?? null}
+              currentUserRole={user?.role}
+              onChanged={() => (activeRoom as any).branch_id && loadQueueSummary((activeRoom as any).branch_id)}
+            />
           )}
 
           {user && (

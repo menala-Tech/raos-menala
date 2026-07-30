@@ -35,29 +35,12 @@ export default function AbsensiPage() {
   const [recentAttendance, setRecentAttendance] = useState<Attendance[]>([])
 
   useEffect(() => {
-    // GPS tiered — coarse dulu (~1s wifi/cell) supaya banner lokasi & status
-    // geo-fence langsung tampil, refine (GPS asli, non-blocking) menyusul.
-    // Geofence check pakai user.branch_id supaya cuma pickup point Terminal
-    // user yang dicek. userBranchId di-fetch paralel — kalau belum ready
-    // saat fix pertama datang, cek semua (null); begitu ready, refine akan
-    // pakai filter branch.
-    let userBranchId: string | null = null
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) return
-      supabase.from('user_profiles').select('branch_id').eq('id', session.user.id).single()
-        .then(({ data }) => { userBranchId = data?.branch_id ?? null })
-    })
-
-    const abortGps = requestLocationTiered({
-      onFix: async fix => {
-        setLocation({ lat: fix.lat, lng: fix.lng })
-        const result = await checkGeofence(fix.lat, fix.lng, userBranchId)
-        setGeofence(result)
-        setLocationValid(result.isValid)
-        setLocationStatus('done')
-      },
-      onUnavailable: () => setLocationStatus('unavailable'),
-    })
+    // Init dulu untuk dapat user.branch_id (cabang yang di-assign admin di
+    // HRIS / panel /admin), BARU jalankan GPS+geofence supaya cabang yang
+    // di-cek benar sesuai staff login. Sebelumnya userBranchId di-fetch
+    // paralel dan sering null saat fix pertama → checkGeofence menyapu
+    // pickup_points semua cabang → salah "nearest".
+    let abortGps: (() => void) | undefined
 
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
@@ -65,6 +48,18 @@ export default function AbsensiPage() {
       const { data: profile } = await supabase
         .from('user_profiles').select('*, branches(*)').eq('id', session.user.id).single()
       setUser(profile)
+
+      const userBranchId: string | null = profile?.branch_id ?? null
+      abortGps = requestLocationTiered({
+        onFix: async fix => {
+          setLocation({ lat: fix.lat, lng: fix.lng })
+          const result = await checkGeofence(fix.lat, fix.lng, userBranchId)
+          setGeofence(result)
+          setLocationValid(result.isValid)
+          setLocationStatus('done')
+        },
+        onUnavailable: () => setLocationStatus('unavailable'),
+      })
 
       // Shift otomatis (spec Absensi.md: Pagi/Siang/Malam by jam sekarang)
       detectCurrentShift().then(setShift)
@@ -84,7 +79,7 @@ export default function AbsensiPage() {
       setRecentAttendance(recent ?? [])
     }
     init()
-    return abortGps
+    return () => { abortGps?.() }
   }, [router])
 
   async function handleAbsensi(absenType: 'in' | 'out') {

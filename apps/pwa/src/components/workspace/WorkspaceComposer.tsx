@@ -29,7 +29,8 @@ interface Props {
   textInputRef: React.RefObject<HTMLInputElement>
   showSaldoRequestButton: boolean
   showQueueRequestButton: boolean
-  showPollButton: boolean
+  /** @deprecated tombol polling di-sunset 30 Juli 2026 */
+  showPollButton?: boolean
   mentionDropdown: MentionDropdownState
   roomMembers: WorkspaceMember[]
   roomDrivers: Array<{ id: string; driver_id: string; name: string }>
@@ -38,7 +39,8 @@ interface Props {
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onClearPendingFile: () => void
   onSendLocation: () => void
-  onOpenPoll: () => void
+  /** @deprecated tombol polling di-sunset 30 Juli 2026 */
+  onOpenPoll?: () => void
   onOpenSaldo: () => void
   onOpenQueue: () => void
   onStartRecording: () => void
@@ -55,9 +57,9 @@ export default function WorkspaceComposer(props: Props) {
     text, onTextChange, disabled, sending, uploading, sendingLocation, pollSending, uploadingAudio,
     recording, recSeconds, voiceMaxSeconds, pendingFile, pendingPreview,
     fileInputRef, textInputRef,
-    showSaldoRequestButton, showQueueRequestButton, showPollButton,
+    showSaldoRequestButton, showQueueRequestButton,
     mentionDropdown, roomMembers, roomDrivers, currentUserId,
-    onPickFile, onFileSelect, onClearPendingFile, onSendLocation, onOpenPoll, onOpenSaldo, onOpenQueue,
+    onPickFile, onFileSelect, onClearPendingFile, onSendLocation, onOpenSaldo, onOpenQueue,
     onStartRecording, onStopRecording, onCancelRecording,
     onSubmit, onSubmitAttachment, onInsertMention, onCloseMentionDropdown,
   } = props
@@ -131,10 +133,8 @@ export default function WorkspaceComposer(props: Props) {
             sendingLocation={sendingLocation}
             showSaldoRequestButton={showSaldoRequestButton}
             showQueueRequestButton={showQueueRequestButton}
-            showPollButton={showPollButton}
             onPickFile={onPickFile}
             onSendLocation={onSendLocation}
-            onOpenPoll={onOpenPoll}
             onOpenSaldo={onOpenSaldo}
             onOpenQueue={onOpenQueue}
           />

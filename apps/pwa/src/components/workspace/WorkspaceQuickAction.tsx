@@ -1,17 +1,19 @@
 'use client'
 
 import type React from 'react'
-import { BarChart2, Car, Loader2, MapPin, Paperclip, Wallet } from 'lucide-react'
+import { Car, Loader2, MapPin, Paperclip, Wallet } from 'lucide-react'
 
 interface Props {
   disabled?: boolean
   sendingLocation?: boolean
   showSaldoRequestButton?: boolean
   showQueueRequestButton?: boolean
+  /** @deprecated tombol polling di-sunset per 30 Juli 2026 */
   showPollButton?: boolean
   onPickFile: () => void
   onSendLocation: () => void
-  onOpenPoll: () => void
+  /** @deprecated tombol polling di-sunset per 30 Juli 2026 */
+  onOpenPoll?: () => void
   onOpenSaldo?: () => void
   onOpenQueue?: () => void
   extra?: React.ReactNode
@@ -19,19 +21,18 @@ interface Props {
 
 /**
  * Aksi cepat pada composer workspace. Tombol bisnis (Isi Saldo, Antrian
- * Driver) muncul berdasarkan konteks workspace. Tombol Polling
- * disembunyikan di workspace Saldo/Driver sesuai spec (kode polling di
- * DB/API tetap ada — cuma tidak ditampilkan).
+ * Driver) muncul berdasarkan konteks workspace. Polling di-sunset 30 Juli
+ * 2026 sesuai request user — diganti sepenuhnya oleh Antrian Driver (per
+ * cabang). RPC/tabel polling di DB tetap ada supaya polling historis
+ * masih bisa dilihat/di-vote, tapi tidak ada entry point baru.
  */
 export default function WorkspaceQuickAction({
   disabled,
   sendingLocation,
   showSaldoRequestButton,
   showQueueRequestButton,
-  showPollButton = true,
   onPickFile,
   onSendLocation,
-  onOpenPoll,
   onOpenSaldo,
   onOpenQueue,
   extra,
@@ -56,16 +57,6 @@ export default function WorkspaceQuickAction({
           ? <Loader2 size={18} className="animate-spin text-red-400" />
           : <MapPin size={20} />}
       </button>
-      {showPollButton && (
-        <button
-          onClick={onOpenPoll}
-          disabled={disabled}
-          className="text-gray-400 hover:text-secondary transition-colors disabled:opacity-40 flex-shrink-0"
-          title="Buat polling"
-        >
-          <BarChart2 size={20} />
-        </button>
-      )}
       {showSaldoRequestButton && onOpenSaldo && (
         <button
           onClick={onOpenSaldo}

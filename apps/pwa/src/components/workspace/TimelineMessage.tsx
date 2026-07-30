@@ -1,10 +1,11 @@
 'use client'
 
 import {
-  BarChart2, Check, CheckCheck, CheckSquare, Download, FileText, Lock,
+  BarChart2, Camera, Check, CheckCheck, CheckSquare, Download, FileText, Lock,
   MapPin, Mic, Square,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { supabase } from '@/lib/supabase'
 import type { ChatMessage, ChatPoll, ChatPollVote, UserProfile } from '@/types'
 import { parseActionCard, type DriverPayload, type QueuePayload } from '@/lib/actionCardParser'
 import {
@@ -205,16 +206,42 @@ export default function TimelineMessage(props: Props) {
         )
       })()}
 
-      {/* TEXT with @mention highlighting */}
+      {/* TEXT with @mention highlighting + raos-selfie:// button */}
       {msg.type === 'text' && (() => {
         const content = msg.content ?? ''
-        const parts = content.split(/(@[A-Za-z][A-Za-z0-9._\- ]*?(?=\s|$|[.,!?]))/g)
+        // Strip token "raos-selfie://<path>" dari body — dirender terpisah
+        // sebagai tombol "Lihat Foto" (bucket 'selfies' private → butuh
+        // signed URL yang di-generate on-click).
+        const selfieMatch = content.match(/raos-selfie:\/\/(\S+)/)
+        const selfiePath = selfieMatch ? selfieMatch[1] : null
+        const cleaned = selfiePath
+          ? content.replace(/\n?\U0001f4f7?\s*Foto Selfie:\s*raos-selfie:\/\/\S+\n?/u, '').replace(/raos-selfie:\/\/\S+/, '').trim()
+          : content
+        const parts = cleaned.split(/(@[A-Za-z][A-Za-z0-9._\- ]*?(?=\s|$|[.,!?]))/g)
         return (
-          <p className="leading-relaxed whitespace-pre-wrap break-words">
-            {parts.map((chunk, i) => chunk.startsWith('@')
-              ? <span key={i} className={clsx('font-semibold rounded px-0.5', isMe ? 'text-primary bg-white/10' : 'text-secondary bg-secondary/10')}>{chunk}</span>
-              : chunk)}
-          </p>
+          <>
+            <p className="leading-relaxed whitespace-pre-wrap break-words">
+              {parts.map((chunk, i) => chunk.startsWith('@')
+                ? <span key={i} className={clsx('font-semibold rounded px-0.5', isMe ? 'text-primary bg-white/10' : 'text-secondary bg-secondary/10')}>{chunk}</span>
+                : chunk)}
+            </p>
+            {selfiePath && (
+              <button
+                onClick={async () => {
+                  const { data } = await supabase.storage.from('selfies').createSignedUrl(selfiePath, 3600)
+                  if (data?.signedUrl) window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+                  else alert('Foto tidak dapat dibuka (file belum tersinkron).')
+                }}
+                className={clsx(
+                  'mt-2 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                  isMe ? 'bg-white/15 hover:bg-white/25 text-white' : 'bg-secondary/10 hover:bg-secondary/20 text-secondary'
+                )}
+              >
+                <Camera size={13} />
+                Lihat Foto Selfie
+              </button>
+            )}
+          </>
         )
       })()}
 

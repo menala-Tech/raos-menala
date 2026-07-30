@@ -125,6 +125,15 @@ export interface WorkspaceContact {
   branches?: { name: string } | null
 }
 
+export interface WorkspaceDriverContact {
+  id: string
+  driver_id: string
+  name: string
+  phone: string | null
+  vehicle_plate: string | null
+  branches?: { name: string } | null
+}
+
 export type WorkspaceTimelineMessage = ChatMessage
 export type WorkspaceMessageReaction = ChatMessageReaction
 export type WorkspacePoll = ChatPoll

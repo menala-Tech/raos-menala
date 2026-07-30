@@ -215,7 +215,7 @@ export default function TimelineMessage(props: Props) {
         const selfieMatch = content.match(/raos-selfie:\/\/(\S+)/)
         const selfiePath = selfieMatch ? selfieMatch[1] : null
         const cleaned = selfiePath
-          ? content.replace(/\n?\U0001f4f7?\s*Foto Selfie:\s*raos-selfie:\/\/\S+\n?/u, '').replace(/raos-selfie:\/\/\S+/, '').trim()
+          ? content.replace(/\n?\u{1F4F7}?\s*Foto Selfie:\s*raos-selfie:\/\/\S+\n?/u, '').replace(/raos-selfie:\/\/\S+/, '').trim()
           : content
         const parts = cleaned.split(/(@[A-Za-z][A-Za-z0-9._\- ]*?(?=\s|$|[.,!?]))/g)
         return (

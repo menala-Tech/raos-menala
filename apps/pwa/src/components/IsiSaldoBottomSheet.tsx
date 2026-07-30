@@ -153,7 +153,7 @@ export default function IsiSaldoBottomSheet({
                 <div className="text-[11px] leading-tight">
                   <p className="font-semibold text-green-800 dark:text-green-200">{driver.name}</p>
                   <p className="text-green-700 dark:text-green-300">
-                    Cabang: {driver.branches?.name ?? 'tidak diketahui'}
+                    Cabang: {driver.branch_name ?? 'tidak diketahui'}
                   </p>
                 </div>
               </div>

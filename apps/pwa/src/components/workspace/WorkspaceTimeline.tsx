@@ -33,6 +33,7 @@ interface Props {
   onQueueApprove: (msgId: string, payload: QueuePayload) => void
   onQueueReject: (msgId: string, payload: QueuePayload) => void
   onQueueComplete: (msgId: string, payload: QueuePayload) => void
+  onTagSender?: (userId: string, fullName: string) => void
 }
 
 const WorkspaceTimeline = forwardRef<HTMLDivElement, Props>(function WorkspaceTimeline(props, bottomRef) {
@@ -67,11 +68,22 @@ const WorkspaceTimeline = forwardRef<HTMLDivElement, Props>(function WorkspaceTi
             ref={el => props.registerMessageRef(msg.id, el)}
             className={clsx('flex flex-col', isMe ? 'items-end' : 'items-start')}
           >
-            {!isMe && (
-              <p className="text-[10px] font-bold text-primary ml-1 mb-0.5 capitalize">
-                {(msg as any).user_profiles?.full_name ?? 'Unknown'} · {(msg as any).user_profiles?.role ?? ''}
-              </p>
-            )}
+            {!isMe && (() => {
+              const senderName = (msg as any).user_profiles?.full_name ?? 'Anggota'
+              const senderRole = (msg as any).user_profiles?.role ?? ''
+              const canTag = !!msg.sender_id && !!props.onTagSender
+              return (
+                <button
+                  type="button"
+                  disabled={!canTag}
+                  onClick={() => msg.sender_id && props.onTagSender?.(msg.sender_id, senderName)}
+                  className="text-[10px] font-bold text-primary ml-1 mb-0.5 capitalize hover:underline disabled:no-underline disabled:cursor-default text-left"
+                  title={canTag ? `Ketuk untuk tag @${senderName}` : undefined}
+                >
+                  {senderName}{senderRole ? ` · ${senderRole}` : ''}
+                </button>
+              )
+            })()}
 
             <WorkspaceCard
               isMe={isMe}

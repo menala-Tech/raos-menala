@@ -58,6 +58,7 @@ import {
   type RoomPrefs,
   type RoomSheet,
   type WorkspaceContact,
+  type WorkspaceDriverContact,
   type WorkspaceMember,
 } from '@/components/workspace/types'
 
@@ -141,6 +142,7 @@ function ChatPageInner() {
 
   const [contactSheet, setContactSheet] = useState(false)
   const [contactList, setContactList] = useState<WorkspaceContact[]>([])
+  const [contactDrivers, setContactDrivers] = useState<WorkspaceDriverContact[]>([])
   const [contactLoading, setContactLoading] = useState(false)
   const [contactSearch, setContactSearch] = useState('')
   const [openingPribadi, setOpeningPribadi] = useState<string | null>(null)
@@ -380,8 +382,16 @@ function ChatPageInner() {
       .channel(`room:${activeRoom.id}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${activeRoom.id}` },
-        payload => {
-          const msg = payload.new as ChatMessage
+        async payload => {
+          const raw = payload.new as ChatMessage
+          // payload.new tidak include join user_profiles → nama pengirim
+          // muncul "Unknown" di bubble. Fetch enriched row supaya nama
+          // & role sender langsung tampil di realtime append.
+          const { data: enriched } = await supabase
+            .from('chat_messages')
+            .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)')
+            .eq('id', raw.id).maybeSingle()
+          const msg = (enriched ?? raw) as ChatMessage
           setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
           supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
@@ -916,12 +926,28 @@ function ChatPageInner() {
   async function openContactSheet() {
     setContactSheet(true)
     setContactLoading(true)
-    const { data } = await supabase
+    // Staff/koord/driver_manager cuma lihat kontak cabang sendiri.
+    // Admin/management/direksi lihat semua cabang.
+    const seesAllBranches = user && ['admin','management','direksi'].includes(user.role)
+    const branchId: string | null = user?.branch_id ?? null
+
+    let staffQ = supabase
       .from('user_profiles')
-      .select('id, full_name, role, staff_id, branches(name)')
+      .select('id, full_name, role, staff_id, branch_id, branches(name)')
       .eq('is_active', true)
       .order('full_name')
-    setContactList((data ?? []).filter(u => u.id !== user?.id) as unknown as WorkspaceContact[])
+    if (!seesAllBranches && branchId) staffQ = staffQ.eq('branch_id', branchId)
+
+    let driverQ = supabase
+      .from('raos_drivers')
+      .select('id, driver_id, name, phone, vehicle_plate, branch_id, branches(name)')
+      .eq('is_active', true)
+      .order('name')
+    if (!seesAllBranches && branchId) driverQ = driverQ.eq('branch_id', branchId)
+
+    const [{ data: staffData }, { data: driverData }] = await Promise.all([staffQ, driverQ])
+    setContactList((staffData ?? []).filter(u => u.id !== user?.id) as unknown as WorkspaceContact[])
+    setContactDrivers((driverData ?? []) as unknown as WorkspaceDriverContact[])
     setContactLoading(false)
   }
 
@@ -1052,6 +1078,22 @@ function ChatPageInner() {
     } else if (mentionDropdown.open) {
       setMentionDropdown({ open: false, query: '', startPos: 0 })
     }
+  }
+
+  /**
+   * Tap nama pengirim di bubble → append `@Nama` ke input + register user_id
+   * ke mentionsPending supaya push notification kategori 'pengumuman'
+   * (title "📣 Anda di-tag") sampai. Kalau text sudah ada mention untuk user
+   * yang sama, tidak duplikat.
+   */
+  function tagSender(userId: string, fullName: string) {
+    if (userId === user?.id) return
+    const mention = `@${fullName}`
+    if (!text.includes(mention)) {
+      setText(prev => (prev.endsWith(' ') || prev.length === 0 ? prev : prev + ' ') + mention + ' ')
+    }
+    setMentionsPending(prev => prev.includes(userId) ? prev : [...prev, userId])
+    setTimeout(() => textInputRef.current?.focus(), 0)
   }
 
   function insertMention(name: string, extraSuffix: string, userId?: string) {
@@ -1207,6 +1249,7 @@ function ChatPageInner() {
               onQueueApprove={(id, p) => handleQueueAction(id, 'approved', p)}
               onQueueReject={(id, p) => handleQueueAction(id, 'rejected', p)}
               onQueueComplete={(id, p) => handleQueueAction(id, 'done', p)}
+              onTagSender={tagSender}
             />
           )}
 
@@ -1301,6 +1344,7 @@ function ChatPageInner() {
         <WorkspaceContactSheet
           loading={contactLoading}
           contacts={contactList}
+          drivers={contactDrivers}
           search={contactSearch}
           openingId={openingPribadi}
           onSearchChange={setContactSearch}

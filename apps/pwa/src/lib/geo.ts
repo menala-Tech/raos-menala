@@ -62,8 +62,12 @@ export async function checkGeofence(
   lng: number,
   branchId?: string | null
 ): Promise<GeofenceResult> {
+  // View raos_geofence_points menggabungkan pickup_points aktif +
+  // fallback ke branches.lat/lng/default_radius_meters untuk cabang yang
+  // belum punya pickup point. Filter branchId supaya staff cabang lain
+  // tidak salah-validate ke titik cabang tetangga.
   let query = supabase
-    .from('pickup_points')
+    .from('raos_geofence_points')
     .select('id, name, latitude, longitude, radius_meters, branch_id')
     .eq('is_active', true)
 

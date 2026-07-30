@@ -85,11 +85,18 @@ export default function AbsensiPage() {
   async function handleAbsensi(absenType: 'in' | 'out') {
     if (!user) return
     if (shouldBlockByGeofence(user.role, geofence, locationStatus, (user as any).is_geofence_exempt)) {
+      const overshoot = geofence?.overshootMeters
+      const pointName = geofence?.nearestPointName
+      // Kalau overshoot null berarti checkGeofence tidak ketemu pickup point
+      // sama sekali untuk cabang staff (data kosong / branch belum di-setup).
+      // Jangan render "nullm" ke user — kasih pesan yang jelas.
       const reason = locationStatus === 'unavailable'
         ? 'GPS tidak terdeteksi. Aktifkan lokasi HP lalu coba lagi.'
         : locationStatus === 'checking'
           ? 'Menunggu lokasi terdeteksi. Coba beberapa detik lagi.'
-          : `Anda ${geofence?.overshootMeters}m di luar radius ${geofence?.nearestPointName ?? ''}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m — absensi dibatalkan.`
+          : overshoot === null || overshoot === undefined
+            ? 'Data pickup point cabang belum di-setup. Hubungi admin untuk konfigurasi lokasi.'
+            : `Anda ${overshoot}m di luar radius ${pointName ?? 'lokasi cabang'}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m — absensi dibatalkan.`
       alert(reason)
       return
     }
@@ -203,8 +210,10 @@ export default function AbsensiPage() {
           {locationStatus === 'unavailable' && 'GPS tidak terdeteksi — absensi tetap bisa dilakukan'}
           {locationStatus === 'done' && geofence && (
             geofence.isValid
-              ? `✓ Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`
-              : `${geofence.nearestPointName} terdekat — ${geofence.distanceMeters}m (di luar radius)`
+              ? `✓ Lokasi valid — ${geofence.nearestPointName ?? 'lokasi cabang'} (${geofence.distanceMeters ?? 0}m)`
+              : geofence.nearestPointName === null || geofence.distanceMeters === null
+                ? '⚠ Data pickup point cabang belum di-setup — hubungi admin'
+                : `${geofence.nearestPointName} terdekat — ${geofence.distanceMeters}m (di luar radius)`
           )}
         </div>
       </div>

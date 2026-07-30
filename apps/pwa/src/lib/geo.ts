@@ -22,9 +22,13 @@ export interface GeofenceResult {
   overshootMeters: number | null
 }
 
-// Tolerance GPS drift indoor terminal Soeta (atap struktur baja bikin GPS
-// meleset 10-30m). Kalau jarak > radius + tolerance → hard-block staff.
-export const GEOFENCE_TOLERANCE_METERS = 50
+// Tolerance GPS drift + area operasional luar terminal (parkiran, jalur
+// akses bandara). Per feedback user 30 Juli 2026: dinaikkan dari 50m ke
+// 1000m supaya staff yang beroperasi di area luar radius pickup point
+// tapi masih dalam kompleks bandara tidak ke-block. Kombinasi
+// radius pickup point (500-1000m per cabang) + tolerance 1000m =
+// coverage efektif 1.5-2km dari titik pusat.
+export const GEOFENCE_TOLERANCE_METERS = 1000
 
 /**
  * Role staff dihard-block kalau di luar (radius + 50m tolerance).

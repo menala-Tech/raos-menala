@@ -25,20 +25,13 @@ export default function ScanPage() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [geofence, setGeofence] = useState<GeofenceResult | null>(null)
   const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid' | 'unavailable'>('checking')
-  // Default scan mode dari preferensi user di Settings > Aplikasi. Kalau
-  // belum set atau invalid, fallback ke 'camera' (default sesi 14).
-  const [inputMode, setInputMode] = useState<'camera' | 'manual'>(() => {
-    if (typeof window === 'undefined') return 'camera'
-    try {
-      const raw = localStorage.getItem('raos_prefs')
-      if (raw) {
-        const prefs = JSON.parse(raw)
-        // scanMode: 'otomatis' → camera, 'manual' → manual
-        if (prefs.scanMode === 'manual') return 'manual'
-      }
-    } catch { /* ignore */ }
-    return 'camera'
-  })
+  // Kamera SELALU aktif secara default di setiap page load (user feedback
+  // 30 Juli 2026: "harusnya otomatis kamera scan barcode yang tampil").
+  // Toggle localStorage `raos_prefs.scanMode` di Settings sengaja tidak
+  // dipakai sebagai initial state — supaya user tidak stuck di mode manual
+  // gara-gara pernah switch di sesi sebelumnya. FAB pojok kanan bawah
+  // tetap available kalau butuh switch ke manual per sesi.
+  const [inputMode, setInputMode] = useState<'camera' | 'manual'>('camera')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -84,12 +77,15 @@ export default function ScanPage() {
 
     if (shouldBlockByGeofence(user.role, geofence, locationStatus, (user as any).is_geofence_exempt)) {
       setScanState('error')
+      const overshoot = geofence?.overshootMeters
       setLastScan({
         error: locationStatus === 'unavailable'
           ? 'GPS tidak terdeteksi. Scan dibatalkan — aktifkan lokasi HP lalu coba lagi.'
           : locationStatus === 'checking'
             ? 'Menunggu lokasi terdeteksi. Coba beberapa detik lagi.'
-            : `Anda berada ${geofence?.overshootMeters}m di luar radius pickup point ${geofence?.nearestPointName ?? ''}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m. Scan dibatalkan.`,
+            : overshoot === null || overshoot === undefined
+              ? 'Data pickup point cabang belum di-setup. Hubungi admin untuk konfigurasi lokasi.'
+              : `Anda berada ${overshoot}m di luar radius pickup point ${geofence?.nearestPointName ?? 'lokasi cabang'}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m. Scan dibatalkan.`,
       })
       return
     }
@@ -197,9 +193,11 @@ export default function ScanPage() {
           {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
           {locationStatus === 'valid' && geofence &&
             `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`}
-          {locationStatus === 'invalid' && geofence && user?.role === 'staff' &&
+          {locationStatus === 'invalid' && geofence && (geofence.overshootMeters === null || geofence.nearestPointName === null) &&
+            'Data pickup point cabang belum di-setup — hubungi admin.'}
+          {locationStatus === 'invalid' && geofence && geofence.overshootMeters !== null && user?.role === 'staff' &&
             `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${GEOFENCE_TOLERANCE_METERS}m — scan akan diblok kalau lewat.`}
-          {locationStatus === 'invalid' && geofence && user?.role !== 'staff' &&
+          {locationStatus === 'invalid' && geofence && geofence.distanceMeters !== null && user?.role !== 'staff' &&
             `Di luar radius ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Scan tetap bisa (bypass role).`}
           {locationStatus === 'unavailable' && user?.role === 'staff' && 'GPS tidak terdeteksi — scan diblok. Aktifkan lokasi HP.'}
           {locationStatus === 'unavailable' && user?.role !== 'staff' && 'GPS tidak terdeteksi — scan tetap bisa (bypass role).'}

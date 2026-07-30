@@ -106,6 +106,25 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
     }
   }
 
+  // Auto-route ke room "Pengisian Saldo — <Cabang>" berdasarkan branchId
+  // regardless of activeRoom user. Feedback 30 Juli: pengajuan saldo Batam
+  // bocor ke room "Umum" karena user (direksi/admin) buka Umum saat submit.
+  // Cari room saldo cabang yang match. Kalau tidak ketemu, fallback ke
+  // roomId lama (backward-compat) dengan warning.
+  const { data: saldoRoom } = await supabase
+    .from('chat_rooms')
+    .select('id')
+    .eq('branch_id', branchId)
+    .eq('is_active', true)
+    .or('name.ilike.%pengisian saldo%,name.ilike.%isi saldo%')
+    .limit(1)
+    .maybeSingle()
+
+  const targetRoomId = saldoRoom?.id ?? roomId
+  if (!saldoRoom) {
+    console.warn(`[submitIsiSaldo] Room "Pengisian Saldo — <cabang>" tidak ditemukan untuk branch ${branchId}. Fallback ke ${roomId}. Minta admin bulk-create room via /admin.`)
+  }
+
   const requestNo = newRequestNo(nominal)
   const { data: request, error: reqErr } = await supabase
     .from('raos_saldo_requests')
@@ -115,7 +134,7 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
       branch_id: branchId,
       nominal,
       status: 'pending',
-      chat_room_id: roomId,
+      chat_room_id: targetRoomId,
     })
     .select('id, request_no')
     .single()
@@ -124,7 +143,6 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
     return { ok: false, error: reqErr?.message ?? 'Gagal simpan pengajuan.' }
   }
 
-  // Post chat message type='saldo_request'
   const content = JSON.stringify({
     request_id: request.id,
     request_no: request.request_no,
@@ -140,7 +158,7 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
   const { data: msg, error: msgErr } = await supabase
     .from('chat_messages')
     .insert({
-      room_id: roomId,
+      room_id: targetRoomId,
       sender_id: userId,
       type: 'saldo_request',
       content,

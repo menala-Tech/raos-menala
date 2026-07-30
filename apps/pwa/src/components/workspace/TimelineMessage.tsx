@@ -214,8 +214,11 @@ export default function TimelineMessage(props: Props) {
         // signed URL yang di-generate on-click).
         const selfieMatch = content.match(/raos-selfie:\/\/(\S+)/)
         const selfiePath = selfieMatch ? selfieMatch[1] : null
+        // Buang seluruh baris yang mengandung token raos-selfie://... (termasuk
+        // emoji kamera prefix). Regex tanpa flag `u` supaya kompat tsconfig
+        // target:es5 (flag u butuh es6+ dan bikin CI TS check gagal).
         const cleaned = selfiePath
-          ? content.replace(/\n?\u{1F4F7}?\s*Foto Selfie:\s*raos-selfie:\/\/\S+\n?/u, '').replace(/raos-selfie:\/\/\S+/, '').trim()
+          ? content.replace(/\n?[^\n]*raos-selfie:\/\/\S+[^\n]*/g, '').trim()
           : content
         const parts = cleaned.split(/(@[A-Za-z][A-Za-z0-9._\- ]*?(?=\s|$|[.,!?]))/g)
         return (

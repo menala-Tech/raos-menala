@@ -1,4 +1,4 @@
-export type UserRole = 'direksi' | 'admin' | 'management' | 'koordinator' | 'staff' | 'driver_manager'
+export type UserRole = 'direksi' | 'admin' | 'management' | 'koordinator' | 'staff' | 'driver_manager' | 'driver'
 
 export interface Branch {
   id: string

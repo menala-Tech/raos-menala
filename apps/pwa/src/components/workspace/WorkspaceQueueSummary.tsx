@@ -46,7 +46,7 @@ export default function WorkspaceQueueSummary({ summary, history }: Props) {
         </div>
       )}
       <p className="mt-2 text-[10px] text-gray-500">
-        Perintah cepat: /antri &lt;driver_id&gt; · /panggil &lt;posisi&gt; · /selesai &lt;posisi&gt; · /keluar &lt;driver_id&gt;
+        Gunakan tombol <span className="font-semibold text-amber-700">+ Antrian Driver</span> untuk masukkan driver ke antrean. Kelola dari halaman <span className="font-semibold text-amber-700">Antrian Driver</span>.
       </p>
     </div>
   )

@@ -7,7 +7,7 @@
  * query param.
  */
 
-export type Role = 'staff' | 'koordinator' | 'admin' | 'management' | 'direksi' | 'driver_manager'
+export type Role = 'staff' | 'koordinator' | 'admin' | 'management' | 'direksi' | 'driver_manager' | 'driver'
 export type InstallVariant = 'staff' | 'koord' | 'mgmt' | 'direksi' | 'driver' | 'dm'
 
 const ROLE_HOME: Record<string, string> = {
@@ -17,6 +17,7 @@ const ROLE_HOME: Record<string, string> = {
   management:     '/dashboard',
   direksi:        '/dashboard',
   driver_manager: '/dashboard',
+  driver:         '/driver-workspace',
 }
 
 // Route mana yang boleh diakses per role. Kalau route tidak match, redirect
@@ -40,6 +41,12 @@ const ROLE_ROUTES: Record<string, string[]> = {
     '/dashboard', '/chat', '/settings', '/settings/bantuan',
     '/notifications', '/reset-password',
     '/antrian-driver', '/drivers', '/admin/barcodes',
+  ],
+  // driver: read-only workspace untuk melihat antrean sendiri, riwayat saldo,
+  // chat room driver cabang. Tidak akses staff/finance/admin apapun.
+  driver: [
+    '/driver-workspace', '/chat', '/settings', '/settings/bantuan',
+    '/notifications', '/reset-password',
   ],
   // admin, management, direksi punya akses semua route
   admin:      ['*'],

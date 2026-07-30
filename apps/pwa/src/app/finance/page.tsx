@@ -12,6 +12,7 @@ import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import { markSaldoRequestProcessed } from '@/lib/saldoRequest'
+import { formatInTimezone, tzLabel } from '@/lib/timezone'
 
 /**
  * Finance Dashboard — halaman tersentralisir gaya Google Sheets untuk
@@ -45,7 +46,7 @@ interface Row {
   note: string | null
   driver_login_id: string | null
   driver_name: string | null
-  branch: { id: string; name: string; slug: string | null } | null
+  branch: { id: string; name: string; slug: string | null; timezone: string | null } | null
   staff: { id: string; full_name: string; staff_id: string } | null
   approved_by_user: { full_name: string } | null
   processed_by_user: { full_name: string } | null
@@ -73,7 +74,7 @@ export default function FinanceDashboardPage() {
         'id, request_no, nominal, status, is_processed, requested_at,' +
         'approved_at, processed_at, rejection_reason, note,' +
         'driver_login_id, driver_name,' +
-        'branch:branches!branch_id(id, name, slug),' +
+        'branch:branches!branch_id(id, name, slug, timezone),' +
         'staff:user_profiles!staff_id(id, full_name, staff_id),' +
         'approved_by_user:user_profiles!approved_by(full_name),' +
         'processed_by_user:user_profiles!processed_by(full_name)'
@@ -261,7 +262,13 @@ export default function FinanceDashboardPage() {
                     )}
                   </Td>
                   <Td className="font-mono text-[10px] whitespace-nowrap">{row.request_no}</Td>
-                  <Td className="whitespace-nowrap">{formatDateTime(row.requested_at)}</Td>
+                  <Td className="whitespace-nowrap">
+                    {formatInTimezone(row.requested_at, row.branch?.timezone, {
+                      day: '2-digit', month: 'short', year: '2-digit',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                    <span className="ml-1 text-[10px] text-gray-400">{tzLabel(row.branch?.timezone)}</span>
+                  </Td>
                   <Td className="whitespace-nowrap">{row.branch?.name ?? '—'}</Td>
                   <Td className="font-mono text-[10px] whitespace-nowrap">{row.driver_login_id ?? '—'}</Td>
                   <Td className="whitespace-nowrap max-w-[180px] truncate">{row.driver_name ?? '—'}</Td>
@@ -270,7 +277,14 @@ export default function FinanceDashboardPage() {
                   <Td className="whitespace-nowrap max-w-[180px] truncate">{row.approved_by_user?.full_name ?? '—'}</Td>
                   <Td><StatusBadge row={row} /></Td>
                   <Td className="whitespace-nowrap text-[11px] text-gray-500">
-                    {row.processed_at ? formatDateTime(row.processed_at) : '—'}
+                    {row.processed_at
+                      ? <>
+                          {formatInTimezone(row.processed_at, row.branch?.timezone, {
+                            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                          })}
+                          <span className="ml-1 text-[10px] text-gray-400">{tzLabel(row.branch?.timezone)}</span>
+                        </>
+                      : '—'}
                     {row.processed_by_user?.full_name && (
                       <span className="block text-[10px] text-gray-400">oleh {row.processed_by_user.full_name}</span>
                     )}
@@ -328,8 +342,3 @@ function StatusBadge({ row }: { row: Row }) {
   )
 }
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('id-ID', {
-    day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit',
-  })
-}

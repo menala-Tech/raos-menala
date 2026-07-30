@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
+import { formatInTimezone, tzLabel } from '@/lib/timezone'
 
 /**
  * /driver-workspace — landing page untuk role='driver'.
@@ -57,6 +58,7 @@ export default function DriverWorkspacePage() {
   const router = useRouter()
   const [profile, setProfile] = useState<DriverProfile | null>(null)
   const [branchName, setBranchName] = useState<string>('')
+  const [branchTz, setBranchTz] = useState<string | null>(null)
   const [myQueue, setMyQueue] = useState<QueueEntry | null>(null)
   const [saldoHistory, setSaldoHistory] = useState<SaldoEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -76,8 +78,11 @@ export default function DriverWorkspacePage() {
     setProfile(prof as unknown as DriverProfile)
     const branchId = (prof as any).raos_drivers?.branch_id ?? null
     if (branchId) {
-      const { data: b } = await supabase.from('branches').select('name').eq('id', branchId).single()
-      if (b) setBranchName(b.name)
+      const { data: b } = await supabase.from('branches').select('name, timezone').eq('id', branchId).single()
+      if (b) {
+        setBranchName(b.name)
+        setBranchTz(b.timezone ?? null)
+      }
     }
 
     // Antrean aktif driver ini (status waiting/called)
@@ -144,6 +149,7 @@ export default function DriverWorkspacePage() {
             <p className="text-white/50 text-xs mt-0.5 truncate">
               {profile?.raos_drivers?.driver_id ?? '-'}
               {branchName && <> · {branchName}</>}
+              {branchTz && <> · <span className="font-semibold text-primary/90">{tzLabel(branchTz)}</span></>}
               {profile?.raos_drivers?.vehicle_plate && <> · {profile.raos_drivers.vehicle_plate}</>}
             </p>
           </div>
@@ -157,7 +163,7 @@ export default function DriverWorkspacePage() {
         {!loading && (
           <>
             {/* Kartu status antrean */}
-            <QueueStatusCard queue={myQueue} />
+            <QueueStatusCard queue={myQueue} branchTz={branchTz} />
 
             {/* Shortcut chat */}
             <Link href="/chat"
@@ -181,7 +187,7 @@ export default function DriverWorkspacePage() {
                 <p className="text-xs text-gray-400 text-center py-6">Belum ada riwayat 30 hari terakhir</p>
               )}
               <div className="space-y-2">
-                {saldoHistory.map(s => <SaldoRow key={s.id} entry={s} />)}
+                {saldoHistory.map(s => <SaldoRow key={s.id} entry={s} branchTz={branchTz} />)}
               </div>
             </div>
           </>
@@ -191,7 +197,7 @@ export default function DriverWorkspacePage() {
   )
 }
 
-function QueueStatusCard({ queue }: { queue: QueueEntry | null }) {
+function QueueStatusCard({ queue, branchTz }: { queue: QueueEntry | null; branchTz: string | null }) {
   if (!queue) {
     return (
       <div className="card bg-gray-50 text-center">
@@ -224,8 +230,10 @@ function QueueStatusCard({ queue }: { queue: QueueEntry | null }) {
           </p>
           <p className="text-[10px] text-gray-500 mt-1">
             {isCalled
-              ? <>Dipanggil {queue.called_at ? new Date(queue.called_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''}</>
-              : <>Masuk antre {new Date(queue.joined_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</>}
+              ? <>Dipanggil {queue.called_at
+                  ? <>{formatInTimezone(queue.called_at, branchTz, { hour: '2-digit', minute: '2-digit' })} {tzLabel(branchTz)}</>
+                  : ''}</>
+              : <>Masuk antre {formatInTimezone(queue.joined_at, branchTz, { hour: '2-digit', minute: '2-digit' })} {tzLabel(branchTz)}</>}
           </p>
         </div>
         {isCalled
@@ -236,7 +244,7 @@ function QueueStatusCard({ queue }: { queue: QueueEntry | null }) {
   )
 }
 
-function SaldoRow({ entry }: { entry: SaldoEntry }) {
+function SaldoRow({ entry, branchTz }: { entry: SaldoEntry; branchTz: string | null }) {
   const meta = (() => {
     if (entry.is_processed) return { icon: Wallet, label: 'PAID', cls: 'bg-sky-100 text-sky-700' }
     if (entry.status === 'rejected' || entry.status === 'cancelled') {
@@ -252,9 +260,9 @@ function SaldoRow({ entry }: { entry: SaldoEntry }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-gray-800">Rp{Number(entry.nominal).toLocaleString('id-ID')}</p>
         <p className="text-[10px] text-gray-500 truncate">
-          {entry.request_no} · {new Date(entry.requested_at).toLocaleString('id-ID', {
+          {entry.request_no} · {formatInTimezone(entry.requested_at, branchTz, {
             day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-          })}
+          })} {tzLabel(branchTz)}
         </p>
         {entry.rejection_reason && (
           <p className="text-[10px] text-red-600 mt-0.5">{entry.rejection_reason}</p>

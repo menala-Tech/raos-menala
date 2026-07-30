@@ -145,6 +145,11 @@ export interface ChatMessageReaction {
   created_at: string
 }
 
+export type NotificationPriority = 'critical' | 'high' | 'normal' | 'low'
+export type NotificationStatus = 'sent' | 'delivered' | 'read' | 'archived' | 'expired'
+export type NotificationChannel = 'push' | 'in_app' | 'chat' | 'whatsapp' | 'email'
+export type NotificationPayloadType = 'saldo' | 'queue' | 'attendance' | 'chat' | 'system' | 'dashboard' | 'pengumuman' | 'scan' | 'kpi' | 'absensi' | string
+
 export interface Notification {
   id: string
   user_id: string
@@ -153,6 +158,17 @@ export interface Notification {
   type: string
   is_read: boolean
   created_at: string
+  // Extended per raos_063 (F1 Notification Engine Foundation, 31 Juli 2026)
+  priority?: NotificationPriority
+  status?: NotificationStatus
+  channel?: NotificationChannel
+  payload_type?: NotificationPayloadType | null
+  dedup_key?: string | null
+  data?: Record<string, unknown> | null
+  expires_at?: string | null
+  read_at?: string | null
+  delivered_at?: string | null
+  updated_at?: string
 }
 
 export type Database = {

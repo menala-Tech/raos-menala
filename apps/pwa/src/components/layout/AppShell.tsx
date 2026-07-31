@@ -3,6 +3,7 @@
 import BottomNav from './BottomNav'
 import SwipeBackWrapper from '../SwipeBackWrapper'
 import OnlineStatusBanner from '../OnlineStatusBanner'
+import { useAutoPushSubscribe } from '@/lib/useAutoPushSubscribe'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -12,6 +13,8 @@ interface AppShellProps {
 }
 
 export default function AppShell({ children, noSwipe }: AppShellProps) {
+  useAutoPushSubscribe()
+
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <OnlineStatusBanner />

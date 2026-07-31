@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import MenalaLogo, { MenalaMark } from '@/components/MenalaLogo'
 import { Eye, EyeOff, Lock, Mail, ShieldCheck, Send, ArrowLeft, Loader2 } from 'lucide-react'
 import { defaultLandingForRole } from '@/lib/roleGuard'
+import { logActivity } from '@/lib/activity'
 
 type Mode = 'password' | 'magic-link' | 'forgot-password'
 
@@ -40,6 +41,8 @@ export default function LoginPage() {
     // Route ke landing sesuai role (staff → /dashboard, driver → /driver-workspace, dst)
     const { data: profile } = await supabase.from('user_profiles')
       .select('role').eq('id', data.user.id).single()
+    // Audit login sukses — fire-and-forget, tidak block redirect.
+    void logActivity('login', `role=${profile?.role ?? 'unknown'}`)
     router.push(defaultLandingForRole(profile?.role))
   }
 

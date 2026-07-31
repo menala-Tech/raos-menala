@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { invokePush } from './pushClient'
+import { logActivity } from './activity'
 
 /**
  * Parse dan handle chat command untuk pengajuan isi saldo.
@@ -193,6 +194,9 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
     // Link msg_id ke request (fire-and-forget)
     void supabase.from('raos_saldo_requests').update({ chat_message_id: msg.id }).eq('id', request.id)
   }
+
+  // Audit financial action — fire-and-forget
+  void logActivity('isi_saldo_submit', `${request.request_no} Rp${nominal.toLocaleString('id-ID')} driver=${driverLoginId} branch=${branchSlug ?? branchId}`)
 
   return { ok: true, requestNo: request.request_no, requestId: request.id }
 }

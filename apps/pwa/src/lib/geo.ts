@@ -23,15 +23,15 @@ export interface GeofenceResult {
 }
 
 // Tolerance GPS drift + area operasional luar terminal (parkiran, jalur
-// akses bandara). Per feedback user 30 Juli 2026: dinaikkan dari 50m ke
-// 1000m supaya staff yang beroperasi di area luar radius pickup point
-// tapi masih dalam kompleks bandara tidak ke-block. Kombinasi
-// radius pickup point (500-1000m per cabang) + tolerance 1000m =
-// coverage efektif 1.5-2km dari titik pusat.
-export const GEOFENCE_TOLERANCE_METERS = 1000
+// akses bandara). Sejarah: 50m (sesi awal) → 1000m (feedback 30 Juli
+// 2026) → 500m (feedback 31 Juli 2026, kembali diperketat untuk
+// menegakkan hard-block yang efektif). Kombinasi radius pickup point
+// (500-1000m per cabang) + tolerance 500m = coverage efektif ~1-1.5km
+// dari titik pusat, masih meng-cover area operasional terminal.
+export const GEOFENCE_TOLERANCE_METERS = 500
 
 /**
- * Role staff dihard-block kalau di luar (radius + 50m tolerance).
+ * Role staff dihard-block kalau di luar (radius + GEOFENCE_TOLERANCE_METERS).
  * Direksi/koordinator/management/admin bypass hard-block, tapi
  * `is_location_valid` tetap direkam untuk audit.
  *

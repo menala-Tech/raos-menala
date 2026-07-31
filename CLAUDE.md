@@ -768,8 +768,19 @@ Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
 ### Debt yang masih relevan (BUKAN done)
 - **Tambah kolom "Jabatan DIREKSI" di HRIS** — mapping role direksi belum
   ada di sheet SSOT MASTER DATA STAFF.
-- **`activity_logs` cuma 1 row** — logActivity GAS belum di-hook di event
-  lifecycle. Prioritas rendah, `system_logs` (9,712 rows) sudah cover
-  observability operational.
-- **Offline mode** (SW upgrade cache-first strategy) — belum ada infra.
-  Push Notification sudah live via VAPID (bukan FCM).
+- **Service Worker cache-first strategy untuk offline READ** — infra
+  offline WRITE sudah lengkap ([lib/offlineQueue.ts](apps/pwa/src/lib/offlineQueue.ts)
+  + [lib/offlineSyncer.ts](apps/pwa/src/lib/offlineSyncer.ts) + banner),
+  tapi kalau user buka dashboard/riwayat/chat offline masih putih.
+  Butuh tune `next-pwa` runtime caching di `next.config.js` (Workbox
+  strategies per route).
+
+### False positive tambahan (sudah done, CLAUDE.md tidak sync)
+- **Offline mode WRITE** — 4 kind action (attendance_in/out, scan_order,
+  chat_message) sudah lengkap dengan IndexedDB queue via `idb`, conflict
+  resolver server-authoritative, idempotency via UNIQUE keys, blob upload
+  chain, driver lookup deferred, app-open flush, polling 30s.
+- **activity_logs coverage** — 6 event ter-hook: scan, absensi in/out,
+  validasi admin, chat moderation, login, isi saldo submit. Row count
+  rendah bukan karena bug — memang usage prod masih minim (`scan_orders=0`,
+  `raos_attendance=3` di dev).

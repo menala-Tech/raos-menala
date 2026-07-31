@@ -706,35 +706,70 @@ Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
   duplikat dengan sync SSOT). Fungsi masih ada di `03_order.gs` kalau
   perlu dipanggil manual dari script editor untuk debug.
 
-## Debt / Pending Tinggi (per akhir sesi 15 — 23 Juli 2026)
+## Debt / Pending Tinggi (per akhir sesi 21 — 31 Juli 2026)
 
-1. **KPI pipeline REFACTOR BESAR** (belum pernah jalan). `updateAllKpiThisMonth`
-   loop `staff_id` TEXT dari sheet, tapi `kpi_targets.staff_id` FK UUID →
-   insert selalu gagal. `kpi_targets` masih 0 baris. Butuh: sheet TARGET STAFF
-   diisi + refactor pipe pakai `user_profiles` Supabase UUID + rekap absensi
-   dari `raos_attendance` (bukan sheet ABSENSI lokal).
-2. **Hard-block scan/absensi di luar radius** (staff & koordinator). Sekarang
-   masih non-blocking. Interpretasi persis "50m di luar radius" perlu dipilih:
-   (A) jarak > radius + 50m tolerance, (B) jarak > 50m fix ignore radius,
-   (C) hard block kalau di luar radius, 50m cuma display threshold.
-3. **Chat gap sesi 15**:
-   - Create Room (proyek/multi-member) via `/admin` — perlu INSERT policy +
-     modal + member picker.
-   - Voice message (MediaRecorder + bucket mime `audio/webm` + type baru
-     `'audio'` di `chat_messages` + UI record/play).
-4. Aktifkan Leaked Password Protection di Supabase Auth Settings (manual, 1
-   klik, tidak bisa lewat SQL).
-5. Ganti password admin (masih `Menala2026!`).
-6. Set `branch_id` (T1/T2/T3) untuk Hendro (staff Soeta) via `/admin` — sync
-   SSOT tidak isi otomatis karena kolom itu RAOS-only.
-7. Isi PIN Hendro di sheet MASTER DATA STAFF (kolom H, minimal 6 digit
-   angka). Sync berikutnya (max 1 jam) propagate ke password Supabase Auth.
-8. Hapus `SUPABASE_SERVICE_ROLE_KEY` dari Vercel env vars kalau sempat
-   di-set sesi 13 (tidak dipakai lagi di PWA).
-9. Tambah kolom "Jabatan DIREKSI" di HRIS — mapping role direksi belum ada
-   di sheet.
-10. `logActivity()`: 0 baris di `activity_logs` — logging GAS belum aktif
-    meski helper ada.
-11. Offline mode (Service Worker upgrade cache-first strategy) + push
-    notification (FCM) — belum ada infra.
-6. **Push Notification (FCM)** & **Offline mode** (SW upgrade): belum ada infra.
+### Sudah selesai sesi 21 (baru saja)
+- ~~**Hard-block scan/absensi di luar radius**~~ — `GEOFENCE_TOLERANCE_METERS`
+  di [lib/geo.ts](apps/pwa/src/lib/geo.ts) di-set 500m (dari 1000m sebelumnya).
+  Interpretasi final: `jarak > radius + 500m` → block staff (koord/direksi/
+  exempt bypass). Infra `shouldBlockByGeofence()` sudah ada sejak sesi 17.
+- ~~**Push subscription = 0 orang**~~ — root cause: default `notifMaster: true`
+  di localStorage bikin toggle terlihat aktif tanpa pernah panggil
+  `subscribePush()`. Fix: hook `useAutoPushSubscribe()` di AppShell — kalau
+  permission granted + notifMaster !== false + belum ada sub → auto call
+  `subscribePush()` diam-diam. Guard sessionStorage `raos_push_heal_v1`.
+  File baru: [lib/useAutoPushSubscribe.ts](apps/pwa/src/lib/useAutoPushSubscribe.ts).
+- ~~**Debt #7 SUPABASE_SERVICE_ROLE_KEY di Vercel**~~ — cek via Vercel MCP,
+  ternyata tidak pernah ada di env vars project `raos-menala`. Clean.
+- ~~**Legacy table `public.drivers`**~~ — di-rename ke
+  `drivers_deprecated_20260731` (migration `raos_064`) setelah audit
+  0 FK/view/function/policy/kode. Drop candidate 2026-08-21.
+- ~~**2 SECURITY DEFINER views + 1 mutable search_path**~~ — migration
+  `raos_065` set `security_invoker=true` di `raos_notification_stats_daily`
+  + `raos_geofence_points`, dan `SET search_path=public` di
+  `notifications_touch`. Semua ERROR advisor bersih.
+
+### False positive — sudah done tapi CLAUDE.md tidak sync
+- **KPI pipeline refactor** — teknis SEMUA sudah done sesi 17: `staff_id`
+  UUID, `updateAllKpiRAOS()` pakai `user_profiles` Supabase, absensi dari
+  `raos_attendance`, saldo dari `raos_saldo_requests`, cron 22:00 forward
+  via `updateAllKpiThisMonth` → `updateAllKpiRAOS`. `kpi_targets` sudah
+  26 rows dengan UUID valid. **Blocker sesungguhnya**: sheet MASTER TARGET
+  belum diisi angka target per cabang (semua cabang skip dengan warning
+  di `system_logs`). Sheet RAOS_KPI_MANUAL juga belum diisi bulanan.
+  Solusi: kamu isi 2 sheet tsb, run manual "▶️ Update KPI Bulan Ini" dari
+  menu GAS, cron 22:00 otomatis lanjut.
+- **Chat CreateRoom modal proyek/multi-member** — sudah ada
+  `CreateProyekRoomModal` di [admin/page.tsx:391](apps/pwa/src/app/admin/page.tsx#L391)
+  dengan branch dropdown + member picker + search. RPC `create_proyek_room`
+  SECURITY DEFINER (bypass RLS INSERT chat_rooms — INSERT policy sengaja
+  tidak ada, harus lewat RPC).
+- **Chat voice message** — sudah lengkap di
+  [chat/page.tsx:865-960](apps/pwa/src/app/chat/page.tsx#L865): MediaRecorder,
+  upload bucket `chat_attachments`, insert `chat_messages` type='audio'.
+  UI record button di [WorkspaceComposer.tsx:235](apps/pwa/src/components/workspace/WorkspaceComposer.tsx#L235).
+  Player di [TimelineMessage.tsx:73-77](apps/pwa/src/components/workspace/TimelineMessage.tsx#L73).
+
+### Debt manual (kamu yang eksekusi — aku tidak bisa)
+1. **Enable Leaked Password Protection** — 1 klik di
+   [Auth Dashboard](https://supabase.com/dashboard/project/vlievtojpmrbsmzlqswl/auth/policies).
+2. **Ganti password admin** (`Menala2026!`) — reset via Auth Dashboard →
+   Users → admin user → "Send password recovery", atau kirim password baru
+   ke Claude untuk `UPDATE auth.users` SQL.
+3. **Set branch_id (T1/T2/T3) Hendro** via `/admin` PWA (kolom RAOS-only,
+   tidak di-sync SSOT).
+4. **Isi PIN Hendro** di sheet MASTER DATA STAFF kolom H (≥6 digit angka).
+   Sync jam berikutnya propagate ke password Supabase Auth.
+5. **Isi sheet MASTER TARGET** — kolom B target order (Soeta), kolom C
+   target saldo Rp (cabang lain) supaya KPI pipeline bisa hitung.
+6. **Isi sheet RAOS_KPI_MANUAL** bulanan — briefing, edukasi, problem,
+   pelayanan, kerapian, pelanggaran per staff.
+
+### Debt yang masih relevan (BUKAN done)
+- **Tambah kolom "Jabatan DIREKSI" di HRIS** — mapping role direksi belum
+  ada di sheet SSOT MASTER DATA STAFF.
+- **`activity_logs` cuma 1 row** — logActivity GAS belum di-hook di event
+  lifecycle. Prioritas rendah, `system_logs` (9,712 rows) sudah cover
+  observability operational.
+- **Offline mode** (SW upgrade cache-first strategy) — belum ada infra.
+  Push Notification sudah live via VAPID (bukan FCM).

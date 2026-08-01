@@ -36,8 +36,16 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error || !data.user) { setError('Email atau PIN salah.'); setLoading(false); return }
+    // Driver login pakai ID Driver (numeric-only, dari SSOT sheet) sebagai
+    // username. Kalau input full numeric ≥6 digit, map ke dummy email
+    // <id>@driver.rifim.local — matches auth user yang di-provision GAS
+    // sync driver airport/external.
+    const trimmed = email.trim()
+    const isDriverId = /^\d{6,}$/.test(trimmed)
+    const loginEmail = isDriverId ? `${trimmed}@driver.rifim.local` : trimmed
+    const loginPassword = isDriverId && !password ? trimmed : password
+    const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword })
+    if (error || !data.user) { setError('Email/ID Driver atau PIN salah.'); setLoading(false); return }
     // Route ke landing sesuai role (staff → /dashboard, driver → /driver-workspace, dst)
     const { data: profile } = await supabase.from('user_profiles')
       .select('role').eq('id', data.user.id).single()
@@ -156,7 +164,7 @@ export default function LoginPage() {
             <form onSubmit={handleLogin} className="space-y-3">
               <div className="relative">
                 <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
-                <input type="email" placeholder="Email atau ID Staff" value={email}
+                <input type="text" placeholder="Email / ID Staff / ID Driver" value={email}
                   onChange={e => setEmail(e.target.value)}
                   className="input pl-10" autoComplete="username" required />
               </div>

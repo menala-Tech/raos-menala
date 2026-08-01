@@ -154,13 +154,9 @@ function syncStaffFromSSOT() {
       if (SKIP_CABANG_SYNC.indexOf(idCabang) >= 0) return
       if (!idCabang) return // baris kosong / header
 
-      // Auto-map slug ID CABANG → branches.id. Head Office atau slug yang
-      // belum di-seed → branch_id NULL (staff tetap masuk untuk PWA lain).
-      const branchId = branchMap[idCabang] || null
-      if (idCabang && !branchId && idCabang !== 'Head Office' && idCabang !== 'Admin') {
-        warnings.push(`Baris ${rowNum} (${staffId}): cabang "${idCabang}" tidak ada di tabel branches — branch_id di-set NULL`)
-      }
-
+      // Destructure identitas dulu supaya bisa dipakai di warning branchId
+      // di bawah (fix ReferenceError TDZ V8 — sebelumnya staffId dipakai
+      // sebelum declaration, sync 100% error di 2 baris).
       const email = String(emailRaw || '').trim().toLowerCase()
       const nama = String(namaRaw || '').replace(/⁠/g, '').trim() // buang word joiner
       const staffId = String(staffIdRaw || '').trim()
@@ -169,6 +165,13 @@ function syncStaffFromSSOT() {
       // Parse Gaji Staff (kolom C) — handle format "Rp 2.700.000", "2700000",
       // atau numeric langsung. Return null kalau kosong/tidak valid.
       const gaji = parseGajiSsot_(gajiRaw)
+
+      // Auto-map slug ID CABANG → branches.id. Head Office atau slug yang
+      // belum di-seed → branch_id NULL (staff tetap masuk untuk PWA lain).
+      const branchId = branchMap[idCabang] || null
+      if (idCabang && !branchId && idCabang !== 'Head Office' && idCabang !== 'Admin') {
+        warnings.push(`Baris ${rowNum} (${staffId}): cabang "${idCabang}" tidak ada di tabel branches — branch_id di-set NULL`)
+      }
 
       if (!email || !staffId || !nama) {
         warnings.push(`Baris ${rowNum}: email/nama/staff_id kosong, dilewati`)

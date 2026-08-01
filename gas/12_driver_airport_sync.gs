@@ -37,8 +37,110 @@ function getDriverAirportSpreadsheet_() {
   return SpreadsheetApp.openById(DRIVER_AIRPORT_SHEET_ID)
 }
 
+/**
+ * Provision Supabase Auth user + user_profiles untuk driver.
+ * Idempotent: kalau auth user sudah ada, refresh password (biar admin bisa
+ * ubah PIN via update SSOT). Kalau user_profiles sudah ada + source=manual,
+ * skip supaya baris manual tidak ditimpa.
+ *
+ * Email pattern: <driver_id>@driver.rifim.local (dummy, tidak dipakai kirim).
+ * Password default: driver_id itu sendiri (numeric, min 9 digit dari SSOT).
+ *
+ * Return true kalau berhasil provision/refresh, false kalau di-skip / error.
+ */
+function provisionDriverAuth_(driverRaosId, driverIdText, driverName, branchId) {
+  if (!driverIdText || String(driverIdText).length < 6) return false
+  const email = `${driverIdText}@driver.rifim.local`
+  const password = String(driverIdText)
+
+  // 1) Cari auth user existing by email
+  let authId = null
+  try {
+    authId = callSupabase('rpc/get_auth_user_id_by_email', 'POST', { p_email: email })
+  } catch (e) {
+    // RPC gagal — log tapi tetap coba create (kalau exists, GoTrue akan 422)
+    logSistem('warning', 'provisionDriverAuth_', 'warning',
+      `Lookup auth user ${email} gagal: ${e.message}`)
+  }
+
+  // 2) Kalau belum ada → create
+  if (!authId) {
+    try {
+      const created = callSupabaseAuth_('admin/users', 'POST', {
+        email: email,
+        password: password,
+        email_confirm: true,
+        user_metadata: { full_name: driverName, driver_id_text: driverIdText, role: 'driver' },
+      })
+      authId = created && created.id
+    } catch (e) {
+      // Kalau 422 email_exists, coba lookup ulang
+      if (String(e.message).indexOf('422') >= 0 || String(e.message).indexOf('already') >= 0) {
+        try {
+          authId = callSupabase('rpc/get_auth_user_id_by_email', 'POST', { p_email: email })
+        } catch (e2) { /* ignore */ }
+      }
+      if (!authId) {
+        logSistem('error', 'provisionDriverAuth_', 'error',
+          `Create auth user ${email}: ${e.message}`)
+        return false
+      }
+    }
+  } else {
+    // 3) Refresh password idempotent — supaya update SSOT propagate ke login
+    try {
+      callSupabaseAuth_(`admin/users/${authId}`, 'PUT', { password: password })
+    } catch (e) {
+      logSistem('warning', 'provisionDriverAuth_', 'warning',
+        `Refresh password ${email}: ${e.message}`)
+    }
+  }
+
+  // 4) Upsert user_profiles
+  try {
+    const existingProfile = callSupabase(
+      `user_profiles?id=eq.${authId}&select=id,source,driver_id`
+    )
+    const now = new Date().toISOString()
+    if (existingProfile && existingProfile.length > 0) {
+      const existing = existingProfile[0]
+      if (existing.source === 'manual') {
+        // Manual entry → jangan ditimpa
+        return false
+      }
+      callSupabase(`user_profiles?id=eq.${authId}`, 'PATCH', {
+        full_name: driverName,
+        role: 'driver',
+        driver_id: driverRaosId,
+        branch_id: branchId,
+        source: 'ssot_driver_airport',
+        ssot_synced_at: now,
+        is_active: true,
+      })
+    } else {
+      callSupabase('user_profiles', 'POST', {
+        id: authId,
+        staff_id: driverIdText,          // reuse staff_id column for driver_id text
+        full_name: driverName,
+        role: 'driver',
+        driver_id: driverRaosId,
+        branch_id: branchId,
+        source: 'ssot_driver_airport',
+        ssot_synced_at: now,
+        is_active: true,
+      })
+    }
+    return true
+  } catch (e) {
+    logSistem('error', 'provisionDriverAuth_', 'error',
+      `Upsert user_profiles driver ${driverIdText}: ${e.message}`)
+    return false
+  }
+}
+
 function syncDriverAirportFromSSOT() {
   let inserted = 0, updated = 0, deactivated = 0, errors = 0
+  let authProvisioned = 0, authSkipped = 0
 
   try {
     const ss = getDriverAirportSpreadsheet_()
@@ -72,15 +174,18 @@ function syncDriverAirportFromSSOT() {
             `raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}&select=id,source,branch_id`
           )
 
+          let raosDriverUuid = null
           if (existing && existing.length > 0) {
             if (existing[0].source !== 'ssot_driver_airport') {
               logSistem('warning', 'syncDriverAirportFromSSOT', 'warning',
                 `Driver ${idStr} sudah ada dengan source=manual, dilewati (tidak ditimpa)`)
               return
             }
+            raosDriverUuid = existing[0].id
             const patch = {
               name: String(namaDriver).trim(),
               is_active: true,
+              driver_type: 'airport',
               ssot_synced_at: new Date().toISOString(),
             }
             // Set branch_id kalau belum ada nilai eksplisit — jangan timpa
@@ -89,15 +194,25 @@ function syncDriverAirportFromSSOT() {
             callSupabase(`raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}`, 'PATCH', patch)
             updated++
           } else {
-            callSupabase('raos_drivers', 'POST', {
+            const created = callSupabase('raos_drivers?select=id', 'POST', {
               driver_id: idStr,
               name: String(namaDriver).trim(),
               branch_id: branchId,
               source: 'ssot_driver_airport',
+              driver_type: 'airport',
               is_active: true,
               ssot_synced_at: new Date().toISOString(),
             })
+            raosDriverUuid = (created && created[0] && created[0].id) || null
             inserted++
+          }
+
+          // Provision auth user + user_profiles (idempotent).
+          // ID Driver di SSOT = username/password login (per feedback 1 Agu 2026).
+          if (raosDriverUuid) {
+            const ok = provisionDriverAuth_(raosDriverUuid, idStr, String(namaDriver).trim(), branchId)
+            if (ok) authProvisioned++
+            else authSkipped++
           }
         } catch (e) {
           errors++
@@ -128,12 +243,12 @@ function syncDriverAirportFromSSOT() {
     })
 
     logSistem('sync', 'syncDriverAirportFromSSOT', errors ? 'warning' : 'success',
-      `${inserted} baru, ${updated} update, ${deactivated} nonaktif, ${errors} error`)
+      `${inserted} baru, ${updated} update, ${deactivated} nonaktif, ${authProvisioned} auth OK, ${authSkipped} auth skip, ${errors} error`)
 
     if (typeof SpreadsheetApp !== 'undefined') {
       try {
         SpreadsheetApp.getUi().alert(
-          `✅ Sync Driver Airport (SSOT) Selesai\n\n• Baru: ${inserted}\n• Update: ${updated}\n• Nonaktif (hilang dari sheet): ${deactivated}\n• Error: ${errors}\n\nCek sheet LOG SISTEM untuk detail.`
+          `✅ Sync Driver Airport (SSOT) Selesai\n\n• Baru: ${inserted}\n• Update: ${updated}\n• Nonaktif (hilang dari sheet): ${deactivated}\n• Auth login OK: ${authProvisioned}\n• Auth skipped/error: ${authSkipped}\n• Error: ${errors}\n\nCek sheet LOG SISTEM untuk detail.`
         )
       } catch (e) { /* dipanggil dari trigger, bukan menu — tidak ada UI */ }
     }

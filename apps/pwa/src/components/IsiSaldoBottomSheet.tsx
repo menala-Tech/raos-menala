@@ -42,7 +42,8 @@ export default function IsiSaldoBottomSheet({
 }: Props) {
   const [driverIdInput, setDriverIdInput] = useState('')
   const [driver, setDriver] = useState<DriverLookup | null>(null)
-  const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle')
+  const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'not_found' | 'error'>('idle')
+  const [lookupErrMsg, setLookupErrMsg] = useState<string>('')
   const [selectedNominal, setSelectedNominal] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -83,7 +84,12 @@ export default function IsiSaldoBottomSheet({
       }
       if (lookupErr) {
         console.warn('[IsiSaldoBottomSheet] driver lookup error', lookupErr)
+        setLookupErrMsg(lookupErr.message ?? String(lookupErr))
+        setLookupState('error')
+        setDriver(null)
+        return
       }
+      setLookupErrMsg('')
       if (data) {
         // Fetch branch name terpisah (silent kalau gagal)
         let branchName: string | null = null
@@ -178,6 +184,12 @@ export default function IsiSaldoBottomSheet({
             {lookupState === 'not_found' && (
               <p className="text-[11px] text-red-600 mt-1 flex items-center gap-1">
                 <AlertCircle size={11} /> ID Driver tidak ditemukan. Cek ejaan.
+              </p>
+            )}
+            {lookupState === 'error' && (
+              <p className="text-[11px] text-red-600 mt-1 flex items-start gap-1">
+                <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+                <span>Koneksi ke database gagal: {lookupErrMsg}. Refresh halaman lalu coba lagi.</span>
               </p>
             )}
           </div>

@@ -192,9 +192,59 @@ export default function RiwayatPage() {
   ]
 
   const role = profile?.role ?? ''
-  const canEditQueue = ['koordinator', 'management', 'admin', 'direksi'].includes(role)
-  const canDeleteQueue = ['admin', 'direksi'].includes(role)
+  const canEdit = ['koordinator', 'management', 'admin', 'direksi'].includes(role)
+  const canDelete = ['admin', 'direksi'].includes(role)
+  const canEditQueue = canEdit
+  const canDeleteQueue = canDelete
   const orderCount = scans.length
+
+  async function deleteScan(row: ScanOrder) {
+    if (!canDelete) return
+    if (!confirm(`Hapus scan ${row.scan_id}?`)) return
+    const { error } = await supabase.from('scan_orders').delete().eq('id', row.id)
+    if (error) { alert('Gagal hapus scan: ' + error.message); return }
+    setScans(prev => prev.filter(r => r.id !== row.id))
+  }
+
+  async function deleteAbsensi(row: Attendance) {
+    if (!canDelete) return
+    if (!confirm(`Hapus absensi tanggal ${row.date}?`)) return
+    const { error } = await supabase.from('raos_attendance').delete().eq('id', row.id)
+    if (error) { alert('Gagal hapus absensi: ' + error.message); return }
+    setAbsensies(prev => prev.filter(r => r.id !== row.id))
+  }
+
+  async function deleteSaldo(row: SaldoRequest) {
+    if (!canDelete) return
+    if (!confirm(`Hapus pengajuan saldo ${row.request_no}?`)) return
+    const { error } = await supabase.from('raos_saldo_requests').delete().eq('id', row.id)
+    if (error) { alert('Gagal hapus saldo: ' + error.message); return }
+    setSaldoRequests(prev => prev.filter(r => r.id !== row.id))
+  }
+
+  async function cancelSaldo(row: SaldoRequest) {
+    if (!canEdit) return
+    if (row.is_processed || row.status !== 'pending') {
+      alert('Hanya pengajuan status Pending yang bisa dibatalkan.')
+      return
+    }
+    const reason = prompt('Alasan pembatalan pengajuan?')
+    if (!reason) return
+    const { error } = await supabase.from('raos_saldo_requests').update({
+      status: 'rejected', rejection_reason: reason, approved_by: profile?.id, approved_at: new Date().toISOString(),
+    }).eq('id', row.id)
+    if (error) { alert('Gagal batalkan: ' + error.message); return }
+    setSaldoRequests(prev => prev.map(r => r.id === row.id ? { ...r, status: 'rejected', rejection_reason: reason } : r))
+  }
+
+  async function editScanStatus(row: ScanOrder) {
+    if (!canEdit) return
+    const next = row.status === 'pending' ? 'valid' : row.status === 'valid' ? 'rejected' : 'pending'
+    if (!confirm(`Ubah status scan ${row.scan_id} dari ${row.status} → ${next}?`)) return
+    const { error } = await supabase.from('scan_orders').update({ status: next }).eq('id', row.id)
+    if (error) { alert('Gagal ubah status: ' + error.message); return }
+    setScans(prev => prev.map(r => r.id === row.id ? { ...r, status: next } as ScanOrder : r))
+  }
 
   async function markQueueCompleted(row: QueueRow) {
     if (!canEditQueue) return
@@ -351,82 +401,114 @@ export default function RiwayatPage() {
 
         {/* Scan list — tap untuk detail */}
         {!loading && (tab === 'semua' || tab === 'scan') && filteredScans.map(scan => (
-          <button
-            key={scan.id}
-            onClick={() => setDetail({ type: 'scan', data: scan })}
-            className="card w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
-          >
-            <div className={clsx(
-              'p-2.5 rounded-xl flex-shrink-0',
-              scan.status === 'valid' ? 'bg-green-50' : scan.status === 'pending' ? 'bg-yellow-50' : 'bg-red-50'
-            )}>
-              <ScanLine size={18} className={
-                scan.status === 'valid' ? 'text-green-600' : scan.status === 'pending' ? 'text-yellow-600' : 'text-red-600'
-              } />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <p className="font-bold text-sm text-gray-800 truncate">
-                  {(scan as any).raos_drivers?.name ?? 'Driver tidak diketahui'}
-                </p>
-                <span className={clsx(
-                  'text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0',
-                  scan.status === 'valid'   ? 'badge-valid' :
-                  scan.status === 'pending' ? 'badge-pending' : 'badge-rejected'
-                )}>
-                  {scan.status.toUpperCase()}
-                </span>
+          <div key={scan.id} className="card">
+            <button
+              onClick={() => setDetail({ type: 'scan', data: scan })}
+              className="w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
+            >
+              <div className={clsx(
+                'p-2.5 rounded-xl flex-shrink-0',
+                scan.status === 'valid' ? 'bg-green-50' : scan.status === 'pending' ? 'bg-yellow-50' : 'bg-red-50'
+              )}>
+                <ScanLine size={18} className={
+                  scan.status === 'valid' ? 'text-green-600' : scan.status === 'pending' ? 'text-yellow-600' : 'text-red-600'
+                } />
               </div>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {scan.scan_id} •{' '}
-                {new Date(scan.scanned_at).toLocaleString('id-ID', {
-                  day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                })}
-              </p>
-            </div>
-          </button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-sm text-gray-800 truncate">
+                    {(scan as any).raos_drivers?.name ?? 'Driver tidak diketahui'}
+                  </p>
+                  <span className={clsx(
+                    'text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0',
+                    scan.status === 'valid'   ? 'badge-valid' :
+                    scan.status === 'pending' ? 'badge-pending' : 'badge-rejected'
+                  )}>
+                    {scan.status.toUpperCase()}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {scan.scan_id} •{' '}
+                  {new Date(scan.scanned_at).toLocaleString('id-ID', {
+                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                  })}
+                </p>
+              </div>
+            </button>
+            {(canEdit || canDelete) && (
+              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
+                {canEdit && (
+                  <button
+                    onClick={() => editScanStatus(scan)}
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100"
+                  >
+                    Ubah Status
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    onClick={() => deleteScan(scan)}
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1"
+                  >
+                    <Trash2 size={11} /> Hapus
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         ))}
 
         {/* Absensi list — tap untuk detail */}
         {!loading && (tab === 'semua' || tab === 'absensi') && absensies.map(att => (
-          <button
-            key={att.id}
-            onClick={() => setDetail({ type: 'absensi', data: att })}
-            className="card w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
-          >
-            <div className="bg-blue-50 p-2.5 rounded-xl flex-shrink-0">
-              <UserCheck size={18} className="text-blue-600" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-sm text-gray-800">Absensi</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {new Date(att.date).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}
-                  </p>
+          <div key={att.id} className="card">
+            <button
+              onClick={() => setDetail({ type: 'absensi', data: att })}
+              className="w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
+            >
+              <div className="bg-blue-50 p-2.5 rounded-xl flex-shrink-0">
+                <UserCheck size={18} className="text-blue-600" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-sm text-gray-800">Absensi</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {new Date(att.date).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })}
+                    </p>
+                  </div>
+                  <span className={clsx(
+                    'text-[10px] font-bold px-2 py-0.5 rounded-full capitalize',
+                    att.status === 'hadir' ? 'badge-valid'
+                      : att.status === 'terlambat' ? 'badge-pending' : 'badge-rejected'
+                  )}>
+                    {att.status.toUpperCase()}
+                  </span>
                 </div>
-                <span className={clsx(
-                  'text-[10px] font-bold px-2 py-0.5 rounded-full capitalize',
-                  att.status === 'hadir' ? 'badge-valid'
-                    : att.status === 'terlambat' ? 'badge-pending' : 'badge-rejected'
-                )}>
-                  {att.status.toUpperCase()}
-                </span>
+                <div className="flex gap-3 mt-1">
+                  {att.check_in_at && (
+                    <span className="text-[11px] text-green-600 font-semibold">
+                      Masuk: {new Date(att.check_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                  {att.check_out_at && (
+                    <span className="text-[11px] text-primary font-semibold">
+                      Pulang: {new Date(att.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex gap-3 mt-1">
-                {att.check_in_at && (
-                  <span className="text-[11px] text-green-600 font-semibold">
-                    Masuk: {new Date(att.check_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                )}
-                {att.check_out_at && (
-                  <span className="text-[11px] text-primary font-semibold">
-                    Pulang: {new Date(att.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                )}
+            </button>
+            {canDelete && (
+              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
+                <button
+                  onClick={() => deleteAbsensi(att)}
+                  className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1"
+                >
+                  <Trash2 size={11} /> Hapus
+                </button>
               </div>
-            </div>
-          </button>
+            )}
+          </div>
         ))}
 
         {/* Isi Saldo list — 4-state lifecycle: Pending 🟡 → Approved 🟢 → Paid 🔵 / Rejected 🔴 */}
@@ -480,6 +562,26 @@ export default function RiwayatPage() {
                   <p className="text-[11px] text-red-600 mt-0.5">
                     Alasan: {req.rejection_reason}
                   </p>
+                )}
+                {(canEdit || canDelete) && (
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
+                    {canEdit && meta.status === 'pending' && (
+                      <button
+                        onClick={() => cancelSaldo(req)}
+                        className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100"
+                      >
+                        Batalkan
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        onClick={() => deleteSaldo(req)}
+                        className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1"
+                      >
+                        <Trash2 size={11} /> Hapus
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

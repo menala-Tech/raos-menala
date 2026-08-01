@@ -848,12 +848,30 @@ function ChatPageInner() {
   async function openPribadiWithMember(otherUserId: string) {
     if (!user || otherUserId === user.id) return
     const { data, error } = await supabase.rpc('get_or_create_pribadi_room', { p_other_user_id: otherUserId })
-    if (error || !data) { alert('Gagal buka chat pribadi: ' + (error?.message ?? '')); return }
-    const { data: roomData } = await supabase.from('chat_rooms').select('*').eq('id', data).single()
-    if (roomData) {
-      setRoomSheet('none')
-      setActiveRoom(roomData as ChatRoom)
+    if (error || !data) {
+      console.warn('[openPribadiWithMember] RPC failed', error)
+      alert('Gagal buka chat pribadi: ' + (error?.message ?? 'RPC tidak mengembalikan room_id'))
+      return
     }
+    const { data: roomData, error: roomErr } = await supabase
+      .from('chat_rooms').select('*').eq('id', data).maybeSingle()
+    if (roomErr) console.warn('[openPribadiWithMember] fetch room failed', roomErr)
+    // Fallback minimal room kalau SELECT belum propagate (baru dibuat via RPC).
+    const otherMember = roomMembers.find(m => m.user_id === otherUserId)
+    const otherName = otherMember?.user_profiles?.full_name ?? 'Chat Pribadi'
+    const targetRoom = roomData ?? ({
+      id: data as string,
+      name: otherName,
+      category: 'pribadi',
+      description: 'Chat pribadi',
+      branch_id: null,
+      is_active: true,
+      auto_delete_days: null,
+      created_by: user.id,
+      created_at: new Date().toISOString(),
+    } as any)
+    setRoomSheet('none')
+    setActiveRoom(targetRoom as ChatRoom)
   }
 
   // ── Voice recorder ───────────────────────────────────────────────────────
@@ -994,12 +1012,32 @@ function ChatPageInner() {
     setOpeningPribadi(otherUserId)
     const { data: roomId, error } = await supabase.rpc('get_or_create_pribadi_room', { p_other_user_id: otherUserId })
     setOpeningPribadi(null)
-    if (error || !roomId) { alert('Gagal buka chat pribadi: ' + (error?.message ?? 'unknown')); return }
-    const { data: room } = await supabase.from('chat_rooms').select('*').eq('id', roomId).single()
-    if (room) {
-      setContactSheet(false)
-      setActiveRoom(room)
+    if (error || !roomId) {
+      console.warn('[startPribadiChat] RPC failed', error)
+      alert('Gagal buka chat pribadi: ' + (error?.message ?? 'RPC tidak mengembalikan room_id'))
+      return
     }
+    // Fetch room dulu — kalau RLS SELECT belum propagate untuk pribadi baru dibuat,
+    // fallback ke minimal room object supaya UI tetap masuk ke room. Realtime
+    // subscribe di useEffect akan populate messages ketika data siap.
+    const { data: room, error: roomErr } = await supabase
+      .from('chat_rooms').select('*').eq('id', roomId).maybeSingle()
+    if (roomErr) console.warn('[startPribadiChat] fetch room failed', roomErr)
+    const otherContact = contactList.find(c => c.id === otherUserId)
+    const otherName = otherContact?.full_name ?? 'Chat Pribadi'
+    const targetRoom = room ?? ({
+      id: roomId as string,
+      name: otherName,
+      category: 'pribadi',
+      description: 'Chat pribadi',
+      branch_id: null,
+      is_active: true,
+      auto_delete_days: null,
+      created_by: user?.id ?? null,
+      created_at: new Date().toISOString(),
+    } as any)
+    setContactSheet(false)
+    setActiveRoom(targetRoom)
   }
 
   async function leaveRoom() {

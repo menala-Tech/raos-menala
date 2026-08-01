@@ -117,7 +117,10 @@ function ChatPageInner() {
     id: string; slug: string | null; name: string | null; saldo_nominal_options: number[]
   } | null>(null)
   const showSaldoRequestButton = isSaldoRoomContext(activeRoom, activeRoomBranch)
-  const showQueueRequestButton = isDriverRoomContext(activeRoom)
+  // Feedback 1 Agu 2026: tombol "+ Antrian Driver" di composer chat hanya
+  // dimunculkan untuk role driver (self-request). Staff/koord/mgmt/admin
+  // pakai /drivers page (tombol per driver) untuk Panggil/Selesai/Request.
+  const showQueueRequestButton = isDriverRoomContext(activeRoom) && user?.role === 'driver'
   const showPollButton = !showSaldoRequestButton && !showQueueRequestButton
 
   const [roomDrivers, setRoomDrivers] = useState<Array<{ id: string; driver_id: string; name: string }>>([])
@@ -1149,10 +1152,10 @@ function ChatPageInner() {
   // ─────────────────────────────────────────────────────────────────────────
 
   if (activeRoom) {
-    const showQueueSummary = Boolean(
-      queueSummary &&
-      ((activeRoom.name ?? '').toLowerCase().includes('driver') || (activeRoom.name ?? '').toLowerCase().includes('antrian'))
-    )
+    // Feedback 1 Agu 2026: sembunyikan QueueSummary card di room chat supaya
+    // ruang chat tidak habis oleh tabel antrian. Pantau antrian pindah ke
+    // /drivers atau /antrian-driver.
+    const showQueueSummary = false
     const composerDisabled = uploading || sendingLocation || pollSending || uploadingAudio
 
     return (

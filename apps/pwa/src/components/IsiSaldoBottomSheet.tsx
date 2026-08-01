@@ -60,13 +60,30 @@ export default function IsiSaldoBottomSheet({
       // Simple query — no branches join (join bisa gagal silently kalau RLS
       // branches block, atau kalau tidak ada FK relationship di schema
       // cache Supabase). Fetch branch name terpisah setelah driver ketemu.
-      const { data } = await supabase
+      // Feedback 1 Agustus 2026: kadang lookup gagal walau driver ada di DB.
+      // Coba 2 strategi: (1) exact match dulu (paling cepat, pakai index),
+      // (2) fallback ilike kalau exact tidak ketemu.
+      let { data, error: lookupErr } = await supabase
         .from('raos_drivers')
         .select('id, driver_id, name, branch_id')
         .eq('is_active', true)
-        .ilike('driver_id', q)
+        .eq('driver_id', q)
         .limit(1)
         .maybeSingle()
+      if (!data && !lookupErr) {
+        const fallback = await supabase
+          .from('raos_drivers')
+          .select('id, driver_id, name, branch_id')
+          .eq('is_active', true)
+          .ilike('driver_id', q)
+          .limit(1)
+          .maybeSingle()
+        data = fallback.data
+        lookupErr = fallback.error
+      }
+      if (lookupErr) {
+        console.warn('[IsiSaldoBottomSheet] driver lookup error', lookupErr)
+      }
       if (data) {
         // Fetch branch name terpisah (silent kalau gagal)
         let branchName: string | null = null

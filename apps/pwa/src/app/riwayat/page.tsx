@@ -8,13 +8,25 @@ import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import {
   ArrowLeft, Search, ScanLine, UserCheck, Filter, CheckCircle2, Clock,
-  X, BarChart3, MapPin, Car, User, Calendar, Wallet, XCircle,
+  X, BarChart3, MapPin, Car, User, Calendar, Wallet, XCircle, Users, Trash2,
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
-import type { ScanOrder, Attendance } from '@/types'
+import type { ScanOrder, Attendance, UserProfile } from '@/types'
 
-type Tab = 'semua' | 'scan' | 'absensi' | 'saldo'
+type Tab = 'semua' | 'scan' | 'absensi' | 'saldo' | 'antrian'
+
+interface QueueRow {
+  id: string
+  branch_id: string | null
+  position: number
+  status: 'waiting' | 'called' | 'completed' | 'left'
+  joined_at: string
+  called_at: string | null
+  completed_at: string | null
+  driver: { name: string; driver_id: string } | null
+  branch: { name: string } | null
+}
 
 interface SaldoRequest {
   id: string
@@ -64,6 +76,10 @@ export default function RiwayatPage() {
   const [scans, setScans] = useState<ScanOrder[]>([])
   const [absensies, setAbsensies] = useState<Attendance[]>([])
   const [saldoRequests, setSaldoRequests] = useState<SaldoRequest[]>([])
+  const [queueRows, setQueueRows] = useState<QueueRow[]>([])
+  const [queueBusy, setQueueBusy] = useState<string | null>(null)
+  const [queueErr, setQueueErr] = useState('')
+  const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<{ type: 'scan' | 'absensi'; data: any } | null>(null)
   const [showSummary, setShowSummary] = useState(false)
@@ -80,7 +96,13 @@ export default function RiwayatPage() {
       const toIso = to.toISOString()
       const toDate = to.toISOString().split('T')[0]
 
-      const [{ data: scanData }, { data: attData }, { data: saldoData }] = await Promise.all([
+      // Load profile sekali (untuk role gating tab Antrian).
+      if (!profile) {
+        const { data: p } = await supabase.from('user_profiles').select('*, branches(*)').eq('id', session.user.id).single()
+        if (p) setProfile(p as UserProfile)
+      }
+
+      const [{ data: scanData }, { data: attData }, { data: saldoData }, { data: queueData }] = await Promise.all([
         supabase.from('scan_orders')
           .select('*, raos_drivers(*), pickup_points(name)')
           .eq('staff_id', session.user.id)
@@ -101,14 +123,23 @@ export default function RiwayatPage() {
           .eq('staff_id', session.user.id)
           .gte('requested_at', fromIso).lte('requested_at', toIso)
           .order('requested_at', { ascending: false }).limit(200),
+        // Riwayat Antrian — RLS scope by branch. Ambil rentang tanggal sesuai
+        // filter. Tanpa filter user_id supaya staff/koord bisa lihat semua di
+        // cabang mereka; driver secara RLS hanya lihat cabang mereka juga.
+        supabase.from('raos_driver_queue')
+          .select('id, branch_id, position, status, joined_at, called_at, completed_at,' +
+                  'driver:raos_drivers(name, driver_id), branch:branches(name)')
+          .gte('joined_at', fromIso).lte('joined_at', toIso)
+          .order('joined_at', { ascending: false }).limit(200),
       ])
       setScans(scanData ?? [])
       setAbsensies(attData ?? [])
       setSaldoRequests((saldoData ?? []) as unknown as SaldoRequest[])
+      setQueueRows((queueData ?? []) as unknown as QueueRow[])
       setLoading(false)
     }
     load()
-  }, [router, dateRange])
+  }, [router, dateRange, profile])
 
   const filteredScans = scans.filter(s => {
     if (statusFilter !== 'semua' && s.status !== statusFilter) return false
@@ -153,11 +184,36 @@ export default function RiwayatPage() {
   }, [scans, absensies])
 
   const TABS: { key: Tab; label: string; count?: number }[] = [
-    { key: 'semua',   label: 'Semua',   count: filteredScans.length + absensies.length + saldoRequests.length },
+    { key: 'semua',   label: 'Semua',   count: filteredScans.length + absensies.length + saldoRequests.length + queueRows.length },
     { key: 'scan',    label: 'Scan',    count: filteredScans.length },
     { key: 'absensi', label: 'Absensi', count: absensies.length },
     { key: 'saldo',   label: 'Isi Saldo', count: saldoRequests.length },
+    { key: 'antrian', label: 'Antrian', count: queueRows.length },
   ]
+
+  const role = profile?.role ?? ''
+  const canEditQueue = ['koordinator', 'management', 'admin', 'direksi'].includes(role)
+  const canDeleteQueue = ['admin', 'direksi'].includes(role)
+  const orderCount = scans.length
+
+  async function markQueueCompleted(row: QueueRow) {
+    if (!canEditQueue) return
+    setQueueBusy(row.id); setQueueErr('')
+    const { error } = await supabase.rpc('raos_complete_queue', { p_queue_id: row.id })
+    setQueueBusy(null)
+    if (error) { setQueueErr(error.message); return }
+    setQueueRows(prev => prev.map(r => r.id === row.id ? { ...r, status: 'completed', completed_at: new Date().toISOString() } : r))
+  }
+
+  async function deleteQueueRow(row: QueueRow) {
+    if (!canDeleteQueue) return
+    if (!confirm(`Hapus riwayat antrian driver ${row.driver?.name ?? ''}?`)) return
+    setQueueBusy(row.id); setQueueErr('')
+    const { error } = await supabase.from('raos_driver_queue').delete().eq('id', row.id)
+    setQueueBusy(null)
+    if (error) { setQueueErr(error.message); return }
+    setQueueRows(prev => prev.filter(r => r.id !== row.id))
+  }
 
   return (
     <AppShell>
@@ -216,9 +272,10 @@ export default function RiwayatPage() {
 
       {/* Summary strip */}
       <div className="bg-white border-b border-gray-100 px-4 py-3">
-        <div className="grid grid-cols-4 gap-2 text-center">
+        <div className="grid grid-cols-5 gap-2 text-center">
           {[
             { label: 'Total',   value: summary.total,        color: 'text-gray-800' },
+            { label: 'Order',   value: orderCount,           color: 'text-purple-600' },
             { label: 'Valid',   value: summary.validScans,   color: 'text-green-600' },
             { label: 'Pending', value: summary.pendingScans, color: 'text-yellow-600' },
             { label: 'Absensi', value: absensies.length,     color: 'text-blue-600' },
@@ -429,7 +486,82 @@ export default function RiwayatPage() {
           )
         })}
 
-        {!loading && filteredScans.length === 0 && absensies.length === 0 && saldoRequests.length === 0 && (
+        {/* Riwayat Antrian — role gating: driver/staff view, koord edit, admin delete */}
+        {!loading && (tab === 'semua' || tab === 'antrian') && queueErr && (
+          <div className="bg-red-50 border border-red-100 text-red-600 text-xs px-3 py-2 rounded-lg flex items-start justify-between gap-2">
+            <span className="flex-1">{queueErr}</span>
+            <button onClick={() => setQueueErr('')} aria-label="Tutup"><X size={14} /></button>
+          </div>
+        )}
+        {!loading && (tab === 'semua' || tab === 'antrian') && queueRows.map(row => {
+          const statusColor = row.status === 'completed' ? 'bg-emerald-50 text-emerald-700'
+            : row.status === 'called' ? 'bg-blue-50 text-blue-700'
+            : row.status === 'waiting' ? 'bg-amber-50 text-amber-700'
+            : 'bg-gray-100 text-gray-500'
+          const busy = queueBusy === row.id
+          return (
+            <div key={row.id} className="card flex items-start gap-3">
+              <div className="p-2.5 rounded-xl flex-shrink-0 bg-blue-50">
+                <Users size={18} className="text-blue-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-bold text-sm text-gray-800 truncate">
+                    {row.driver?.name ?? 'Driver tidak diketahui'}
+                  </p>
+                  <span className={clsx('text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap uppercase', statusColor)}>
+                    {row.status} · #{row.position}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  {row.driver?.driver_id ?? '-'} · {row.branch?.name ?? '-'}
+                  {' · '}
+                  {new Date(row.joined_at).toLocaleString('id-ID', {
+                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                  })}
+                </p>
+                {(row.called_at || row.completed_at) && (
+                  <div className="flex gap-3 mt-1">
+                    {row.called_at && (
+                      <span className="text-[10px] text-blue-600">
+                        Panggil: {new Date(row.called_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                    {row.completed_at && (
+                      <span className="text-[10px] text-emerald-600">
+                        Selesai: {new Date(row.completed_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {(canEditQueue || canDeleteQueue) && (row.status === 'called' || row.status === 'waiting') && (
+                  <div className="flex items-center gap-2 mt-2">
+                    {canEditQueue && row.status === 'called' && (
+                      <button
+                        onClick={() => markQueueCompleted(row)}
+                        disabled={busy}
+                        className="text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
+                      >
+                        Tandai Selesai
+                      </button>
+                    )}
+                    {canDeleteQueue && (
+                      <button
+                        onClick={() => deleteQueueRow(row)}
+                        disabled={busy}
+                        className="text-[11px] font-semibold px-2 py-1 rounded-md bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50 flex items-center gap-1"
+                      >
+                        <Trash2 size={11} /> Hapus
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+
+        {!loading && filteredScans.length === 0 && absensies.length === 0 && saldoRequests.length === 0 && queueRows.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <Clock size={32} className="mx-auto mb-3 opacity-30" />
             <p className="text-sm font-medium">Belum ada riwayat di rentang ini</p>

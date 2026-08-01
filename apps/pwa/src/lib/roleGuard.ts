@@ -43,7 +43,7 @@ const ROLE_ROUTES: Record<string, string[]> = {
     '/antrian-driver', '/drivers', '/admin/barcodes',
   ],
   // driver: read-only workspace untuk melihat antrean sendiri, riwayat saldo,
-  // chat room driver cabang. Tidak akses staff/finance/admin apapun.
+  // chat room driver cabang. Tidak akses staff/admin apapun.
   driver: [
     '/driver-workspace', '/chat', '/settings', '/settings/bantuan',
     '/notifications', '/reset-password',

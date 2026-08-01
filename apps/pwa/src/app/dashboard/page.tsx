@@ -11,7 +11,7 @@ import {
   ScanLine, Clock, UserCheck, MessageCircle,
   Target, CheckCircle2, AlertCircle, Bell,
   TrendingUp, ShieldCheck, PieChart, Car, FileBarChart,
-  Wallet, ClipboardCheck,
+  ClipboardCheck,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
@@ -60,7 +60,6 @@ export default function DashboardPage() {
 
   const role = user?.role ?? ''
   const isKoordPlus = ['koordinator', 'admin', 'management', 'direksi'].includes(role)
-  const isFinance   = ['admin', 'management', 'direksi'].includes(role)
   const isAdmin     = isKoordPlus // legacy alias — kept untuk minimal diff
   const isDriverMgr = role === 'driver_manager'
 
@@ -77,9 +76,6 @@ export default function DashboardPage() {
       : []),
     ...(isKoordPlus
       ? [{ href: '/validasi-saldo', icon: ClipboardCheck, label: 'Validasi\nSaldo', color: 'bg-amber-600', bg: 'bg-amber-50' }]
-      : []),
-    ...(isFinance
-      ? [{ href: '/finance', icon: Wallet, label: 'Finance\nDashboard', color: 'bg-sky-600', bg: 'bg-sky-50' }]
       : []),
     ...(isAdmin
       ? [

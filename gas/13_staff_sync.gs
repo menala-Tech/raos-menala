@@ -105,6 +105,16 @@ function mapJabatanToRole_(jabatan) {
   return null // jabatan tidak dikenal → skip baris
 }
 
+/** Parse "Rp 2.700.000" atau "2700000" → 2700000. Return null kalau invalid. */
+function parseGajiSsot_(raw) {
+  if (raw === null || raw === undefined || raw === '') return null
+  if (typeof raw === 'number') return isFinite(raw) ? raw : null
+  const s = String(raw).replace(/rp/i, '').replace(/[.\s]/g, '').replace(/,/g, '.').trim()
+  if (!s) return null
+  const n = parseFloat(s)
+  return isFinite(n) && n >= 0 ? n : null
+}
+
 function normalizePin_(rawPin) {
   const s = String(rawPin || '').trim()
   if (!s) return { valid: false, reason: 'kosong' }
@@ -136,7 +146,7 @@ function syncStaffFromSSOT() {
 
     rows.forEach((row, i) => {
       const rowNum = i + 2 // sheet row (1-based, +1 for skipped header)
-      const [emailRaw, namaRaw, /* gaji */, idCabangRaw, staffIdRaw, jabatanRaw, phoneRaw, pinRaw] = row
+      const [emailRaw, namaRaw, gajiRaw, idCabangRaw, staffIdRaw, jabatanRaw, phoneRaw, pinRaw] = row
 
       const idCabang = String(idCabangRaw || '').trim()
       // Post sesi 17: tarik SEMUA staff RIFIM (bukan filter cabang).
@@ -156,6 +166,9 @@ function syncStaffFromSSOT() {
       const staffId = String(staffIdRaw || '').trim()
       const role = mapJabatanToRole_(jabatanRaw)
       const phone = String(phoneRaw || '').trim() || null
+      // Parse Gaji Staff (kolom C) — handle format "Rp 2.700.000", "2700000",
+      // atau numeric langsung. Return null kalau kosong/tidak valid.
+      const gaji = parseGajiSsot_(gajiRaw)
 
       if (!email || !staffId || !nama) {
         warnings.push(`Baris ${rowNum}: email/nama/staff_id kosong, dilewati`)
@@ -221,6 +234,7 @@ function syncStaffFromSSOT() {
             full_name: nama,
             role: role,
             phone: phone,
+            gaji: gaji,
             source: 'ssot_master_staff',
             ssot_synced_at: now,
             is_active: true,
@@ -243,6 +257,7 @@ function syncStaffFromSSOT() {
             full_name: nama,
             role: role,
             phone: phone,
+            gaji: gaji,
             branch_id: branchId,
             source: 'ssot_master_staff',
             ssot_synced_at: now,

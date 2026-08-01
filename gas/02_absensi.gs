@@ -15,7 +15,9 @@ function importAbsensiFromSupabase() {
   )
 
   if (!rows || !rows.length) {
-    SpreadsheetApp.getUi().alert('Tidak ada data absensi di Supabase.')
+    // getUi() throw dari time-based trigger context — wrap try/catch supaya
+    // trigger tidak 100% error (audit 1 Agu 2026).
+    try { SpreadsheetApp.getUi().alert('Tidak ada data absensi di Supabase.') } catch (e) { /* trigger context */ }
     return
   }
 
@@ -44,7 +46,7 @@ function importAbsensiFromSupabase() {
     .setBackground('#1a3a5c').setFontColor('#ffffff').setFontWeight('bold')
 
   logSistem('import', 'importAbsensiFromSupabase', 'success', `${rows.length} data diimport`)
-  SpreadsheetApp.getUi().alert(`✅ Berhasil import ${rows.length} data absensi dari Supabase.`)
+  try { SpreadsheetApp.getUi().alert(`✅ Berhasil import ${rows.length} data absensi dari Supabase.`) } catch (e) { /* trigger context */ }
 }
 
 function syncAbsensiToSupabase() {

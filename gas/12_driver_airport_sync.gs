@@ -140,13 +140,25 @@ function provisionDriverAuth_(driverRaosId, driverIdText, driverName, branchId) 
 
 function syncDriverAirportFromSSOT() {
   let inserted = 0, updated = 0, deactivated = 0, errors = 0
-  let authProvisioned = 0, authSkipped = 0
+  let authProvisioned = 0, authSkipped = 0, authAlreadyExists = 0
 
   try {
     const ss = getDriverAirportSpreadsheet_()
     const branchMap = kpiBranchMap_() // dari 13_staff_sync.gs — slug → branch_id
     const seenDriverIds = []
     const availableTabNames = ss.getSheets().map(s => s.getName())
+
+    // Pre-fetch existing driver user_profiles supaya sync 2x lipat lebih cepat.
+    // Untuk 225+ driver, tanpa pre-fetch tiap row butuh 4 request (RPC email +
+    // POST auth + GET profile + PATCH profile). Dengan map ini, driver yang
+    // sudah ter-provision skip semua kecuali PATCH raos_drivers.
+    const existingProfilesRaw = callSupabase(
+      'user_profiles?role=eq.driver&source=eq.ssot_driver_airport&is_active=eq.true&select=id,staff_id'
+    ) || []
+    const existingDriverProfiles = {}
+    existingProfilesRaw.forEach(p => {
+      if (p.staff_id) existingDriverProfiles[p.staff_id] = p.id
+    })
 
     DRIVER_AIRPORT_TABS.forEach(tabName => {
       const sh = ss.getSheetByName(tabName)
@@ -209,10 +221,16 @@ function syncDriverAirportFromSSOT() {
 
           // Provision auth user + user_profiles (idempotent).
           // ID Driver di SSOT = username/password login (per feedback 1 Agu 2026).
+          // Skip yang sudah ter-provision (dilihat dari pre-fetch map di atas)
+          // supaya sync tidak fetch redundant untuk 200+ driver setiap 6 jam.
           if (raosDriverUuid) {
-            const ok = provisionDriverAuth_(raosDriverUuid, idStr, String(namaDriver).trim(), branchId)
-            if (ok) authProvisioned++
-            else authSkipped++
+            if (existingDriverProfiles[idStr]) {
+              authAlreadyExists++
+            } else {
+              const ok = provisionDriverAuth_(raosDriverUuid, idStr, String(namaDriver).trim(), branchId)
+              if (ok) authProvisioned++
+              else authSkipped++
+            }
           }
         } catch (e) {
           errors++
@@ -243,12 +261,12 @@ function syncDriverAirportFromSSOT() {
     })
 
     logSistem('sync', 'syncDriverAirportFromSSOT', errors ? 'warning' : 'success',
-      `${inserted} baru, ${updated} update, ${deactivated} nonaktif, ${authProvisioned} auth OK, ${authSkipped} auth skip, ${errors} error`)
+      `${inserted} baru, ${updated} update, ${deactivated} nonaktif, ${authProvisioned} auth OK, ${authAlreadyExists} auth cached, ${authSkipped} auth skip, ${errors} error`)
 
     if (typeof SpreadsheetApp !== 'undefined') {
       try {
         SpreadsheetApp.getUi().alert(
-          `✅ Sync Driver Airport (SSOT) Selesai\n\n• Baru: ${inserted}\n• Update: ${updated}\n• Nonaktif (hilang dari sheet): ${deactivated}\n• Auth login OK: ${authProvisioned}\n• Auth skipped/error: ${authSkipped}\n• Error: ${errors}\n\nCek sheet LOG SISTEM untuk detail.`
+          `✅ Sync Driver Airport (SSOT) Selesai\n\n• Baru: ${inserted}\n• Update: ${updated}\n• Nonaktif (hilang dari sheet): ${deactivated}\n• Auth login BARU: ${authProvisioned}\n• Auth sudah ada (skip cepat): ${authAlreadyExists}\n• Auth skipped/error: ${authSkipped}\n• Error: ${errors}\n\nCek sheet LOG SISTEM untuk detail.`
         )
       } catch (e) { /* dipanggil dari trigger, bukan menu — tidak ada UI */ }
     }

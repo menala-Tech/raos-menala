@@ -69,19 +69,15 @@ function syncRaosCredentials() {
           return
         }
 
-        // Upsert ke raos_credentials (on_conflict = user_id primary key)
-        const upsertRes = callSupabase(
-          'raos_credentials?on_conflict=user_id',
-          'POST',
-          {
-            user_id: userId,
-            raos_staff_code: raosCode,
-            raos_pin: raosPin,
-            ssot_pin: ssotPin || null,
-            updated_at: now,
-          },
-          { Prefer: 'resolution=merge-duplicates,return=minimal' }
-        )
+        // Upsert ke raos_credentials — custom Prefer header (callSupabase
+        // built-in tidak support extra header, jadi inline UrlFetchApp).
+        _raosCredUpsert_({
+          user_id: userId,
+          raos_staff_code: raosCode,
+          raos_pin: raosPin,
+          ssot_pin: ssotPin || null,
+          updated_at: now,
+        })
         updated++
       } catch (e) {
         errors++
@@ -90,13 +86,37 @@ function syncRaosCredentials() {
     })
 
     const summary = `${updated} upsert, ${skipped} skip, ${errors} error, ${warnings.length} peringatan`
-    logToSystem_('syncRaosCredentials', errors ? 'warning' : 'success', summary)
-    warnings.slice(0, 30).forEach(w => logToSystem_('syncRaosCredentials', 'warning', w))
+    logSistem('sync', 'syncRaosCredentials', errors ? 'warning' : 'success', summary)
+    warnings.slice(0, 30).forEach(w => logSistem('sync', 'syncRaosCredentials', 'warning', w))
 
     return { updated, skipped, errors, warnings }
   } catch (e) {
-    logToSystem_('syncRaosCredentials', 'error', e.message || String(e))
+    logSistem('sync', 'syncRaosCredentials', 'error', e.message || String(e))
     throw e
+  }
+}
+
+// Inline upsert helper — Supabase REST butuh Prefer=resolution=merge-duplicates
+// untuk upsert; callSupabase() built-in tidak support extra headers.
+function _raosCredUpsert_(row) {
+  const opts = {
+    method: 'POST',
+    headers: {
+      apikey: CONFIG.SUPABASE_KEY,
+      Authorization: 'Bearer ' + CONFIG.SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    payload: JSON.stringify(row),
+    muteHttpExceptions: true,
+  }
+  const res = UrlFetchApp.fetch(
+    CONFIG.SUPABASE_URL + '/rest/v1/raos_credentials?on_conflict=user_id',
+    opts
+  )
+  const code = res.getResponseCode()
+  if (code >= 400) {
+    throw new Error('Upsert HTTP ' + code + ': ' + res.getContentText())
   }
 }
 

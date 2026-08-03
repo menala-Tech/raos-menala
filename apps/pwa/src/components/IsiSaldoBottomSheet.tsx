@@ -58,30 +58,20 @@ export default function IsiSaldoBottomSheet({
     if (!q) { setDriver(null); setLookupState('idle'); return }
     setLookupState('searching')
     debounceRef.current = window.setTimeout(async () => {
-      // Simple query — no branches join (join bisa gagal silently kalau RLS
-      // branches block, atau kalau tidak ada FK relationship di schema
-      // cache Supabase). Fetch branch name terpisah setelah driver ketemu.
-      // Feedback 1 Agustus 2026: kadang lookup gagal walau driver ada di DB.
-      // Coba 2 strategi: (1) exact match dulu (paling cepat, pakai index),
-      // (2) fallback ilike kalau exact tidak ketemu.
-      let { data, error: lookupErr } = await supabase
+      // Feedback 3 Agustus 2026: lookup terasa lambat. Optimasi:
+      //   (1) Debounce 400ms → 250ms
+      //   (2) Exact + case-insensitive fallback digabung jadi 1 query via
+      //       `.or()` — sebelumnya 2 roundtrip berurutan
+      //   (3) Branch name di-fetch async setelah driver di-set (non-blocking
+      //       UI). User langsung lihat status "found" tanpa nunggu branch.
+      const qEsc = q.replace(/[,()"]/g, '')
+      const { data, error: lookupErr } = await supabase
         .from('raos_drivers')
         .select('id, driver_id, name, branch_id')
         .eq('is_active', true)
-        .eq('driver_id', q)
+        .or(`driver_id.eq.${qEsc},driver_id.ilike.${qEsc}`)
         .limit(1)
         .maybeSingle()
-      if (!data && !lookupErr) {
-        const fallback = await supabase
-          .from('raos_drivers')
-          .select('id, driver_id, name, branch_id')
-          .eq('is_active', true)
-          .ilike('driver_id', q)
-          .limit(1)
-          .maybeSingle()
-        data = fallback.data
-        lookupErr = fallback.error
-      }
       if (lookupErr) {
         console.warn('[IsiSaldoBottomSheet] driver lookup error', lookupErr)
         setLookupErrMsg(lookupErr.message ?? String(lookupErr))
@@ -91,20 +81,22 @@ export default function IsiSaldoBottomSheet({
       }
       setLookupErrMsg('')
       if (data) {
-        // Fetch branch name terpisah (silent kalau gagal)
-        let branchName: string | null = null
-        if (data.branch_id) {
-          const { data: br } = await supabase
-            .from('branches').select('name').eq('id', data.branch_id).maybeSingle()
-          branchName = br?.name ?? null
-        }
-        setDriver({ ...(data as DriverLookup), branch_name: branchName })
+        // Set driver dulu (UI cepat), branch name menyusul async
+        setDriver({ ...(data as DriverLookup), branch_name: null })
         setLookupState('found')
+        if (data.branch_id) {
+          supabase
+            .from('branches').select('name').eq('id', data.branch_id).maybeSingle()
+            .then(({ data: br }) => {
+              if (br?.name) setDriver(prev => prev && prev.id === data.id
+                ? { ...prev, branch_name: br.name } : prev)
+            })
+        }
       } else {
         setDriver(null)
         setLookupState('not_found')
       }
-    }, 400)
+    }, 250)
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current) }
   }, [driverIdInput])
 

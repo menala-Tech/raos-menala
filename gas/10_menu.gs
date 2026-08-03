@@ -25,6 +25,7 @@ function onOpen() {
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('👥 Staff')
         .addItem('🔄 Sync Staff Soeta (SSOT MASTER DATA STAFF)', 'syncStaffFromSSOT')
+        .addItem('🔐 Sync RAOS Credentials (kolom I RAOS PIN + J RAOS ID)', 'menuSyncRaosCredentials')
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('📊 KPI RAOS')

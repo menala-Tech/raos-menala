@@ -1,6 +1,10 @@
 # CLAUDE.md — RAOS Project
 *Panduan Claude Code untuk proyek RAOS*
 
+> **⚠️ Setiap butuh deploy GAS**, baca dulu [../GAS_PROJECTS_MAP.md](../GAS_PROJECTS_MAP.md).
+> Ada 2 GAS project (RAOS + Rifim-OS) — kalau salah folder, salah deploy.
+> Helper otomatis: `.\..\gas-push.ps1 raos` (dari worktree ini).
+
 ## Lokasi Lokal (setelah relokasi 2026-07-18)
 ```
 C:\Projects\menala\

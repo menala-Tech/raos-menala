@@ -133,11 +133,13 @@ function syncDriverAirportFromSSOT() {
     // Fetch UUID untuk semua driver yang perlu auth provisioning.
     if (newForAuthProvision.length) {
       const newIds = newForAuthProvision.map(d => d.driver_id)
-      // Chunk fetch (IN clause bisa panjang, safe di 200)
+      // Chunk fetch — URL length limit + PostgREST IN sweet spot ~100 ids.
+      // NOTE: numeric driver_id TIDAK boleh di-quote di PostgREST in.() —
+      // format: in.(123,456,789), BUKAN in.("123","456").
       const uuidMap = {}
-      for (let i = 0; i < newIds.length; i += 200) {
-        const idSlice = newIds.slice(i, i + 200)
-        const inList = idSlice.map(id => '"' + id.replace(/"/g, '\\"') + '"').join(',')
+      for (let i = 0; i < newIds.length; i += 100) {
+        const idSlice = newIds.slice(i, i + 100)
+        const inList = idSlice.map(id => encodeURIComponent(id)).join(',')
         const rows = callSupabase(
           'raos_drivers?driver_id=in.(' + inList + ')&select=id,driver_id'
         ) || []
@@ -241,19 +243,25 @@ function syncDriverAirportFromSSOT() {
       .filter(d => d.source === 'ssot_driver_airport' && seenDriverIds.indexOf(d.driver_id) < 0)
       .map(d => d.driver_id)
     if (staleIds.length) {
-      try {
-        const inList = staleIds.map(id => '"' + id.replace(/"/g, '\\"') + '"').join(',')
-        callSupabase(
-          'raos_drivers?driver_id=in.(' + inList + ')',
-          'PATCH',
-          { is_active: false, ssot_synced_at: now }
-        )
-        deactivated = staleIds.length
-      } catch (e) {
-        errors++
-        logSistem('error', 'syncDriverAirportFromSSOT', 'error',
-          `Batch deactivate: ${e.message}`)
+      // Chunk 100 per PATCH (URL length safety)
+      let deactChunked = 0
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const slice = staleIds.slice(i, i + 100)
+        try {
+          const inList = slice.map(id => encodeURIComponent(id)).join(',')
+          callSupabase(
+            'raos_drivers?driver_id=in.(' + inList + ')',
+            'PATCH',
+            { is_active: false, ssot_synced_at: now }
+          )
+          deactChunked += slice.length
+        } catch (e) {
+          errors++
+          logSistem('error', 'syncDriverAirportFromSSOT', 'error',
+            `Batch deactivate chunk ${i}: ${e.message}`)
+        }
       }
+      deactivated = deactChunked
     }
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1)

@@ -132,190 +132,218 @@ function kpiBranchMap_() {
 }
 
 function syncStaffFromSSOT() {
-  let inserted = 0, updated = 0, deactivated = 0, skipped = 0, errors = 0
+  const t0 = Date.now()
+  let upserted = 0, deactivated = 0, skipped = 0, errors = 0, authNew = 0, authCached = 0
   const warnings = []
 
   try {
     const sh = getMasterStaffSheet_()
-    const rows = sh.getDataRange().getValues().slice(1) // skip header
-    const seenStaffIds = []
+    const rowsRaw = sh.getDataRange().getValues().slice(1)
     const now = new Date().toISOString()
     const branchMap = kpiBranchMap_()
-    // Head Office tidak punya branch entry — direksi/management bebas cabang
-    // (branch_id NULL, is_branch_in_scope bypass via role).
 
-    rows.forEach((row, i) => {
-      const rowNum = i + 2 // sheet row (1-based, +1 for skipped header)
+    // ─── 1) Parse + validate semua rows (in-memory, tanpa HTTP) ─────────
+    const validRows = [] // { rowNum, email, nama, staffId, role, phone, gaji, pin, branchId }
+    const seenStaffIds = []
+    rowsRaw.forEach((row, i) => {
+      const rowNum = i + 2
       const [emailRaw, namaRaw, gajiRaw, idCabangRaw, staffIdRaw, jabatanRaw, phoneRaw, pinRaw] = row
-
       const idCabang = String(idCabangRaw || '').trim()
-      // Post sesi 17: tarik SEMUA staff RIFIM (bukan filter cabang).
-      // Cabang di SKIP_CABANG_SYNC list → lewati (kosong default = tarik semua).
       if (SKIP_CABANG_SYNC.indexOf(idCabang) >= 0) return
-      if (!idCabang) return // baris kosong / header
+      if (!idCabang) return
 
-      // Destructure identitas dulu supaya bisa dipakai di warning branchId
-      // di bawah (fix ReferenceError TDZ V8 — sebelumnya staffId dipakai
-      // sebelum declaration, sync 100% error di 2 baris).
       const email = String(emailRaw || '').trim().toLowerCase()
-      const nama = String(namaRaw || '').replace(/⁠/g, '').trim() // buang word joiner
+      const nama = String(namaRaw || '').replace(/⁠/g, '').trim()
       const staffId = String(staffIdRaw || '').trim()
       const role = mapJabatanToRole_(jabatanRaw)
       const phone = String(phoneRaw || '').trim() || null
-      // Parse Gaji Staff (kolom C) — handle format "Rp 2.700.000", "2700000",
-      // atau numeric langsung. Return null kalau kosong/tidak valid.
       const gaji = parseGajiSsot_(gajiRaw)
-
-      // Auto-map slug ID CABANG → branches.id. Head Office atau slug yang
-      // belum di-seed → branch_id NULL (staff tetap masuk untuk PWA lain).
       const branchId = branchMap[idCabang] || null
-      if (idCabang && !branchId && idCabang !== 'Head Office' && idCabang !== 'Admin') {
-        warnings.push(`Baris ${rowNum} (${staffId}): cabang "${idCabang}" tidak ada di tabel branches — branch_id di-set NULL`)
-      }
 
+      if (idCabang && !branchId && idCabang !== 'Head Office' && idCabang !== 'Admin') {
+        warnings.push(`Baris ${rowNum} (${staffId}): cabang "${idCabang}" tidak ada di branches — branch_id NULL`)
+      }
       if (!email || !staffId || !nama) {
-        warnings.push(`Baris ${rowNum}: email/nama/staff_id kosong, dilewati`)
+        warnings.push(`Baris ${rowNum}: email/nama/staff_id kosong, skip`)
         skipped++
         return
       }
       if (!role) {
-        warnings.push(`Baris ${rowNum} (${staffId}): jabatan "${jabatanRaw}" tidak dikenal, dilewati`)
+        warnings.push(`Baris ${rowNum} (${staffId}): jabatan "${jabatanRaw}" unknown, skip`)
         skipped++
         return
       }
-
       const pin = normalizePin_(pinRaw)
       if (!pin.valid) {
-        warnings.push(`Baris ${rowNum} (${staffId} ${nama}): PIN ${pin.reason} — akun tetap dibuat tanpa password, staff harus pakai "Lupa Kata Sandi" untuk set PIN`)
+        warnings.push(`Baris ${rowNum} (${staffId} ${nama}): PIN ${pin.reason} — password tidak di-set`)
       }
-
       seenStaffIds.push(staffId)
-
-      try {
-        // 1) Cari auth user by email
-        const authIdResult = callSupabase(
-          'rpc/get_auth_user_id_by_email',
-          'POST',
-          { p_email: email }
-        )
-        let authId = authIdResult // RPC returns raw uuid or null
-
-        // 2) Kalau auth user belum ada → buat
-        if (!authId) {
-          const createBody = {
-            email: email,
-            email_confirm: true,
-            user_metadata: { full_name: nama, staff_id: staffId },
-          }
-          if (pin.valid) createBody.password = pin.value
-
-          const created = callSupabaseAuth_('admin/users', 'POST', createBody)
-          authId = created.id
-        } else if (pin.valid) {
-          // 3) Auth user sudah ada + PIN valid → refresh password (idempotent)
-          callSupabaseAuth_(`admin/users/${authId}`, 'PUT', { password: pin.value })
-        }
-
-        // 4) Upsert user_profiles
-        const existingProfile = callSupabase(
-          `user_profiles?id=eq.${authId}&select=id,source,staff_id,branch_id`
-        )
-
-        if (existingProfile && existingProfile.length > 0) {
-          const existing = existingProfile[0]
-          if (existing.source === 'manual') {
-            // Baris manual (mis. admin awal) — jangan ditimpa sync
-            warnings.push(`Baris ${rowNum} (${staffId}): user_profiles ${authId} sudah source=manual, dilewati`)
-            skipped++
-            return
-          }
-          // Update kolom SSoT + branch_id (auto-map dari slug ID CABANG, P1.4).
-          // Sub-terminal Soeta (T1/T2/T3) tetap di-set admin manual dari /admin
-          // — sheet SSOT tidak punya info terminal, hanya cabang top-level.
-          const patch = {
-            staff_id: staffId,
-            full_name: nama,
-            role: role,
-            phone: phone,
-            gaji: gaji,
-            source: 'ssot_master_staff',
-            ssot_synced_at: now,
-            is_active: true,
-            is_geofence_exempt: isStaffGeofenceExempt_(nama),
-          }
-          // Hanya set branch_id kalau belum ada value spesifik (T1/T2/T3
-          // yang di-set admin manual di /admin tidak boleh ditimpa cabang
-          // top-level). Kalau existing NULL atau parent Soeta, isi.
-          if (branchId && (!existing.branch_id || existing.branch_id === branchId)) {
-            patch.branch_id = branchId
-          }
-          callSupabase(`user_profiles?id=eq.${authId}`, 'PATCH', patch)
-          updated++
-        } else {
-          // Insert baru — branch_id auto-set dari slug SSOT.
-          // Untuk staff Soeta, admin masih perlu refine ke T1/T2/T3 via /admin.
-          callSupabase('user_profiles', 'POST', {
-            id: authId,
-            staff_id: staffId,
-            full_name: nama,
-            role: role,
-            phone: phone,
-            gaji: gaji,
-            branch_id: branchId,
-            source: 'ssot_master_staff',
-            ssot_synced_at: now,
-            is_active: true,
-            is_geofence_exempt: isStaffGeofenceExempt_(nama),
-          })
-          inserted++
-        }
-      } catch (e) {
-        errors++
-        logSistem('error', 'syncStaffFromSSOT', 'error',
-          `Baris ${rowNum} (${staffId}): ${e.message}`)
-      }
+      validRows.push({ rowNum, email, nama, staffId, role, phone, gaji, pin, branchId })
     })
 
-    // Soft-delist staff SSoT yang hilang dari sheet — jaga histori (FK ke user_profiles.id)
-    const currentSsot = callSupabase(
-      'user_profiles?source=eq.ssot_master_staff&is_active=eq.true&select=id,staff_id'
+    // ─── 2) Pre-fetch semua user_profiles source SSOT (1 call) ──────────
+    // Map staff_id → { id (auth uuid), source, branch_id }
+    const existingRaw = callSupabase(
+      'user_profiles?source=eq.ssot_master_staff&select=id,staff_id,source,branch_id&limit=1000'
     ) || []
-    const stale = currentSsot.filter(p => seenStaffIds.indexOf(p.staff_id) < 0)
+    const profilesByStaffId = {}
+    existingRaw.forEach(p => { if (p.staff_id) profilesByStaffId[p.staff_id] = p })
 
-    stale.forEach(p => {
-      try {
-        callSupabase(`user_profiles?id=eq.${p.id}`, 'PATCH', {
-          is_active: false,
-          ssot_synced_at: now,
-        })
-        deactivated++
-      } catch (e) {
-        errors++
-        logSistem('error', 'syncStaffFromSSOT', 'error',
-          `Deactivate ${p.staff_id}: ${e.message}`)
+    // Manual profiles (email→id) — untuk deteksi source=manual conflict
+    const manualRaw = callSupabase(
+      'user_profiles?source=eq.manual&select=id&limit=200'
+    ) || []
+    const manualAuthIds = {}
+    manualRaw.forEach(p => { manualAuthIds[p.id] = true })
+
+    // ─── 3) Klasifikasi rows → cached / new-auth-needed ─────────────────
+    const cachedRows = [] // sudah ada auth + profile, tinggal update user_profiles
+    const newAuthRows = [] // belum ada auth user → parallel create
+    validRows.forEach(r => {
+      const existing = profilesByStaffId[r.staffId]
+      if (existing) {
+        r.authId = existing.id
+        r.existingBranch = existing.branch_id
+        cachedRows.push(r)
+      } else {
+        newAuthRows.push(r)
       }
     })
 
-    // Log warnings ke LOG SISTEM (satu baris per warning)
-    warnings.forEach(w => logSistem('warning', 'syncStaffFromSSOT', 'warning', w))
-
-    logSistem('sync', 'syncStaffFromSSOT', errors ? 'warning' : 'success',
-      `${inserted} baru, ${updated} update, ${deactivated} nonaktif, ${skipped} dilewati, ${errors} error, ${warnings.length} peringatan`)
-
-    if (typeof SpreadsheetApp !== 'undefined') {
-      try {
-        SpreadsheetApp.getUi().alert(
-          '✅ Sync Staff Soeta (SSOT) Selesai\n\n' +
-          `• Baru:      ${inserted}\n` +
-          `• Update:    ${updated}\n` +
-          `• Nonaktif:  ${deactivated}\n` +
-          `• Dilewati:  ${skipped}\n` +
-          `• Error:     ${errors}\n` +
-          `• Peringatan:${warnings.length}\n\n` +
-          'Cek sheet LOG SISTEM untuk detail (PIN pendek/kosong, dsb).'
-        )
-      } catch (e) { /* dipanggil dari trigger, tidak ada UI */ }
+    // ─── 4) Parallel create auth users untuk yang baru ──────────────────
+    if (newAuthRows.length) {
+      const requests = newAuthRows.map(r => {
+        const payload = {
+          email: r.email,
+          email_confirm: true,
+          user_metadata: { full_name: r.nama, staff_id: r.staffId },
+        }
+        if (r.pin.valid) payload.password = r.pin.value
+        return {
+          url: CONFIG.SUPABASE_URL + '/auth/v1/admin/users',
+          method: 'post',
+          contentType: 'application/json',
+          headers: {
+            apikey: CONFIG.SUPABASE_KEY,
+            Authorization: 'Bearer ' + CONFIG.SUPABASE_KEY,
+          },
+          payload: JSON.stringify(payload),
+          muteHttpExceptions: true,
+        }
+      })
+      // Batch 50 concurrent
+      const AUTH_BATCH = 50
+      for (let i = 0; i < requests.length; i += AUTH_BATCH) {
+        const batchReq = requests.slice(i, i + AUTH_BATCH)
+        const batchRow = newAuthRows.slice(i, i + AUTH_BATCH)
+        const responses = UrlFetchApp.fetchAll(batchReq)
+        for (let j = 0; j < responses.length; j++) {
+          const res = responses[j]
+          const code = res.getResponseCode()
+          const r = batchRow[j]
+          if (code >= 200 && code < 300) {
+            try { r.authId = JSON.parse(res.getContentText()).id; authNew++ }
+            catch (e) { errors++; warnings.push(`${r.staffId}: parse auth create response fail`) }
+          } else if (code === 422 || res.getContentText().indexOf('already') >= 0) {
+            // Email exists — lookup id
+            try {
+              const looked = callSupabase('rpc/get_auth_user_id_by_email', 'POST', { p_email: r.email })
+              r.authId = Array.isArray(looked) ? looked[0] : looked
+              if (r.authId) authNew++
+            } catch (e) { errors++ }
+          } else {
+            errors++
+            logSistem('error', 'syncStaffFromSSOT', 'error',
+              `Baris ${r.rowNum} (${r.staffId}) auth create: HTTP ${code} ${res.getContentText().substring(0, 200)}`)
+          }
+        }
+      }
     }
+    authCached = cachedRows.length
+
+    // ─── 5) Build bulk payload user_profiles upsert ─────────────────────
+    // Skip yg source=manual (jangan timpa admin awal)
+    const bulkPayload = []
+    validRows.forEach(r => {
+      if (!r.authId) return // gagal create/lookup, skip silent
+      if (manualAuthIds[r.authId]) {
+        warnings.push(`Baris ${r.rowNum} (${r.staffId}): source=manual, skip`)
+        skipped++
+        return
+      }
+      const p = {
+        id: r.authId,
+        staff_id: r.staffId,
+        full_name: r.nama,
+        role: r.role,
+        phone: r.phone,
+        gaji: r.gaji,
+        source: 'ssot_master_staff',
+        ssot_synced_at: now,
+        is_active: true,
+        is_geofence_exempt: isStaffGeofenceExempt_(r.nama),
+      }
+      // Preserve branch_id kalau existing punya value spesifik (T1/T2/T3 admin manual)
+      if (r.branchId && (!r.existingBranch || r.existingBranch === r.branchId)) {
+        p.branch_id = r.branchId
+      } else if (r.existingBranch) {
+        p.branch_id = r.existingBranch
+      } else {
+        p.branch_id = r.branchId
+      }
+      bulkPayload.push(p)
+    })
+
+    // ─── 6) Bulk upsert (chunks 500) ────────────────────────────────────
+    for (let i = 0; i < bulkPayload.length; i += 500) {
+      const chunk = bulkPayload.slice(i, i + 500)
+      try {
+        _raosUserProfilesBulkUpsert_(chunk)
+        upserted += chunk.length
+      } catch (e) {
+        errors++
+        logSistem('error', 'syncStaffFromSSOT', 'error',
+          `Bulk upsert chunk ${i}: ${e.message}`)
+      }
+    }
+
+    // ─── 7) Soft-delist stale (batch PATCH via IN filter, chunks 100) ────
+    const staleIds = existingRaw
+      .filter(p => p.staff_id && seenStaffIds.indexOf(p.staff_id) < 0)
+      .map(p => p.id)
+    if (staleIds.length) {
+      let deactCount = 0
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const slice = staleIds.slice(i, i + 100)
+        try {
+          const inList = slice.map(id => encodeURIComponent(id)).join(',')
+          callSupabase(
+            'user_profiles?id=in.(' + inList + ')',
+            'PATCH',
+            { is_active: false, ssot_synced_at: now }
+          )
+          deactCount += slice.length
+        } catch (e) {
+          errors++
+          logSistem('error', 'syncStaffFromSSOT', 'error',
+            `Batch deactivate chunk ${i}: ${e.message}`)
+        }
+      }
+      deactivated = deactCount
+    }
+
+    // Log warnings (max 50) ke LOG SISTEM
+    warnings.slice(0, 50).forEach(w => logSistem('warning', 'syncStaffFromSSOT', 'warning', w))
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+    const summary = `${upserted} upsert, ${authNew} auth baru, ${authCached} auth cached, ` +
+      `${deactivated} nonaktif, ${skipped} dilewati, ${errors} error, ${warnings.length} peringatan, ${elapsed}s`
+    logSistem('sync', 'syncStaffFromSSOT', errors ? 'warning' : 'success', summary)
+
+    try { SpreadsheetApp.getUi().alert('✅ Sync Staff Soeta Selesai\n\n' + summary) }
+    catch (e) { /* trigger/webapp context */ }
+
+    return { upserted, authNew, authCached, deactivated, skipped, errors, warnings: warnings.length, elapsed_s: Number(elapsed) }
   } catch (e) {
     logSistem('error', 'syncStaffFromSSOT', 'error', e.message)
     throw e

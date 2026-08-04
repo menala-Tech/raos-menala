@@ -305,35 +305,76 @@ function _raosUserProfilesBulkUpsert_(rows) {
 }
 
 /**
- * FORCE re-provision password untuk SEMUA driver airport (jangan skip cached).
- * Pakai kalau admin habis update PIN driver di SSOT dan mau langsung propagate
- * ke Supabase Auth password. Jalankan MANUAL dari Apps Script Editor.
+ * FORCE refresh Supabase Auth password untuk SEMUA driver airport.
+ * Password driver = driver_id itu sendiri (numeric ID dari SSOT).
+ * Pakai kalau admin update driver_id massal di SSOT (misal rotasi ID).
+ * Butuh ~30-60 detik untuk 200+ driver.
  */
-function resyncDriverAirportAuth() {
-  const ss = getDriverAirportSpreadsheet_()
-  const drivers = []
-  DRIVER_AIRPORT_TABS.forEach(tab => {
-    const sh = ss.getSheetByName(tab)
-    if (!sh) return
-    sh.getDataRange().getValues().slice(1).forEach(row => {
-      const id = String(row[1] || '').trim()
-      if (id && id.length >= 6) drivers.push(id)
-    })
-  })
+function forceRefreshDriverAirportAuth() {
+  const t0 = Date.now()
+  let refreshed = 0, skippedNoAuth = 0, failed = 0
 
-  let ok = 0, failed = 0
-  const requests = drivers.map(id => ({
-    url: CONFIG.SUPABASE_URL + '/auth/v1/admin/users/' + id + '@driver.rifim.local',
-    method: 'get',
-    headers: {
-      apikey: CONFIG.SUPABASE_KEY,
-      Authorization: 'Bearer ' + CONFIG.SUPABASE_KEY,
-    },
-    muteHttpExceptions: true,
-  }))
-  // Note: this is a stub — full re-provision would need PUT admin/users/{id}
-  // per driver dengan new password. Kalau memang butuh, extend function ini.
-  logSistem('sync', 'resyncDriverAirportAuth', 'info',
-    `${drivers.length} driver — belum di-implementasi force refresh. Update code kalau perlu.`)
-  return { drivers: drivers.length, ok, failed, note: 'not_implemented' }
+  try {
+    const ss = getDriverAirportSpreadsheet_()
+
+    // Build target list: driver_id → auth uuid dari user_profiles cache
+    const profiles = callSupabase(
+      'user_profiles?role=eq.driver&source=eq.ssot_driver_airport&select=id,staff_id&limit=5000'
+    ) || []
+    const authByDriverId = {}
+    profiles.forEach(p => { if (p.staff_id) authByDriverId[p.staff_id] = p.id })
+
+    const targets = []
+    DRIVER_AIRPORT_TABS.forEach(tab => {
+      const sh = ss.getSheetByName(tab)
+      if (!sh) return
+      sh.getDataRange().getValues().slice(1).forEach(row => {
+        const driverId = String(row[1] || '').trim()
+        if (!driverId || driverId.length < 6) return
+        const authId = authByDriverId[driverId]
+        if (!authId) { skippedNoAuth++; return }
+        targets.push({ driverId, authId, password: driverId })
+      })
+    })
+
+    const requests = targets.map(t => ({
+      url: CONFIG.SUPABASE_URL + '/auth/v1/admin/users/' + t.authId,
+      method: 'put',
+      contentType: 'application/json',
+      headers: {
+        apikey: CONFIG.SUPABASE_KEY,
+        Authorization: 'Bearer ' + CONFIG.SUPABASE_KEY,
+      },
+      payload: JSON.stringify({ password: t.password }),
+      muteHttpExceptions: true,
+    }))
+
+    const BATCH = 50
+    for (let i = 0; i < requests.length; i += BATCH) {
+      const batchReq = requests.slice(i, i + BATCH)
+      const batchTgt = targets.slice(i, i + BATCH)
+      const responses = UrlFetchApp.fetchAll(batchReq)
+      for (let j = 0; j < responses.length; j++) {
+        const code = responses[j].getResponseCode()
+        if (code >= 200 && code < 300) refreshed++
+        else {
+          failed++
+          logSistem('error', 'forceRefreshDriverAirportAuth', 'error',
+            `${batchTgt[j].driverId} PUT auth: HTTP ${code}`)
+        }
+      }
+    }
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+    const summary = `${refreshed} refreshed, ${skippedNoAuth} skip-no-auth, ${failed} failed, ${elapsed}s`
+    logSistem('sync', 'forceRefreshDriverAirportAuth', failed ? 'warning' : 'success', summary)
+
+    try { SpreadsheetApp.getUi().alert('✅ Force Refresh Driver Airport Auth Selesai\n\n' + summary) }
+    catch (e) { /* webapp/trigger */ }
+
+    return { refreshed, skippedNoAuth, failed, elapsed_s: Number(elapsed) }
+  } catch (e) {
+    logSistem('error', 'forceRefreshDriverAirportAuth', 'error', e.message)
+    throw e
+  }
 }

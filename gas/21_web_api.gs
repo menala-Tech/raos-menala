@@ -18,13 +18,15 @@
 //   URL /exec tidak berubah, tapi kode baru baru ke-serve setelah redeploy.
 
 var _WEB_API_ALLOWED_ACTIONS = {
-  'sync_staff':           { fn: 'syncStaffFromSSOT',           label: 'Sync Staff dari SSOT' },
-  'sync_driver_airport':  { fn: 'syncDriverAirportFromSSOT',   label: 'Sync Driver Airport' },
-  'sync_driver_external': { fn: 'syncDriverExternalFromSSOT',  label: 'Sync Driver External' },
-  'sync_raos_credentials':{ fn: 'syncRaosCredentials',         label: 'Sync RAOS Credentials (kolom I/J)' },
-  'run_backup':           { fn: 'backupHarian',                label: 'Backup Spreadsheet Harian' },
-  'sync_selfie_drive':    { fn: 'syncSelfiePhotosToGDrive',    label: 'Sync Foto Selfie ke Drive' },
-  'run_kpi':              { fn: 'updateAllKpiRAOS',            label: 'Update KPI Bulan Ini' },
+  'sync_staff':                { fn: 'syncStaffFromSSOT',              label: 'Sync Staff dari SSOT' },
+  'sync_driver_airport':       { fn: 'syncDriverAirportFromSSOT',      label: 'Sync Driver Airport' },
+  'sync_driver_external':      { fn: 'syncDriverExternalFromSSOT',     label: 'Sync Driver External' },
+  'sync_raos_credentials':     { fn: 'syncRaosCredentials',            label: 'Sync RAOS Credentials (kolom I/J)' },
+  'run_backup':                { fn: 'backupHarian',                   label: 'Backup Spreadsheet Harian' },
+  'sync_selfie_drive':         { fn: 'syncSelfiePhotosToGDrive',       label: 'Sync Foto Selfie ke Drive' },
+  'run_kpi':                   { fn: 'updateAllKpiRAOS',               label: 'Update KPI Bulan Ini' },
+  'force_refresh_staff_auth':  { fn: 'forceRefreshStaffAuth',          label: 'Force Refresh Staff Auth Password' },
+  'force_refresh_driver_auth': { fn: 'forceRefreshDriverAirportAuth',  label: 'Force Refresh Driver Airport Auth Password' },
 };
 
 function doGet(e) {

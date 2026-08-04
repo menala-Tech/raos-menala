@@ -349,3 +349,78 @@ function syncStaffFromSSOT() {
     throw e
   }
 }
+
+/**
+ * FORCE refresh Supabase Auth password untuk SEMUA staff SSOT yg PIN-nya valid.
+ * Pakai kalau admin habis update PIN massal di sheet MASTER DATA STAFF dan mau
+ * langsung propagate ke Auth password (staff bisa login PWA pakai PIN baru).
+ * Skip staff dengan PIN kosong/tidak valid. Butuh ~10 detik untuk 30 staff.
+ */
+function forceRefreshStaffAuth() {
+  const t0 = Date.now()
+  let refreshed = 0, skippedNoPin = 0, skippedNoAuth = 0, failed = 0
+
+  try {
+    const sh = getMasterStaffSheet_()
+    const rowsRaw = sh.getDataRange().getValues().slice(1)
+
+    // Build valid list: staff dengan PIN valid + auth uuid
+    const profiles = callSupabase(
+      'user_profiles?source=eq.ssot_master_staff&select=id,staff_id&limit=1000'
+    ) || []
+    const authByStaffId = {}
+    profiles.forEach(p => { if (p.staff_id) authByStaffId[p.staff_id] = p.id })
+
+    const targets = []
+    rowsRaw.forEach(row => {
+      const staffId = String(row[4] || '').trim()
+      const pin = normalizePin_(row[7])
+      if (!staffId) return
+      if (!pin.valid) { skippedNoPin++; return }
+      const authId = authByStaffId[staffId]
+      if (!authId) { skippedNoAuth++; return }
+      targets.push({ staffId, authId, password: pin.value })
+    })
+
+    // Parallel PUT /auth/v1/admin/users/{id} batch 50
+    const requests = targets.map(t => ({
+      url: CONFIG.SUPABASE_URL + '/auth/v1/admin/users/' + t.authId,
+      method: 'put',
+      contentType: 'application/json',
+      headers: {
+        apikey: CONFIG.SUPABASE_KEY,
+        Authorization: 'Bearer ' + CONFIG.SUPABASE_KEY,
+      },
+      payload: JSON.stringify({ password: t.password }),
+      muteHttpExceptions: true,
+    }))
+
+    const BATCH = 50
+    for (let i = 0; i < requests.length; i += BATCH) {
+      const batchReq = requests.slice(i, i + BATCH)
+      const batchTgt = targets.slice(i, i + BATCH)
+      const responses = UrlFetchApp.fetchAll(batchReq)
+      for (let j = 0; j < responses.length; j++) {
+        const code = responses[j].getResponseCode()
+        if (code >= 200 && code < 300) refreshed++
+        else {
+          failed++
+          logSistem('error', 'forceRefreshStaffAuth', 'error',
+            `${batchTgt[j].staffId} PUT auth: HTTP ${code}`)
+        }
+      }
+    }
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+    const summary = `${refreshed} refreshed, ${skippedNoPin} skip-no-pin, ${skippedNoAuth} skip-no-auth, ${failed} failed, ${elapsed}s`
+    logSistem('sync', 'forceRefreshStaffAuth', failed ? 'warning' : 'success', summary)
+
+    try { SpreadsheetApp.getUi().alert('✅ Force Refresh Staff Auth Selesai\n\n' + summary) }
+    catch (e) { /* webapp/trigger */ }
+
+    return { refreshed, skippedNoPin, skippedNoAuth, failed, elapsed_s: Number(elapsed) }
+  } catch (e) {
+    logSistem('error', 'forceRefreshStaffAuth', 'error', e.message)
+    throw e
+  }
+}

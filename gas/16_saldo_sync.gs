@@ -217,48 +217,11 @@ function handleSaldoCheckboxEdit_(e) {
  * Kalau kolom H belum ada → ditambahkan.
  */
 function updateTargetStaffPencapaian_(requestId) {
-  try {
-    const req = callSupabase(
-      `raos_saldo_requests?id=eq.${requestId}&select=nominal,staff:user_profiles!staff_id(full_name)`
-    )
-    if (!req || req.length === 0) return
-    const nominal = Number(req[0].nominal) || 0
-    const namaStaff = req[0].staff?.full_name
-    if (!namaStaff || nominal <= 0) return
-
-    const sh = getSheet(CONFIG.SHEETS.TARGET_STAFF)
-    const rows = sh.getDataRange().getValues()
-    if (rows.length < 2) return
-
-    const now = new Date()
-    const bulan = now.getMonth() + 1
-    const tahun = now.getFullYear()
-
-    // Pastikan header punya kolom pencapaian_gmv
-    let colPencapaian = rows[0].indexOf('pencapaian_gmv') + 1
-    if (colPencapaian === 0) {
-      colPencapaian = rows[0].length + 1
-      sh.getRange(1, colPencapaian).setValue('pencapaian_gmv').setFontWeight('bold')
-    }
-
-    // Cari row match: nama + bulan + tahun
-    for (let i = 1; i < rows.length; i++) {
-      const rowDate = rows[i][0] instanceof Date ? rows[i][0] : new Date(rows[i][0])
-      if (isNaN(rowDate)) continue
-      if (rowDate.getMonth() + 1 !== bulan || rowDate.getFullYear() !== tahun) continue
-      if (String(rows[i][2] || '').trim() !== namaStaff) continue
-
-      const cell = sh.getRange(i + 1, colPencapaian)
-      const cur = Number(cell.getValue()) || 0
-      cell.setValue(cur + nominal)
-      return
-    }
-    // Row tidak ditemukan — log saja, jangan create otomatis (nama bisa typo)
-    logSistem('warning', 'updateTargetStaffPencapaian_', 'warning',
-      `Row TARGET STAFF untuk ${namaStaff} ${bulan}/${tahun} tidak ada — pencapaian ${nominal} tidak dicatat`)
-  } catch (e) {
-    logSistem('error', 'updateTargetStaffPencapaian_', 'error', e.message)
-  }
+  // NO-OP sejak 2026-08-04: sheet TARGET STAFF sudah dihapus (deleted via
+  // deleteRaosDeprecatedTabs). Pencapaian sekarang tersimpan otomatis di
+  // raos_saldo_requests.nominal + is_processed=true, aggregasi dilakukan
+  // updateAllKpiRAOS() saat generate kpi_targets Supabase.
+  return
 }
 
 /**

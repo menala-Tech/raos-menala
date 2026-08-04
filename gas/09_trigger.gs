@@ -29,17 +29,18 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('updateAllKpiThisMonth')
     .timeBased().atHour(22).everyDays(1).create()
 
-  // Laporan harian ke admin jam 21:00
-  ScriptApp.newTrigger('kirimLaporanHarianAdmin')
-    .timeBased().atHour(21).everyDays(1).create()
+  // [DEPRECATED sesi 2026-08-05] kirimLaporanHarianAdmin dihapus —
+  // Portal Rifim-OS Finance + HRIS sudah live dashboard realtime, email
+  // laporan harian redundant. Fungsi tetap ada, bisa dipanggil manual dari
+  // menu kalau butuh email ad-hoc.
 
   // Backup harian jam 02:00
   ScriptApp.newTrigger('backupHarian')
     .timeBased().atHour(2).everyDays(1).create()
 
-  // Push dashboard ke Supabase setiap 15 menit
-  ScriptApp.newTrigger('pushDashboardToSupabase')
-    .timeBased().everyMinutes(15).create()
+  // [DEPRECATED sesi 2026-08-05] pushDashboardToSupabase dihapus — sync
+  // Sheet DASHBOARD STAFF -> Supabase tidak digunakan lagi. KPI engine
+  // sudah baca langsung dari Supabase tabel (raos_saldo_requests dst).
 
   // Auto hapus riwayat lama setiap tanggal 2 jam 01:00
   ScriptApp.newTrigger('autoHapusRiwayatLama')
@@ -66,22 +67,19 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncStaffFromSSOT')
     .timeBased().everyHours(6).create()
 
-  // Sync pengajuan isi saldo ke tab "Form Isi Saldo" — 15 MENIT (dari 5 menit).
-  // Real-time berlebihan, isi saldo tidak sering. Onboarding manual via
-  // menu 💰 Isi Saldo → 🔄 Sync ke Sheet untuk instant refresh.
-  ScriptApp.newTrigger('syncSaldoRequestsToSheet')
-    .timeBased().everyMinutes(15).create()
+  // [DEPRECATED sesi 2026-08-05] syncSaldoRequestsToSheet dihapus —
+  // Bookmarklet AIST v2 baca langsung dari raos_saldo_requests Supabase,
+  // sheet "Form Isi Saldo" jadi arsip pasif. Manual sync tetap tersedia
+  // via menu 💰 Isi Saldo → 🔄 Sync ke Sheet kalau butuh update sheet.
 
   // Reminder chat "SALDO BELUM DIPROSES" untuk request >5 menit yang belum
   // dicentang. Cron 15 MENIT (dari 5) — cukup, kirim reminder tetap tepat waktu.
   ScriptApp.newTrigger('reminderSaldoBelumDiisi')
     .timeBased().everyMinutes(15).create()
 
-  // Sync raos_driver_queue → tab "Antrian Driver" setiap 30 MENIT (dari 15).
-  // Antrian sudah realtime via /antrian-driver page + realtime subscribe,
-  // sheet-side cukup untuk backup/reporting.
-  ScriptApp.newTrigger('syncDriverQueueToSheet')
-    .timeBased().everyMinutes(30).create()
+  // [DEPRECATED sesi 2026-08-05] syncDriverQueueToSheet dihapus —
+  // /antrian-driver PWA sudah realtime Supabase, sheet backup tidak dipakai.
+  // Manual sync tetap tersedia via menu 🚕 Antrian Driver → 🔄 Sync.
 
   // Archive absensi bulan sebelumnya - tanggal 1 setiap bulan jam 01:00.
   // Export raos_attendance ke Google Sheet baru di Drive
@@ -175,4 +173,43 @@ function onEdit(e) {
   // Function-nya sendiri di 16_saldo_sync.gs sengaja disimpan sebagai
   // referensi historis + kalau perlu bulk backfill manual, tapi tidak
   // lagi dipanggil dari onEdit.
+}
+
+// ============================================================
+// Cleanup one-shot: hapus 4 trigger deprecated (sesi 2026-08-05)
+// ============================================================
+// Kandidat hapus (based on user review):
+//   1. syncDriverQueueToSheet   — /antrian-driver sudah realtime
+//   2. syncSaldoRequestsToSheet — bookmarklet AIST v2 baca Supabase langsung
+//   3. kirimLaporanHarianAdmin  — Portal Rifim-OS live dashboard
+//   4. pushDashboardToSupabase  — KPI engine baca langsung Supabase
+//
+// Cara run: buka GAS editor, pilih fungsi deleteObsoleteTriggers,
+// klik Run. Lihat log Executions untuk confirm N trigger dihapus.
+// Idempotent — safe re-run kapan aja.
+function deleteObsoleteTriggers() {
+  const OBSOLETE = [
+    'syncDriverQueueToSheet',
+    'syncSaldoRequestsToSheet',
+    'kirimLaporanHarianAdmin',
+    'pushDashboardToSupabase',
+  ]
+  let deleted = 0
+  const kept = []
+  ScriptApp.getProjectTriggers().forEach(t => {
+    const fn = t.getHandlerFunction()
+    if (OBSOLETE.indexOf(fn) !== -1) {
+      ScriptApp.deleteTrigger(t)
+      deleted++
+      Logger.log(`DELETED trigger: ${fn}`)
+    } else {
+      kept.push(fn)
+    }
+  })
+  const msg = `Deleted ${deleted} obsolete triggers. ${kept.length} kept.`
+  Logger.log(msg)
+  Logger.log('Kept: ' + kept.sort().join(', '))
+  logSistem('cleanup', 'deleteObsoleteTriggers', 'success', msg)
+  try { SpreadsheetApp.getUi().alert(`✅ ${msg}\n\nKept: ${kept.length} trigger aktif.`) } catch (e) { /* headless run */ }
+  return { deleted, kept }
 }

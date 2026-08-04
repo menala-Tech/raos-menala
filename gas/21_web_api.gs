@@ -38,6 +38,20 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  // OUTER try/catch — pastikan SEMUA path return JSON. Kalau ada throw yg
+  // lolos, GAS default handler serve HTML page (bikin client parse gagal).
+  try {
+    return _doPostImpl_(e);
+  } catch (fatal) {
+    return _webJson({
+      ok: false, error: 'fatal_uncaught',
+      detail: (fatal && fatal.message) || String(fatal),
+      stack: (fatal && fatal.stack) ? String(fatal.stack).substring(0, 500) : null,
+    });
+  }
+}
+
+function _doPostImpl_(e) {
   var body = {};
   try {
     body = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
@@ -53,7 +67,12 @@ function doPost(e) {
   }
 
   if (!token) return _webJson({ ok: false, error: 'missing_token' });
-  var caller = _webVerifyCaller_(token);
+  var caller;
+  try {
+    caller = _webVerifyCaller_(token);
+  } catch (verifyErr) {
+    return _webJson({ ok: false, error: 'verify_throw', detail: verifyErr.message || String(verifyErr) });
+  }
   if (!caller.ok) return _webJson(caller);
 
   if (action === 'system_log_recent') {

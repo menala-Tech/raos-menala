@@ -104,18 +104,24 @@ function syncDriverExternalFromSSOT() {
       .map(d => d.driver_id)
 
     if (staleIds.length) {
-      try {
-        const inList = staleIds.map(id => '"' + id.replace(/"/g, '\\"') + '"').join(',')
-        callSupabase(
-          'raos_drivers?driver_id=in.(' + inList + ')',
-          'PATCH',
-          { is_active: false, ssot_synced_at: now }
-        )
-        deactivated = staleIds.length
-      } catch (e) {
-        errors++
-        warnings.push('Batch deactivate failed: ' + e.message)
+      // Chunk 100 per PATCH; numeric IDs tanpa quote.
+      let deactCount = 0
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const slice = staleIds.slice(i, i + 100)
+        try {
+          const inList = slice.map(id => encodeURIComponent(id)).join(',')
+          callSupabase(
+            'raos_drivers?driver_id=in.(' + inList + ')',
+            'PATCH',
+            { is_active: false, ssot_synced_at: now }
+          )
+          deactCount += slice.length
+        } catch (e) {
+          errors++
+          warnings.push('Batch deactivate chunk ' + i + ': ' + e.message)
+        }
       }
+      deactivated = deactCount
     }
 
     warnings.forEach(w => logSistem('warning', 'syncDriverExternalFromSSOT', 'warning', w))

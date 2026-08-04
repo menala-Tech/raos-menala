@@ -784,3 +784,104 @@ Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
   validasi admin, chat moderation, login, isi saldo submit. Row count
   rendah bukan karena bug — memang usage prod masih minim (`scan_orders=0`,
   `raos_attendance=3` di dev).
+
+## Sesi 2026-08-04 sore — KPI Targets V2 + Payroll + AIST Bookmarklet v2
+
+Backend foundation untuk cross-repo integration flow:
+**Room Chat Pengisian Saldo → Riwayat → Finance → KPI Staff → HRIS Payroll**.
+
+### Migration `raos_070` (4 sub-migration applied)
+
+- **`raos_070a_kpi_targets_v2_tables`** — 4 tabel baru:
+  - `raos_kpi_targets_branch` (branch_id, effective_month, target_cabang,
+    target_staff_default, mode='saldo'|'order') — target per cabang bulanan
+  - `raos_kpi_targets_staff` (staff_id, effective_month, target_saldo,
+    member_parkir_amount) — override + optional member parkir
+  - `raos_driver_staff_assignment` (driver_id UNIQUE, staff_id, branch_id) —
+    random assignment, 1 driver = 1 staff, management-only edit
+  - `raos_payroll` (staff_id, effective_month, gapok, bonus_saldo, bpjs,
+    paket_data, member_parkir, bonus_kpi, **thp GENERATED**, target_pct,
+    driver_active_pct, status_target) — payroll bulanan hasil compute
+- **`raos_070b1_views_only`** — 2 view `security_invoker=true`:
+  - `raos_target_tercapai_bulan` — SUM nominal `raos_saldo_requests` group
+    by staff+bulan (WHERE is_processed=true)
+  - `raos_driver_active_days_bulan` — COUNT DISTINCT hari driver assigned
+    isi saldo ≥1x per bulan
+- **`raos_070b2/b3/b4`** — RLS enable + policies (staff read own,
+  koord read cabang, admin+ read all; write management/direksi only untuk
+  assignment)
+- **`raos_070c_random_assign_rpc`** — `raos_random_assign_drivers(p_branch_id
+  uuid, p_force boolean DEFAULT false)` SECURITY DEFINER management/direksi
+  only. Fisher-Yates shuffle + round-robin distribute. p_force=true reset
+  semua assignment cabang dulu
+- **`raos_070d_compute_payroll_rpc`** — `raos_compute_payroll_month(p_month
+  date)` SECURITY DEFINER admin/mgmt/direksi. Loop semua staff aktif dengan
+  branch_id, hitung tier Bonus Saldo + Bonus KPI + status_target, UPSERT
+  ke raos_payroll
+
+### Tier formula (hardcoded di RPC)
+
+**Bonus Saldo** (max 1.5jt staff / 2jt koord, gate: ≥80% staff cabang capai
+target + individu capai):
+- `<80%` → 0 · `80-89%` → 60% × max · `90-99%` → 80% × max · `≥100%` → max
+
+**Bonus KPI** (max 300rb, gate: ≥80% driver assigned aktif ≥25 hari/bulan):
+- `<80%` → 0 · `80-89%` → 180rb · `90-99%` → 240rb · `≥100%` → 300rb
+
+**Excluded cabang** (slug ILIKE '%soeta%' OR '%makassar%'): bonus_saldo=0
++ status_target='na'. Bonus KPI tetap dihitung (pakai driver assignment).
+
+### PWA RAOS side
+
+- `/admin` tombol baru **🎲 Random Assign Driver → Staff** (dropdown
+  branch_id prompt + confirm force rebalance). Panggil RPC `raos_random_assign_drivers`.
+  RLS enforce management/direksi — kalau admin biasa/koord/staff coba,
+  alert error explicit.
+
+### Cross-repo integration
+
+- **UI Finance/HRIS bukan di RAOS PWA** — ada di **Rifim-OS Portal**
+  (`rifim-os.vercel.app/finance` + `/hris`). Lihat CLAUDE.md rifim-os
+  section "Sesi 2026-08-04 sore" untuk detail 3 tab baru (Target Cabang,
+  Target Staff, DB Driver) + 2 kolom baru HRIS Payroll (Bonus Saldo/KPI
+  RAOS) + endpoint crmApi.js baru
+- **Bookmarklet AIST v2** — source di
+  `C:\Projects\menala\rifim-os\automation\aist-bookmarklet\aist-fill-v2.source.js`
+  + install page `install.html`. Baca langsung `raos_saldo_requests`
+  (bukan sheet lama), auto-refresh 30s, auto-mark is_processed=true
+
+### Data source of truth per pipeline
+
+| Modul | Sumber data | Update trigger |
+|---|---|---|
+| Pengajuan Saldo | `raos_saldo_requests` PWA RAOS chat `/isisaldo` | User submit |
+| Riwayat Saldo | `raos_saldo_requests` | Realtime subscribe |
+| Finance Tab Isi Saldo | `raos_saldo_requests` proxy via crmApi | Broadcast `raos-saldo-new` |
+| KPI Target Cabang | `raos_kpi_targets_branch` | Manual edit tab Finance |
+| KPI Target Staff | `raos_kpi_targets_staff` (override) + view | Manual edit tab Finance |
+| Payroll Bonus | `raos_payroll` | RPC `raos_compute_payroll_month` (manual/cron) |
+| HRIS Payroll UI | `payroll` tabel HRIS + fetch bonus dari raos_payroll | Manual + Auto-fill button |
+
+### Debt sesi ini
+
+- **Auto-compute payroll saat saldo di-approve** — sekarang manual click
+  "⚙️ Recompute Payroll Bulan Ini" di Finance. Trigger AFTER UPDATE
+  raos_saldo_requests punya risiko performance (loop semua staff cabang
+  per event). Solusi tunda: cron GAS harian jam 22:00 panggil RPC
+- **Bookmarklet AIST selector heuristic** — `findInputByLabel(['Amount',
+  'Driver login',...])`. Kalau AIST DOM berubah label, edit array di
+  source. Test empiris masih perlu dari admin
+- **Sync raos_payroll → sheet spreadsheet** (Rule §1.-1) — belum dibuat
+  GAS sheet counterpart untuk `raos_payroll`. Tab MASTER TARGET existing
+  masih pakai schema lama (target Order/target Saldo per cabang, bukan
+  gabungan V2). Tinggal integrate atau biarkan sheet legacy jadi manual
+  reference
+
+### File touched sesi ini
+
+- **RAOS**: `apps/pwa/src/app/admin/page.tsx` (tombol random-assign) — PR
+  #48 merged commit `bbc25b1`
+- **Rifim-OS** (repo terpisah): `crmApi.js` (+10 endpoint), `finance/index.html`
+  (3 tab + modal helper), `hris/index.html` (2 kolom + autofill), 2 file
+  baru `aist-bookmarklet/` — commit main `7d77252`
+- **GAS Web App**: redeploy manual done (user confirm)

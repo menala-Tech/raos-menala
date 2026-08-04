@@ -29,103 +29,128 @@ function getDriverExternalSpreadsheet_() {
 }
 
 function syncDriverExternalFromSSOT() {
-  let inserted = 0, updated = 0, deactivated = 0, errors = 0
+  let upserted = 0, deactivated = 0, skipped = 0, errors = 0
   const warnings = []
+  const now = new Date().toISOString()
 
   try {
     const ss = getDriverExternalSpreadsheet_()
-    const branchMap = kpiBranchMap_() // dari 13_staff_sync.gs
-    const seenDriverIds = []
+    const branchMap = kpiBranchMap_()
     const availableTabNames = ss.getSheets().map(s => s.getName())
+
+    // 1) Pre-fetch semua driver existing (source-agnostic) — 1 HTTP call
+    const existingAll = callSupabase(
+      'raos_drivers?select=driver_id,source,branch_id&limit=10000'
+    ) || []
+    const existingMap = {}
+    existingAll.forEach(d => { existingMap[d.driver_id] = d })
+
+    // 2) Kumpulkan rows semua tab → buat payload bulk
+    const payload = []
+    const seenDriverIds = []
 
     DRIVER_EXTERNAL_TABS.forEach(tabName => {
       const sh = ss.getSheetByName(tabName)
       if (!sh) {
-        warnings.push(`Tab "${tabName}" tidak ditemukan di SSOT (tersedia: ${availableTabNames.join(', ')})`)
+        warnings.push(`Tab "${tabName}" tidak ditemukan (tersedia: ${availableTabNames.join(', ')})`)
         return
       }
       const branchId = branchMap[tabName] || null
       if (!branchId) {
-        warnings.push(`Branch untuk slug "${tabName}" tidak ada di tabel branches — driver di-set branch_id NULL`)
+        warnings.push(`Branch untuk slug "${tabName}" tidak ada di tabel branches`)
       }
-      const rows = sh.getDataRange().getValues().slice(1) // skip header
-
-      rows.forEach((row, i) => {
-        const [, driverId, namaDriver] = row
+      sh.getDataRange().getValues().slice(1).forEach(row => {
+        const driverId = String(row[1] || '').trim()
+        const namaDriver = String(row[2] || '').trim()
         if (!driverId) return
 
-        const idStr = String(driverId).trim()
-        seenDriverIds.push(idStr)
-
-        try {
-          const existing = callSupabase(
-            `raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}&select=id,source,branch_id`
-          )
-
-          if (existing && existing.length > 0) {
-            if (existing[0].source !== 'ssot_driver_external') {
-              // Kalau source-nya airport atau manual, jangan timpa
-              warnings.push(`Driver ${idStr} sudah ada dengan source=${existing[0].source}, dilewati`)
-              return
-            }
-            const patch = {
-              name: String(namaDriver).trim(),
-              is_active: true,
-              ssot_synced_at: new Date().toISOString(),
-            }
-            if (branchId && !existing[0].branch_id) patch.branch_id = branchId
-            callSupabase(`raos_drivers?driver_id=eq.${encodeURIComponent(idStr)}`, 'PATCH', patch)
-            updated++
-          } else {
-            callSupabase('raos_drivers', 'POST', {
-              driver_id: idStr,
-              name: String(namaDriver).trim(),
-              branch_id: branchId,
-              source: 'ssot_driver_external',
-              is_active: true,
-              ssot_synced_at: new Date().toISOString(),
-            })
-            inserted++
-          }
-        } catch (e) {
-          errors++
-          logSistem('error', 'syncDriverExternalFromSSOT', 'error',
-            `${tabName} baris ${i + 2} (${idStr}): ${e.message}`)
+        const existing = existingMap[driverId]
+        if (existing && existing.source !== 'ssot_driver_external') {
+          // milik airport / manual — jangan timpa
+          skipped++
+          return
         }
+        seenDriverIds.push(driverId)
+        payload.push({
+          driver_id: driverId,
+          name: namaDriver,
+          // preserve branch_id yg sudah diset admin manual; overwrite kalau kosong
+          branch_id: (existing && existing.branch_id) ? existing.branch_id : branchId,
+          source: 'ssot_driver_external',
+          driver_type: 'external',
+          is_active: true,
+          ssot_synced_at: now,
+        })
       })
     })
 
-    // Soft-delist driver_external yang hilang dari sheet
-    const currentSsot = callSupabase(
-      `raos_drivers?source=eq.ssot_driver_external&is_active=eq.true&select=driver_id`
-    ) || []
-    const stale = currentSsot.filter(d => seenDriverIds.indexOf(d.driver_id) < 0)
-
-    stale.forEach(d => {
+    // 3) Bulk upsert dalam chunks (Supabase batas ~1000 rows per POST, kita pakai 500)
+    const CHUNK_SIZE = 500
+    for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+      const chunk = payload.slice(i, i + CHUNK_SIZE)
       try {
-        callSupabase(`raos_drivers?driver_id=eq.${encodeURIComponent(d.driver_id)}`, 'PATCH', {
-          is_active: false,
-          ssot_synced_at: new Date().toISOString(),
-        })
-        deactivated++
+        _raosDriverBulkUpsert_(chunk)
+        upserted += chunk.length
       } catch (e) {
         errors++
+        logSistem('error', 'syncDriverExternalFromSSOT', 'error',
+          `Bulk chunk ${i}-${i + chunk.length}: ${e.message}`)
       }
-    })
+    }
+
+    // 4) Soft-delist stale — 1 batch PATCH via IN filter
+    const staleIds = existingAll
+      .filter(d => d.source === 'ssot_driver_external' && seenDriverIds.indexOf(d.driver_id) < 0)
+      .map(d => d.driver_id)
+
+    if (staleIds.length) {
+      try {
+        const inList = staleIds.map(id => '"' + id.replace(/"/g, '\\"') + '"').join(',')
+        callSupabase(
+          'raos_drivers?driver_id=in.(' + inList + ')',
+          'PATCH',
+          { is_active: false, ssot_synced_at: now }
+        )
+        deactivated = staleIds.length
+      } catch (e) {
+        errors++
+        warnings.push('Batch deactivate failed: ' + e.message)
+      }
+    }
 
     warnings.forEach(w => logSistem('warning', 'syncDriverExternalFromSSOT', 'warning', w))
-    logSistem('sync', 'syncDriverExternalFromSSOT', errors ? 'warning' : 'success',
-      `${inserted} baru, ${updated} update, ${deactivated} nonaktif, ${errors} error, ${warnings.length} peringatan`)
+    const summary = `${upserted} upsert, ${deactivated} nonaktif, ${skipped} skip, ${errors} error, ${warnings.length} peringatan`
+    logSistem('sync', 'syncDriverExternalFromSSOT', errors ? 'warning' : 'success', summary)
 
     try {
-      SpreadsheetApp.getUi().alert(
-        `✅ Sync Driver Eksternal Selesai\n\n` +
-        `• Baru: ${inserted}\n• Update: ${updated}\n• Nonaktif: ${deactivated}\n• Error: ${errors}\n\n` +
-        'Cek LOG SISTEM untuk detail warning.'
-      )
-    } catch (e) { /* trigger context */ }
+      SpreadsheetApp.getUi().alert('✅ Sync Driver Eksternal Selesai\n\n' + summary + '\n\nCek LOG SISTEM untuk detail.')
+    } catch (e) { /* trigger/webapp context */ }
+
+    return { upserted, deactivated, skipped, errors, warnings }
   } catch (e) {
     logSistem('error', 'syncDriverExternalFromSSOT', 'error', e.message)
     throw e
   }
+}
+
+// Bulk upsert helper — custom Prefer header (callSupabase built-in tidak
+// support extra headers). Butuh Prefer resolution=merge-duplicates untuk
+// upsert Supabase.
+function _raosDriverBulkUpsert_(rows) {
+  const res = UrlFetchApp.fetch(
+    CONFIG.SUPABASE_URL + '/rest/v1/raos_drivers?on_conflict=driver_id',
+    {
+      method: 'POST',
+      headers: {
+        apikey: CONFIG.SUPABASE_KEY,
+        Authorization: 'Bearer ' + CONFIG.SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      payload: JSON.stringify(rows),
+      muteHttpExceptions: true,
+    }
+  )
+  const code = res.getResponseCode()
+  if (code >= 400) throw new Error('HTTP ' + code + ': ' + res.getContentText().substring(0, 500))
 }

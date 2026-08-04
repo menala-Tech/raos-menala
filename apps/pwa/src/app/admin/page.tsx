@@ -183,6 +183,21 @@ export default function AdminPage() {
             <button
               onClick={async () => {
                 if (!user) return
+                const branchId = prompt('Random-assign driver ke staff cabang mana? (paste UUID branch_id — cek di tab Finance > DB Driver Portal Rifim-OS)')
+                if (!branchId) return
+                const force = confirm('Force rebalance? (OK = hapus semua assignment cabang ini lalu redistribute, Cancel = hanya assign driver yang belum punya staff)')
+                const { data, error } = await supabase.rpc('raos_random_assign_drivers', { p_branch_id: branchId, p_force: force })
+                if (error) { alert('Gagal: ' + error.message + '\n\nCatatan: hanya role management/direksi yang boleh trigger ini.'); return }
+                alert(`✅ ${data} driver ter-assign${force ? ' (rebalanced)' : ''}`)
+              }}
+              className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-amber-500/10 rounded-lg text-left"
+            >
+              <QrCode size={16} className="text-amber-600" />
+              🎲 Random Assign Driver → Staff (management/direksi only)
+            </button>
+            <button
+              onClick={async () => {
+                if (!user) return
                 if (!confirm('Kirim test push notification ke akun Anda sendiri sekarang?')) return
                 const { data: { session } } = await supabase.auth.getSession()
                 const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/raos-send-push`, {

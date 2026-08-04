@@ -83,6 +83,13 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncDriverQueueToSheet')
     .timeBased().everyMinutes(30).create()
 
+  // Archive absensi bulan sebelumnya - tanggal 1 setiap bulan jam 01:00.
+  // Export raos_attendance ke Google Sheet baru di Drive
+  // {ABSENSI_PHOTOS_ROOT_ID}/Absensi/[YYYY-MM Bulan]/Absensi_[Bulan].xlsx
+  // Trigger reset otomatis - HRIS Absensi tab lihat bulan berjalan aja
+  ScriptApp.newTrigger('archiveAbsensiPreviousMonth')
+    .timeBased().atHour(1).onMonthDay(1).create()
+
   logSistem('setup', 'setupAllTriggers', 'success', 'Semua trigger berhasil dipasang')
   SpreadsheetApp.getUi().alert('✅ Semua trigger berhasil dipasang!')
 }

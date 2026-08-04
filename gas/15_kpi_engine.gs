@@ -20,10 +20,12 @@
  * punya active spreadsheet).
  */
 function kpiGetSpreadsheet_() {
+  // Web App context: getActiveSpreadsheet() return null. Fallback ke ID
+  // hardcoded (sheet RAOS resmi) — tidak perlu Script Property setup.
   const active = SpreadsheetApp.getActiveSpreadsheet()
   if (active) return active
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')
-  if (!id) throw new Error('SPREADSHEET_ID Script Property belum diset (untuk cron context tanpa active spreadsheet)')
+    || '1eYS2mM3Sy-BNAVGfp8BUHtsZuLiGDetnJeGw-AWk__8'
   return SpreadsheetApp.openById(id)
 }
 

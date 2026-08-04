@@ -59,8 +59,38 @@ const withPWA = require('@ducanh2912/next-pwa').default({
           cacheableResponse: { statuses: [0, 200] },
         },
       },
-      // ─── Supabase REST/Auth GET — NetworkOnly (data operasional + RLS
-      // sensitive, JANGAN cache — cegah leak antar user + stale data).
+      // ─── Supabase REST GET — data referensi statis (branches,
+      // pickup_points, shifts). Berubah jarang (edit manual admin),
+      // aman di-cache SWR 1 jam supaya offline READ dashboard/scan/
+      // absensi tetap jalan. Harus di ATAS rule NetworkOnly umum
+      // (Workbox first-match wins).
+      {
+        urlPattern: /^https:\/\/vlievtojpmrbsmzlqswl\.supabase\.co\/rest\/v1\/(branches|pickup_points|shifts)(\?.*)?$/i,
+        handler: 'StaleWhileRevalidate',
+        method: 'GET',
+        options: {
+          cacheName: 'supabase-ref',
+          expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 },
+          cacheableResponse: { statuses: [0, 200] },
+        },
+      },
+      // ─── Supabase REST GET — profil user sendiri (id=eq.<uuid>).
+      // URL punya UUID user → cache per-user, tidak leak. SWR 15 menit.
+      // Pattern `id=eq.` HANYA match single-row fetch, bukan pool
+      // mentions (yang pakai is_active=eq.true tanpa id=eq.).
+      {
+        urlPattern: /^https:\/\/vlievtojpmrbsmzlqswl\.supabase\.co\/rest\/v1\/user_profiles\?.*id=eq\./i,
+        handler: 'StaleWhileRevalidate',
+        method: 'GET',
+        options: {
+          cacheName: 'supabase-me',
+          expiration: { maxEntries: 5, maxAgeSeconds: 15 * 60 },
+          cacheableResponse: { statuses: [0, 200] },
+        },
+      },
+      // ─── Supabase REST/Auth GET lainnya — NetworkOnly (data
+      // operasional + RLS sensitive, JANGAN cache — cegah leak antar
+      // user + stale data).
       {
         urlPattern: /^https:\/\/vlievtojpmrbsmzlqswl\.supabase\.co\/.*/,
         handler: 'NetworkOnly',

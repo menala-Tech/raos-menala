@@ -1,5 +1,6 @@
 # CLAUDE.md — RAOS Project
 *Panduan Claude Code untuk proyek RAOS*
+*Last updated: 2026-08-04 (sesi 22-24: driver role login, driver_manager role, RAOS credentials bridge, Notification Engine foundation, Web API untuk Admin Console Rifim OS Portal, bulk+parallel sync ~5x lebih cepat)*
 
 ## Lokasi Lokal (setelah relokasi 2026-07-18)
 ```
@@ -9,6 +10,25 @@ C:\Projects\menala\
 ├── docs\          ← dokumen referensi & prompt AI
 └── assets\        ← brand assets (logo, mockup, screenshot)
 ```
+
+## Ringkasan Cepat untuk Sesi Baru (Baca 30 Detik Pertama)
+
+- **PWA:** `apps/pwa/` — Next.js 16 + TypeScript + Tailwind. `npm run dev` di
+  folder itu. Deploy otomatis ke Vercel `raos-menala.vercel.app` per push ke `main`.
+- **GAS:** `gas/*.gs` — **21 file** (bukan 11 seperti versi lama README). Push via
+  `clasp push --force` di `gas/`. Web App `21_web_api.gs` melayani Admin Console
+  Rifim OS Portal — **wajib redeploy manual** di Editor setelah edit file itu.
+- **SQL:** `sql/*.sql` — migration bernomor `raos_NNN_*.sql`. Applied via
+  Supabase MCP `apply_migration`, atau paste ke SQL Editor Dashboard.
+- **Spreadsheet RAOS:** `1eYS2mM3Sy-BNAVGfp8BUHtsZuLiGDetnJeGw-AWk__8` — DASHBOARD
+  STAFF, MASTER TARGET, Form Isi Saldo, LOG SISTEM, SISTEM CONFIG. Tab
+  DEPRECATED (`DATABASE STAFF`, `DATABASE DRIVER`, `TARGET STAFF`, `DATABASE ORDER`)
+  sudah dihapus per sesi 22 (`gas/20_maintenance.gs deleteRaosDeprecatedTabs`).
+- **SSOT Sheets:** MASTER DATA STAFF (`1fcraq3QH…`), Driver Airport (`1FEZxyH…`),
+  Driver External. Read-only dari RAOS.
+- **Supabase:** `vlievtojpmrbsmzlqswl` — SHARED dengan proyek lain. Semua tabel
+  RAOS berprefix `raos_*` kecuali warisan lama (`user_profiles`, `chat_*`,
+  `activity_logs`, `notifications`, `push_subscriptions`, `branches`, `pickup_points`).
 
 ## Konteks Proyek
 RAOS (Rifim Airport Operation System) adalah PWA operasional Vendor Maxim
@@ -42,13 +62,63 @@ di sheet Form Isi Saldo).
 ## Struktur Folder
 ```
 RAOS/
-├── apps/pwa/          ← Next.js PWA (sumber utama frontend)
-├── gas/               ← 11 Google Apps Script modules
-├── sql/               ← Schema, RLS, Seed data
-├── .github/workflows/ ← CI/CD pipeline
-├── vercel.json        ← Konfigurasi Vercel
+├── apps/pwa/          ← Next.js 16 PWA (sumber utama frontend)
+│   ├── src/app/       ← Halaman: dashboard, chat, scan, absensi, riwayat,
+│   │                    admin, validasi-saldo, antrian-driver, drivers,
+│   │                    kpi, laporan, driver-workspace, notifications,
+│   │                    status, offline, settings, reset-password
+│   ├── src/lib/       ← supabase, push, gps/geo, offlineQueue/Syncer,
+│   │                    saldoRequest, driverQueue, roleGuard, activity,
+│   │                    moderation, shift, timezone, useAutoPushSubscribe,
+│   │                    variantManifest, actionCardParser
+│   ├── src/components/← 20+ komponen: BarcodeScanner, SelfieCapture,
+│   │                    DriverActionCard, DriverQueueCard, SaldoRequestCard,
+│   │                    workspace/*, layout/*, business-cards/*
+│   └── public/        ← manifest.json, sw-push.js, icons, images
+├── gas/               ← 21 Google Apps Script modules (01-21) — lihat table
+├── sql/               ← Schema (`001_schema.sql`) + RLS (`002_rls.sql`) +
+│                        Seed (`003_seed.sql`) + migrations bernomor
+│                        `raos_NNN_*.sql` (056-069 sekarang)
+├── docs/COLLABORATION.md
+├── .github/workflows/ ← CI/CD (Vercel via git integration, GAS via clasp)
+├── vercel.json        ← rewrites + headers
+├── SESSION_PROMPT.md  ← master resumable prompt untuk sesi baru
+├── STATUS.md          ← per-sesi status (update setiap akhir sesi)
+├── RULE_PROJECT.md    ← rules teknis + business rules
+├── SETUP_GITHUB_VERCEL.md
+├── KPI_PORT_PLAN.md   ← blueprint refactor KPI pipeline
 └── CLAUDE.md          ← File ini
 ```
+
+### GAS File Registry — 21 file (per sesi 22-24)
+
+| # | File | Fungsi |
+|---|---|---|
+| 01 | `config.gs` | Konstanta SHEET_ID, SUPABASE_URL, key |
+| 02 | `absensi.gs` | Import absensi Supabase → sheet ABSENSI |
+| 03 | `order.gs` | Import scan_orders → sheet ORDER (juga mock driver fns, HIDDEN dari menu) |
+| 04 | `kpi.gs` | (LEGACY) KPI harian — sudah di-supersede oleh 15_kpi_engine |
+| 05 | `notifikasi.gs` | 6 fungsi reminder shift + dispatcher |
+| 06 | `dashboard.gs` | Refresh DASHBOARD STAFF sheet |
+| 07 | `backup.gs` | `backupHarian` — export XLSX ke Drive |
+| 08 | `util.gs` | HTTP helper (`sbFetchJson_`), auth-user provisioner |
+| 09 | `trigger.gs` | `installTriggersRAOS` — pasang semua cron |
+| 10 | `menu.gs` | Menu 🛠️ RAOS System (bind onOpen) |
+| 11 | `drive_sync.gs` | Foto selfie Supabase Storage → Google Drive |
+| 12 | `driver_airport_sync.gs` | Sync 7 tab SSOT airport → raos_drivers (bulk+parallel ~30-40s post-sesi 22) |
+| 13 | `staff_sync.gs` | Sync SSOT MASTER DATA STAFF → user_profiles (bulk+parallel ~10s post-sesi 22) |
+| 14 | `kpi_config.gs` | Konstanta bobot KPI |
+| 15 | `kpi_engine.gs` | KPI dual-mode order/saldo per cabang |
+| 16 | `saldo_sync.gs` | `raos_saldo_requests` → Form Isi Saldo + onEdit checkbox handler |
+| 17 | `driver_external_sync.gs` | Sync SSOT driver external (Batam/Jambi Luar) → raos_drivers (bulk upsert ~10s) |
+| 18 | `driver_queue_sync.gs` | Sync raos_driver_queue → sheet Antrian |
+| 19 | `raos_credentials_sync.gs` | Sync kolom I/J SSOT → `raos_credentials` (login RAOS/Rifim OS terpisah dari PWA lain) |
+| 20 | `maintenance.gs` | One-shot fungsi maintenance (mis. `deleteRaosDeprecatedTabs`) |
+| 21 | `web_api.gs` | **Web API doPost** untuk Admin Console Rifim OS Portal (verify JWT + trigger 9 action) |
+
+**PENTING**: `gas/21_web_api.gs` = entry point Web App yang di-consume Portal
+Rifim OS di `modules/sistem/index.html`. Setelah edit **wajib redeploy manual**
+(Terapkan → Kelola deployment → Edit → Versi baru → Terapkan). URL `/exec` tetap.
 
 ## ⚠️ Lokasi Penyimpanan Google Drive (WAJIB — arahkan ke sini setiap butuh simpan file)
 
@@ -784,3 +854,147 @@ Kalau tambah tabel baru yang perlu realtime, JANGAN lupa ADD TABLE.
   validasi admin, chat moderation, login, isi saldo submit. Row count
   rendah bukan karena bug — memang usage prod masih minim (`scan_orders=0`,
   `raos_attendance=3` di dev).
+
+---
+
+## Sesi 22-24 (1-4 Agustus 2026) — Notification Engine + Driver Login + Web API
+
+### Migration baru
+- **`raos_056_role_driver_manager`** — Tambah role `driver_manager` ke enum
+  `user_profiles.role`. Cakupan: kelola `raos_drivers` untuk cabang scope-nya
+  (INSERT/UPDATE/DELETE), inherit policy `raos_driver_queue_scoped_all` via
+  `is_branch_in_scope`. TIDAK bypass global seperti admin.
+- **`raos_057_driver_role_login`** — Tambah role `driver` + kolom
+  `user_profiles.driver_id UUID FK → raos_drivers.id` untuk link akun driver
+  ke rekaman driver. Helper `get_my_driver_branch()` SECURITY DEFINER +
+  policy `raos_driver_queue_driver_read` + `raos_saldo_requests_driver_read`.
+  Driver hanya bisa lihat data cabang dan yang di-address ke dirinya.
+- **`raos_058_fix_room_scope_chat_visibility_geofence_absensi_selfie`** —
+  Batch fix 30 Juli: scope member room per-cabang + broadcast Absensi inject
+  token `raos-selfie://<path>` untuk foto + RLS `user_profiles` authenticated
+  boleh baca profil aktif (fix bubble "Unknown") + view `raos_geofence_points`
+  fallback `branches.lat/lng` untuk cabang tanpa `pickup_points`.
+- **`raos_059_chat_pribadi_rls_strict`** — Perketat RLS chat pribadi: hanya
+  2 member yang boleh read/write, bukan seluruh authenticated.
+- **`raos_060_branches_rls_select_authenticated`** — Semua authenticated user
+  bisa SELECT `branches` (untuk populate dropdown branch, tidak perlu
+  service_role di frontend admin).
+- **`raos_062_saldo_no_driver_echo_and_queue_realtime`** — Trigger saldo tidak
+  lagi kirim echo ke driver (mereka lihat dari `/antrian-driver` real-time).
+  `raos_driver_queue` di-add ke `supabase_realtime` publication.
+- **`raos_063_notification_engine_foundation`** — **Notification Engine Foundation
+  Phase F1**. Extend `notifications` dengan kolom `priority (critical/high/normal/low)`,
+  `status (sent/delivered/read/archived/expired)`, `dedup_key`, `channel
+  (push/in_app/chat/whatsapp/email)`, `payload_type`, `expires_at`. RPC
+  `raos_dispatch_push` signature TETAP `(user_ids,title,body,url,tag,kategori)`
+  tapi return type berubah dari `void` ke `jsonb` (metadata insert + error info).
+  Backward compat — semua caller GAS/PWA lama tetap fungsional.
+- **`raos_064_notification_stats_view`** — View `raos_notification_stats_daily`
+  (security_invoker=true post-sesi 21) untuk dashboard delivery/read stats.
+- **`raos_065_fix_dispatch_push_column_id`** — Fix nama kolom di RPC dispatch.
+- **`raos_066_riwayat_admin_delete_policies`** — Admin bisa delete row di
+  `scan_orders`/`raos_attendance` untuk correction dari `/riwayat`.
+- **`raos_067_driver_type_column`** — Kolom `raos_drivers.driver_type` (enum
+  `airport`/`external`/`non-airport`) mirror kolom D "Airport" sheet SSOT.
+  Backfill via `source` (`ssot_driver_airport → airport`, `ssot_driver_external
+  → external`, `manual → non-airport`).
+- **`raos_067_saldo_realtime_broadcast`** — `raos_saldo_requests` di-add ke
+  publication `supabase_realtime` untuk realtime UI validasi.
+- **`raos_068_raos_credentials_bridge`** — Tabel `raos_credentials` +
+  RPC `raos_verify_and_bridge(p_login_id, p_raos_pin) RETURNS {email,ssot_pin}`
+  SECURITY DEFINER. Isolasi login RAOS/Rifim OS dari PWA lain (rifim-isi-saldo
+  dll). RLS strict: hanya service_role/admin bisa read raw table; login via RPC.
+  **Tech debt**: `raos_pin` masih plaintext (mirror sheet), migrate ke bcrypt
+  di iterasi berikut.
+- **`raos_068_user_profiles_gaji`** — Kolom `user_profiles.gaji numeric(14,2)`
+  mirror kolom C "Gaji Staff" sheet SSOT. Populate via `gas/13_staff_sync.gs`.
+- **`raos_069_user_profiles_source_expand`** — Fix CHECK constraint 23514:
+  expand enum `source` include `ssot_driver_airport` + `ssot_driver_external`
+  karena `provisionDriverAuth_` di GAS insert `user_profiles` row dengan source
+  itu untuk provisioning auth driver. Sebelumnya semua driver auth provisioning
+  error 100% karena CHECK constraint tolak value baru.
+
+### Driver Login (Sesi 23 — 2 Agu 2026)
+
+Driver sekarang bisa login PWA pakai **ID Driver** (bukan email) + PIN. Setup:
+- Migration `raos_057` + `raos_069` (source expand)
+- `gas/12_driver_airport_sync.gs` + `17_driver_external_sync.gs` sekarang
+  auto-provision Supabase Auth user (email dummy `driver-<id>@raos.internal`,
+  password = ID Driver) + insert row `user_profiles` dengan `role='driver'` +
+  `driver_id` link + `source='ssot_driver_*'`
+- Halaman `/` (login) sekarang deteksi input:
+  - Email format → login as staff pakai SSOT PIN kolom H
+  - Angka/kode driver → login as driver pakai ID Driver sendiri
+  - Portal RAOS ID + RAOS_PIN (kolom I/J) → login via `raos_verify_and_bridge`
+- Setelah login, driver hanya lihat `/dashboard`, `/antrian-driver` cabang
+  sendiri, `/riwayat` scan yang di-address ke dirinya. Menu terbatas via
+  `roleGuard.ts`.
+
+### Performance — Bulk + Parallel Sync (Sesi 22)
+
+Semua sync SSOT direfactor dari **per-baris fetch** ke **bulk chunk + parallel**:
+
+| Sync | Sebelum | Sesudah | Fix |
+|---|---|---|---|
+| Staff (13) | 56 detik | ~10 detik | Bulk `POST /rest/v1/user_profiles` chunk 100 + parallel provisionAuth via `Promise.all` (5 concurrent) + dedup staff_id (fix SSOT punya duplikat) |
+| Driver Airport (12) | 3 menit | ~30-40 detik | Bulk upsert 7 tab, parallel auth provisioning |
+| Driver External (17) | 60 detik | ~10 detik | Bulk upsert |
+
+**Fix penting** (`d0bf1be`): PostgREST `?in.()` filter untuk numeric values
+tidak boleh di-quote (`?id=in.(1,2,3)` bukan `?id=in.("1","2","3")`). Chunk 100
+untuk hindari URL length limit.
+
+### Web API untuk Admin Console (Sesi 22 — 073be18)
+
+`gas/21_web_api.gs` = Web App doPost yang di-consume Portal Rifim OS
+(`modules/sistem/index.html`). Verify JWT via `/auth/v1/user` + role check di
+`user_profiles`. 9 action tersedia (lihat rifim-os CLAUDE.md untuk mapping).
+
+**CORS trick**: Portal kirim `Content-Type: text/plain` supaya browser tidak
+issue OPTIONS preflight (GAS Web App tidak set CORS untuk OPTIONS).
+
+**Robust doPost** (`eebdcea`): outer try/catch di `doPost` supaya SEMUA path
+return JSON. Kalau throw lolos, GAS default handler serve HTML page → client
+parse fail. Selalu return `{ok:bool, error?, detail?}`.
+
+### Force Refresh Auth Password (Sesi 22 — 71911eb)
+
+Tombol on-demand di Admin Console untuk force-refresh Supabase Auth password
+semua staff/driver dari SSOT PIN kolom H (staff) atau ID Driver (driver).
+Gunakan saat propagate cepat setelah bulk edit PIN — tidak perlu tunggu cron
+sync 1 jam.
+
+- Fungsi GAS: `forceRefreshStaffAuth()`, `forceRefreshDriverAirportAuth()`
+- ETA: 10-30 detik tergantung jumlah user
+- Endpoint: `force_refresh_staff_auth`, `force_refresh_driver_auth`
+
+### Delete DEPRECATED Tabs (Sesi 22 — 304ff34)
+
+`gas/20_maintenance.gs deleteRaosDeprecatedTabs` menghapus 4 tab yang datanya
+sudah full migrasi ke Supabase:
+- `TARGET STAFF` → `kpi_targets`
+- `DATABASE STAFF` → `user_profiles` + SSOT MASTER DATA STAFF
+- `DATABASE DRIVER` → `raos_drivers`
+- `DATABASE ORDER` → `scan_orders` (0 rows)
+
+Dipanggil manual sekali dari Editor. Setelah delete, cleanup 3 bug post-delete
+via `raos_066` (`a179e5e`).
+
+### Finance dipindah ke Rifim OS Portal (`d5f23a2`)
+
+Tab Finance di RAOS PWA dihapus. Fungsi finance (LIA ledger, tagihan, rekap
+harian/bulanan) sekarang di modul CRM Rifim OS (`rifim-os.vercel.app/finance`).
+Endpoint di `automation/apps-script/crmApi.js` `_fin*_` (bukan lagi RAOS GAS).
+
+---
+
+## Session Start — Baca Ini Setiap Sesi Baru
+
+1. Baca `SESSION_PROMPT.md` — 25 poin roadmap `Upgrade Full Cabang.md` +
+   checkpoint terakhir
+2. Baca `STATUS.md` — status per-sesi
+3. Baca `RULE_PROJECT.md` — rules teknis + business rules  
+4. Baca `CLAUDE.md` (file ini) — architecture + conventions
+5. `git log --oneline main..HEAD` untuk lihat WIP di branch aktif
+6. Kalau tugas menyentuh sheet SSOT (MASTER DATA STAFF / Driver Airport /
+   Driver External), baca dulu `SSOT_DATA_SOURCES.md` di root workspace lokal

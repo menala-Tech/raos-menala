@@ -294,9 +294,32 @@ function syncStaffFromSSOT() {
       bulkPayload.push(p)
     })
 
-    // ─── 6) Bulk upsert (chunks 500) ────────────────────────────────────
-    for (let i = 0; i < bulkPayload.length; i += 500) {
-      const chunk = bulkPayload.slice(i, i + 500)
+    // ─── 6a) Dedup bulkPayload by id (auth uuid) — bug DATA sheet SSOT
+    // punya staff_id duplicate (RIF0125/RIF0149/RIF0153 dipakai 2 baris)
+    // → 2 rows map ke authId sama → Postgres "ON CONFLICT cannot affect
+    // row a second time". Winner-last, dan log warning.
+    const dedupMap = {}
+    const dupWarnings = []
+    bulkPayload.forEach(p => {
+      if (dedupMap[p.id]) {
+        dupWarnings.push(
+          `Duplicate authId ${p.id.substring(0, 8)}…: ${dedupMap[p.id].staff_id}/${dedupMap[p.id].full_name} ` +
+          `dan ${p.staff_id}/${p.full_name} — pakai row terakhir. Cek sheet SSOT: staff_id sama untuk 2 email berbeda.`
+        )
+      }
+      dedupMap[p.id] = p
+    })
+    const dedupedPayload = Object.values(dedupMap)
+    if (dupWarnings.length) {
+      dupWarnings.forEach(w => {
+        warnings.push(w)
+        logSistem('warning', 'syncStaffFromSSOT', 'warning', w)
+      })
+    }
+
+    // ─── 6b) Bulk upsert (chunks 500) ───────────────────────────────────
+    for (let i = 0; i < dedupedPayload.length; i += 500) {
+      const chunk = dedupedPayload.slice(i, i + 500)
       try {
         _raosUserProfilesBulkUpsert_(chunk)
         upserted += chunk.length

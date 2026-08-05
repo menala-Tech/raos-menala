@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { useCachedQuery } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
@@ -18,45 +19,63 @@ import type { UserProfile } from '@/types'
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [user, setUser] = useState<UserProfile | null>(null)
-  const [stats, setStats] = useState({ total: 0, valid: 0, pending: 0 })
-  const [unreadNotif, setUnreadNotif] = useState(0)
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null)
 
+  // Auth check — blocking, tidak di-cache (session harus fresh)
   useEffect(() => {
-    async function load() {
-      const { data: { session } } = await supabase.auth.getSession()
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { router.push('/'); return }
+      setSessionUserId(session.user.id)
+    })
+  }, [router])
 
-      const { data: profile } = await supabase
+  // 3 query paralel — cache-first, background refresh
+  const { data: user } = useCachedQuery<UserProfile>(
+    ['user-profile', sessionUserId],
+    async () => {
+      const { data } = await supabase
         .from('user_profiles')
         .select('*, branches(*)')
-        .eq('id', session.user.id)
+        .eq('id', sessionUserId!)
         .single()
-      setUser(profile)
+      return data as UserProfile
+    },
+    { enabled: !!sessionUserId, ttlMs: 30 * 60 * 1000 }
+  )
 
-      const today = new Date().toISOString().split('T')[0]
+  const today = new Date().toISOString().split('T')[0]
+  const { data: stats } = useCachedQuery(
+    ['dashboard-stats', sessionUserId, today],
+    async () => {
       const { data: scans } = await supabase
         .from('scan_orders')
         .select('status')
-        .eq('staff_id', session.user.id)
+        .eq('staff_id', sessionUserId!)
         .gte('scanned_at', today)
-      if (scans) {
-        setStats({
-          total: scans.length,
-          valid: scans.filter(s => s.status === 'valid').length,
-          pending: scans.filter(s => s.status === 'pending').length,
-        })
+      const s = scans || []
+      return {
+        total: s.length,
+        valid: s.filter(x => x.status === 'valid').length,
+        pending: s.filter(x => x.status === 'pending').length,
       }
+    },
+    { enabled: !!sessionUserId, ttlMs: 5 * 60 * 1000, refreshIntervalMs: 5 * 60 * 1000 }
+  )
 
+  const { data: unreadNotifData } = useCachedQuery(
+    ['dashboard-unread-notif', sessionUserId],
+    async () => {
       const { count } = await supabase
         .from('notifications')
         .select('*', { count: 'exact', head: true })
-        .eq('user_id', session.user.id)
+        .eq('user_id', sessionUserId!)
         .eq('is_read', false)
-      setUnreadNotif(count ?? 0)
-    }
-    load()
-  }, [router])
+      return count ?? 0
+    },
+    { enabled: !!sessionUserId, ttlMs: 60 * 1000, refreshIntervalMs: 2 * 60 * 1000 }
+  )
+  const unreadNotif = unreadNotifData ?? 0
+  const statsData = stats ?? { total: 0, valid: 0, pending: 0 }
 
   const role = user?.role ?? ''
   const isKoordPlus = ['koordinator', 'admin', 'management', 'direksi'].includes(role)
@@ -135,9 +154,9 @@ export default function DashboardPage() {
         {/* Stats */}
         <div className="grid grid-cols-3 gap-2">
           {[
-            { label: 'Scan Hari Ini', value: stats.total,   color: 'text-white',        accent: 'bg-white/10' },
-            { label: 'Valid',         value: stats.valid,   color: 'text-green-400',    accent: 'bg-green-500/20' },
-            { label: 'Pending',       value: stats.pending, color: 'text-yellow-400',   accent: 'bg-yellow-500/20' },
+            { label: 'Scan Hari Ini', value: statsData.total,   color: 'text-white',        accent: 'bg-white/10' },
+            { label: 'Valid',         value: statsData.valid,   color: 'text-green-400',    accent: 'bg-green-500/20' },
+            { label: 'Pending',       value: statsData.pending, color: 'text-yellow-400',   accent: 'bg-yellow-500/20' },
           ].map(s => (
             <div key={s.label} className={`${s.accent} rounded-xl p-3 text-center border border-white/10`}>
               <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
@@ -184,12 +203,12 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs text-gray-500">Scan Valid</span>
-                <span className="text-xs font-bold text-gray-700">{stats.valid} / 20</span>
+                <span className="text-xs font-bold text-gray-700">{statsData.valid} / 20</span>
               </div>
               <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-green-500 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min((stats.valid / 20) * 100, 100)}%` }}
+                  style={{ width: `${Math.min((statsData.valid / 20) * 100, 100)}%` }}
                 />
               </div>
             </div>
@@ -197,18 +216,18 @@ export default function DashboardPage() {
         </div>
 
         {/* Alert */}
-        {stats.pending > 0 && (
+        {statsData.pending > 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-center gap-3">
             <AlertCircle size={20} className="text-yellow-600 flex-shrink-0" />
             <div>
               <p className="text-xs font-bold text-yellow-800">
-                {stats.pending} scan menunggu validasi koordinator
+                {statsData.pending} scan menunggu validasi koordinator
               </p>
               <p className="text-[10px] text-yellow-600 mt-0.5">Koordinator belum memvalidasi</p>
             </div>
           </div>
         )}
-        {stats.valid > 0 && stats.pending === 0 && (
+        {statsData.valid > 0 && statsData.pending === 0 && (
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-3">
             <CheckCircle2 size={20} className="text-green-600 flex-shrink-0" />
             <p className="text-xs font-bold text-green-800">Semua scan telah tervalidasi ✓</p>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { cacheReadSync, cacheWriteSync, cacheInvalidate } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
@@ -85,32 +86,55 @@ export default function RiwayatPage() {
   const [showSummary, setShowSummary] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     async function load() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/'); return }
-      setLoading(true)
 
       const { from, to } = rangeToDates(dateRange)
       const fromIso = from.toISOString()
       const fromDate = from.toISOString().split('T')[0]
       const toIso = to.toISOString()
       const toDate = to.toISOString().split('T')[0]
+      const userId = session.user.id
 
-      // Load profile sekali (untuk role gating tab Antrian).
-      if (!profile) {
-        const { data: p } = await supabase.from('user_profiles').select('*, branches(*)').eq('id', session.user.id).single()
-        if (p) setProfile(p as UserProfile)
+      // Cache-first 2-phase: instant render kalau ada, background refresh selalu.
+      // Key composite by user + range — beda filter = beda cache.
+      const cacheKey = ['riwayat', userId, dateRange, fromDate, toDate]
+      const cached = cacheReadSync<{
+        scans: ScanOrder[]; absensies: Attendance[]; saldoRequests: SaldoRequest[]; queueRows: QueueRow[]
+      }>(cacheKey)
+      if (cached && !cancelled) {
+        setScans(cached.scans)
+        setAbsensies(cached.absensies)
+        setSaldoRequests(cached.saldoRequests)
+        setQueueRows(cached.queueRows)
+        setLoading(false)
+      } else {
+        setLoading(true)
       }
 
+      // Profile fetch (cached separately, TTL panjang)
+      if (!profile) {
+        const cachedProfile = cacheReadSync<UserProfile>(['user-profile', userId])
+        if (cachedProfile && !cancelled) setProfile(cachedProfile)
+        const { data: p } = await supabase.from('user_profiles').select('*, branches(*)').eq('id', userId).single()
+        if (p && !cancelled) {
+          setProfile(p as UserProfile)
+          cacheWriteSync(['user-profile', userId], p)
+        }
+      }
+
+      // Fetch fresh 4 query paralel (foreground kalau no cache, background kalau cache hit)
       const [{ data: scanData }, { data: attData }, { data: saldoData }, { data: queueData }] = await Promise.all([
         supabase.from('scan_orders')
           .select('*, raos_drivers(*), pickup_points(name)')
-          .eq('staff_id', session.user.id)
+          .eq('staff_id', userId)
           .gte('scanned_at', fromIso).lte('scanned_at', toIso)
           .order('scanned_at', { ascending: false }).limit(200),
         supabase.from('raos_attendance')
           .select('*, pickup_points(name), shifts(name, start_time, end_time)')
-          .eq('staff_id', session.user.id)
+          .eq('staff_id', userId)
           .gte('date', fromDate).lte('date', toDate)
           .order('date', { ascending: false }).limit(60),
         supabase.from('raos_saldo_requests')
@@ -120,7 +144,7 @@ export default function RiwayatPage() {
             'approved_by_user:user_profiles!approved_by(full_name),' +
             'processed_by_user:user_profiles!processed_by(full_name)'
           )
-          .eq('staff_id', session.user.id)
+          .eq('staff_id', userId)
           .gte('requested_at', fromIso).lte('requested_at', toIso)
           .order('requested_at', { ascending: false }).limit(200),
         // Riwayat Antrian — RLS scope by branch. Ambil rentang tanggal sesuai
@@ -132,13 +156,23 @@ export default function RiwayatPage() {
           .gte('joined_at', fromIso).lte('joined_at', toIso)
           .order('joined_at', { ascending: false }).limit(200),
       ])
-      setScans(scanData ?? [])
-      setAbsensies(attData ?? [])
-      setSaldoRequests((saldoData ?? []) as unknown as SaldoRequest[])
-      setQueueRows((queueData ?? []) as unknown as QueueRow[])
+      if (cancelled) return
+
+      const fresh = {
+        scans: (scanData ?? []) as ScanOrder[],
+        absensies: (attData ?? []) as Attendance[],
+        saldoRequests: (saldoData ?? []) as unknown as SaldoRequest[],
+        queueRows: (queueData ?? []) as unknown as QueueRow[],
+      }
+      setScans(fresh.scans)
+      setAbsensies(fresh.absensies)
+      setSaldoRequests(fresh.saldoRequests)
+      setQueueRows(fresh.queueRows)
+      cacheWriteSync(cacheKey, fresh)
       setLoading(false)
     }
     load()
+    return () => { cancelled = true }
   }, [router, dateRange, profile])
 
   const filteredScans = scans.filter(s => {
@@ -198,12 +232,20 @@ export default function RiwayatPage() {
   const canDeleteQueue = canDelete
   const orderCount = scans.length
 
+  // Invalidate cache riwayat setelah mutation supaya next visit fetch fresh
+  function invalidateRiwayat() {
+    if (!profile) return
+    const { from, to } = rangeToDates(dateRange)
+    cacheInvalidate(['riwayat', profile.id, dateRange, from.toISOString().split('T')[0], to.toISOString().split('T')[0]])
+  }
+
   async function deleteScan(row: ScanOrder) {
     if (!canDelete) return
     if (!confirm(`Hapus scan ${row.scan_id}?`)) return
     const { error } = await supabase.from('scan_orders').delete().eq('id', row.id)
     if (error) { alert('Gagal hapus scan: ' + error.message); return }
     setScans(prev => prev.filter(r => r.id !== row.id))
+    invalidateRiwayat()
   }
 
   async function deleteAbsensi(row: Attendance) {
@@ -212,6 +254,7 @@ export default function RiwayatPage() {
     const { error } = await supabase.from('raos_attendance').delete().eq('id', row.id)
     if (error) { alert('Gagal hapus absensi: ' + error.message); return }
     setAbsensies(prev => prev.filter(r => r.id !== row.id))
+    invalidateRiwayat()
   }
 
   async function deleteSaldo(row: SaldoRequest) {
@@ -220,6 +263,7 @@ export default function RiwayatPage() {
     const { error } = await supabase.from('raos_saldo_requests').delete().eq('id', row.id)
     if (error) { alert('Gagal hapus saldo: ' + error.message); return }
     setSaldoRequests(prev => prev.filter(r => r.id !== row.id))
+    invalidateRiwayat()
   }
 
   async function cancelSaldo(row: SaldoRequest) {
@@ -235,6 +279,7 @@ export default function RiwayatPage() {
     }).eq('id', row.id)
     if (error) { alert('Gagal batalkan: ' + error.message); return }
     setSaldoRequests(prev => prev.map(r => r.id === row.id ? { ...r, status: 'rejected', rejection_reason: reason } : r))
+    invalidateRiwayat()
   }
 
   async function editScanStatus(row: ScanOrder) {
@@ -244,6 +289,7 @@ export default function RiwayatPage() {
     const { error } = await supabase.from('scan_orders').update({ status: next }).eq('id', row.id)
     if (error) { alert('Gagal ubah status: ' + error.message); return }
     setScans(prev => prev.map(r => r.id === row.id ? { ...r, status: next } as ScanOrder : r))
+    invalidateRiwayat()
   }
 
   async function markQueueCompleted(row: QueueRow) {
@@ -253,6 +299,7 @@ export default function RiwayatPage() {
     setQueueBusy(null)
     if (error) { setQueueErr(error.message); return }
     setQueueRows(prev => prev.map(r => r.id === row.id ? { ...r, status: 'completed', completed_at: new Date().toISOString() } : r))
+    invalidateRiwayat()
   }
 
   async function deleteQueueRow(row: QueueRow) {
@@ -263,6 +310,7 @@ export default function RiwayatPage() {
     setQueueBusy(null)
     if (error) { setQueueErr(error.message); return }
     setQueueRows(prev => prev.filter(r => r.id !== row.id))
+    invalidateRiwayat()
   }
 
   return (

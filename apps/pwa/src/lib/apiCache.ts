@@ -57,6 +57,23 @@ type CachedEnvelope<T> = {
   data: T
 }
 
+/**
+ * Low-level cache read — bypass hook, cocok untuk pattern manual 2-phase
+ * (instant render kalau cache hit, kemudian fetch fresh di background).
+ * Return null kalau tidak ada / expired.
+ */
+export function cacheReadSync<T>(key: string | (string | number | boolean | null | undefined)[], ttlMs?: number): T | null {
+  return cacheRead<T>(_serializeKey(key), ttlMs)
+}
+
+/**
+ * Low-level cache write — pakai saat mutasi manual (setelah fetch fresh
+ * di useEffect atau setelah delete/update row).
+ */
+export function cacheWriteSync<T>(key: string | (string | number | boolean | null | undefined)[], data: T): void {
+  cacheWrite<T>(_serializeKey(key), data)
+}
+
 function cacheRead<T>(key: string, ttlMs?: number): T | null {
   if (typeof window === 'undefined') return null
   try {

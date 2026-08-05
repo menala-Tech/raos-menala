@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
 import { ArrowLeft, Download, FileSpreadsheet, Printer, TrendingUp, Banknote, UserCheck, ScanLine } from 'lucide-react'
 import Link from 'next/link'
@@ -34,8 +35,23 @@ export default function LaporanPage() {
   const [loading, setLoading] = useState(true)
   const [authorized, setAuthorized] = useState(false)
 
-  const loadReport = useCallback(async (days: number) => {
-    setLoading(true)
+  const loadReport = useCallback(async (days: number, opts: { forceRefresh?: boolean } = {}) => {
+    const cacheKey = ['laporan', 'aggregate', days]
+
+    // Phase 1: instant render kalau cache ada
+    if (!opts.forceRefresh) {
+      const cached = cacheReadSync<DayRow[]>(cacheKey, 30 * 60 * 1000)
+      if (cached) {
+        setRows(cached)
+        setLoading(false)
+      } else {
+        setLoading(true)
+      }
+    } else {
+      setLoading(true)
+    }
+
+    // Phase 2: fetch fresh selalu (background/foreground)
     const since = new Date()
     since.setDate(since.getDate() - days + 1)
     since.setHours(0, 0, 0, 0)
@@ -75,7 +91,9 @@ export default function LaporanPage() {
       if (row) row.absensi++
     })
 
-    setRows(Array.from(byDate.values()).reverse())
+    const fresh = Array.from(byDate.values()).reverse()
+    setRows(fresh)
+    cacheWriteSync(cacheKey, fresh)
     setLoading(false)
   }, [])
 

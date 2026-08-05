@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { useCachedQuery } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
 import { ArrowLeft, Target, TrendingUp, CalendarCheck, Banknote } from 'lucide-react'
 import Link from 'next/link'
@@ -15,56 +16,59 @@ const BULAN = [
 
 export default function KpiPage() {
   const router = useRouter()
-  const [user, setUser] = useState<UserProfile | null>(null)
-  const [kpi, setKpi] = useState<any | null>(null)
-  const [scanStats, setScanStats] = useState({ total: 0, valid: 0, gmv: 0 })
-  const [loading, setLoading] = useState(true)
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null)
 
   const now = new Date()
   const bulan = now.getMonth() + 1
   const tahun = now.getFullYear()
+  const startMonth = `${tahun}-${String(bulan).padStart(2, '0')}-01`
 
+  // Auth check
   useEffect(() => {
-    async function load() {
-      const { data: { session } } = await supabase.auth.getSession()
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { router.push('/'); return }
+      setSessionUserId(session.user.id)
+    })
+  }, [router])
 
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('*, branches(*)')
-        .eq('id', session.user.id)
-        .single()
-      setUser(profile)
+  // 3 query paralel cache-first — TTL 30m (KPI bulanan tidak sering berubah)
+  const { data: user } = useCachedQuery<UserProfile>(
+    ['user-profile', sessionUserId],
+    async () => {
+      const { data } = await supabase
+        .from('user_profiles').select('*, branches(*)').eq('id', sessionUserId!).single()
+      return data as UserProfile
+    },
+    { enabled: !!sessionUserId, ttlMs: 30 * 60 * 1000 }
+  )
 
-      // Target KPI bulan ini
-      const { data: kpiData } = await supabase
-        .from('kpi_targets')
-        .select('*')
-        .eq('staff_id', session.user.id)
-        .eq('month', bulan)
-        .eq('year', tahun)
-        .single()
-      setKpi(kpiData)
+  const { data: kpi } = useCachedQuery<any>(
+    ['kpi-target', sessionUserId, tahun, bulan],
+    async () => {
+      const { data } = await supabase
+        .from('kpi_targets').select('*')
+        .eq('staff_id', sessionUserId!).eq('month', bulan).eq('year', tahun).single()
+      return data
+    },
+    { enabled: !!sessionUserId, ttlMs: 30 * 60 * 1000 }
+  )
 
-      // Realisasi scan bulan ini
-      const startMonth = `${tahun}-${String(bulan).padStart(2, '0')}-01`
+  const { data: scanStatsData, loading } = useCachedQuery(
+    ['kpi-scan-stats', sessionUserId, tahun, bulan],
+    async () => {
       const { data: scans } = await supabase
-        .from('scan_orders')
-        .select('status, gmv')
-        .eq('staff_id', session.user.id)
-        .gte('scanned_at', startMonth)
-
-      if (scans) {
-        setScanStats({
-          total: scans.length,
-          valid: scans.filter(s => s.status === 'valid').length,
-          gmv: scans.reduce((sum, s) => sum + (parseFloat(s.gmv) || 0), 0),
-        })
+        .from('scan_orders').select('status, gmv')
+        .eq('staff_id', sessionUserId!).gte('scanned_at', startMonth)
+      const s = scans || []
+      return {
+        total: s.length,
+        valid: s.filter(x => x.status === 'valid').length,
+        gmv: s.reduce((sum, x) => sum + (parseFloat(x.gmv as any) || 0), 0),
       }
-      setLoading(false)
-    }
-    load()
-  }, [router, bulan, tahun])
+    },
+    { enabled: !!sessionUserId, ttlMs: 15 * 60 * 1000, refreshIntervalMs: 15 * 60 * 1000 }
+  )
+  const scanStats = scanStatsData ?? { total: 0, valid: 0, gmv: 0 }
 
   const targetScan = kpi?.target_scan || 0
   const pctScan = targetScan > 0 ? Math.min((scanStats.valid / targetScan) * 100, 100) : 0

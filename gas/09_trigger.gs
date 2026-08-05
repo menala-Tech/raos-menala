@@ -61,11 +61,13 @@ function setupAllTriggers() {
   ScriptApp.newTrigger('syncDriverExternalFromSSOT')
     .timeBased().everyHours(2).create()
 
-  // Sync staff (semua RIFIM dari MASTER DATA STAFF) setiap 6 jam — perubahan
-  // roster/PIN/jabatan tidak sering, cukup 6 jam. Kalau butuh update cepat,
-  // admin bisa run manual dari menu 👥 Staff → 🔄 Sync Staff
+  // Sync staff dari MASTER DATA STAFF setiap 10 menit (turun dari 6 jam
+  // sesi 2026-08-05) supaya PWA RAOS + HRIS `/hris` sinkron cepat dengan
+  // sheet SSOT. Payload kecil (max ~40 staff), UrlFetch ke Supabase ringan.
+  // Manual sync tersedia via menu 👥 Staff → 🔄 Sync Staff atau tombol
+  // "🔄 Sync Sekarang" di HRIS `/hris` header.
   ScriptApp.newTrigger('syncStaffFromSSOT')
-    .timeBased().everyHours(6).create()
+    .timeBased().everyMinutes(10).create()
 
   // [DEPRECATED sesi 2026-08-05] syncSaldoRequestsToSheet dihapus —
   // Bookmarklet AIST v2 baca langsung dari raos_saldo_requests Supabase,

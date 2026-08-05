@@ -9,6 +9,12 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-05 15:05 Claude] docs(task-division) — dokumen
+  `docs/TASK_DIVISION_CC_CODEX.md` (identik dengan rifim-os repo) untuk
+  pembagian tugas Claude Code Desktop vs Codex Desktop. Cakup 15 aspek +
+  17 halaman PWA RAOS + 9 modul Rifim-OS + kolom tabel kritis cross-repo
+  + protokol sinkronisasi branch/commit/merge. Branch:
+  `claude/pwa-raos-rifim-task-division-730bij` (identik di kedua repo).
 - [2026-07-26 02:36 Claude] e44d78f PR#2 merged (squash) — mention
   dropdown include driver cabang + RPC raos_reseed_all_branch_room_members
   (mig raos_056) + fix parser /isisaldo terima spasi

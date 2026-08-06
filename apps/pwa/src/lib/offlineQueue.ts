@@ -28,6 +28,7 @@ export type QueueKind =
   | 'raos_attendance_out'
   | 'scan_order'
   | 'chat_message'
+  | 'saldo_request'
 
 export interface QueuedItem {
   id?: number

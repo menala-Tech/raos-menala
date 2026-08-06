@@ -120,6 +120,18 @@ async function flushItem(item: QueuedItem): Promise<{ ok: boolean; err?: string;
       return { ok: true }
     }
 
+    if (item.kind === 'saldo_request') {
+      const { error } = await supabase.rpc('raos_saldo_submit', item.payload as {
+        p_client_id: string
+        p_branch_id: string
+        p_nominal: number
+        p_room_id: string
+        p_driver_id: string
+      })
+      if (error) return { ok: false, err: error.message }
+      return { ok: true }
+    }
+
     return { ok: false, err: `unknown kind: ${item.kind}` }
   } catch (e: any) {
     return { ok: false, err: String(e?.message ?? e) }

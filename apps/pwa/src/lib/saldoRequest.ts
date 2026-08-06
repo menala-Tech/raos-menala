@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { invokePush } from './pushClient'
 import { logActivity } from './activity'
+import { enqueue, isNetworkError } from './offlineQueue'
 
 /**
  * Parse dan handle chat command untuk pengajuan isi saldo.
@@ -42,6 +43,7 @@ export function parseIsiSaldoCommand(text: string): ParsedCommand | null {
 
 export interface SubmitResult {
   ok: boolean
+  queued?: boolean
   error?: string
   requestNo?: string
   requestId?: string
@@ -54,7 +56,7 @@ interface SubmitOpts {
   branchName?: string
   fullName: string
   roomId: string
-  clientMsgId: string
+  clientMsgId?: string
   nominal: number
   allowedNominals: number[]
   // Driver info — wajib per feedback 30 Juli 2026 sore. Input manual driver_id
@@ -89,21 +91,9 @@ async function postSaldoSystemMessage(opts: {
   })
 }
 
-function newRequestNo(nominal: number): string {
-  const now = new Date()
-  const yyyy = now.getFullYear()
-  const mm = String(now.getMonth() + 1).padStart(2, '0')
-  const dd = String(now.getDate()).padStart(2, '0')
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mi = String(now.getMinutes()).padStart(2, '0')
-  const ss = String(now.getSeconds()).padStart(2, '0')
-  const rnd = Math.floor(Math.random() * 900 + 100)
-  return `SLD-${yyyy}${mm}${dd}-${hh}${mi}${ss}-${rnd}`
-}
-
 export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
-  const { userId, branchId, branchSlug, branchName, fullName, roomId, clientMsgId, nominal, allowedNominals,
-          driverIdRef, driverLoginId, driverName, driverBranchName } = opts
+  const { branchId, branchSlug, roomId, clientMsgId, nominal, allowedNominals,
+          driverIdRef, driverLoginId, driverName } = opts
 
   if (!branchId) {
     return { ok: false, error: 'Cabang tidak diketahui — hubungi admin untuk set branch di /admin.' }
@@ -137,66 +127,31 @@ export async function submitIsiSaldo(opts: SubmitOpts): Promise<SubmitResult> {
     console.warn(`[submitIsiSaldo] Room "Pengisian Saldo — <cabang>" tidak ditemukan untuk branch ${branchId}. Fallback ke ${roomId}. Minta admin bulk-create room via /admin.`)
   }
 
-  const requestNo = newRequestNo(nominal)
-  const { data: request, error: reqErr } = await supabase
-    .from('raos_saldo_requests')
-    .insert({
-      request_no: requestNo,
-      staff_id: userId,
-      branch_id: branchId,
-      nominal,
-      status: 'pending',
-      chat_room_id: targetRoomId,
-      driver_id: driverIdRef,
-      driver_login_id: driverLoginId,
-      driver_name: driverName,
-    })
-    .select('id, request_no')
-    .single()
-
-  if (reqErr || !request) {
-    return { ok: false, error: reqErr?.message ?? 'Gagal simpan pengajuan.' }
+  const clientId = clientMsgId || crypto.randomUUID()
+  const rpcPayload = {
+    p_client_id: clientId,
+    p_branch_id: branchId,
+    p_nominal: nominal,
+    p_room_id: targetRoomId,
+    p_driver_id: driverIdRef,
+  }
+  const { data, error } = await supabase.rpc('raos_saldo_submit', rpcPayload)
+  if (error) {
+    if (isNetworkError(error)) {
+      await enqueue('saldo_request', rpcPayload)
+      return { ok: true, queued: true }
+    }
+    return { ok: false, error: error.message ?? 'Gagal simpan pengajuan.' }
   }
 
-  const content = JSON.stringify({
-    request_id: request.id,
-    request_no: request.request_no,
-    staff_name: fullName,
-    branch_slug: branchSlug ?? null,
-    branch_name: branchName ?? null,
-    branch_id: branchId,
-    nominal,
-    status: 'pending',
-    requested_at: new Date().toISOString(),
-    // Driver snapshot untuk render card tanpa join tambahan di client
-    driver_login_id: driverLoginId,
-    driver_name: driverName,
-    driver_branch_name: driverBranchName ?? null,
-  })
-
-  const { data: msg, error: msgErr } = await supabase
-    .from('chat_messages')
-    .insert({
-      room_id: targetRoomId,
-      sender_id: userId,
-      type: 'saldo_request',
-      content,
-      client_id: clientMsgId,
-    })
-    .select('id')
-    .single()
-
-  if (msgErr) {
-    return { ok: false, error: `Pengajuan tersimpan (${request.request_no}) tapi gagal post ke chat: ${msgErr.message}` }
-  }
-
-  if (msg) {
-    // Link msg_id ke request (fire-and-forget)
-    void supabase.from('raos_saldo_requests').update({ chat_message_id: msg.id }).eq('id', request.id)
+  const result = data as { status?: string; row?: { id?: string; request_no?: string } } | null
+  const request = result?.row
+  if (!request?.id || !request.request_no) {
+    return { ok: false, error: 'Response raos_saldo_submit tidak lengkap.' }
   }
 
   // Audit financial action — fire-and-forget
-  void logActivity('isi_saldo_submit', `${request.request_no} Rp${nominal.toLocaleString('id-ID')} driver=${driverLoginId} branch=${branchSlug ?? branchId}`)
+  void logActivity('isi_saldo_submit', `${request.request_no} Rp${nominal.toLocaleString('id-ID')} driver=${driverLoginId} branch=${branchSlug ?? branchId} status=${result?.status ?? 'unknown'}`)
 
   return { ok: true, requestNo: request.request_no, requestId: request.id }
 }

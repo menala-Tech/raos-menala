@@ -840,6 +840,56 @@ Merge sequence: kontrak (CC) → UI (CX) → docs (CC).
 
 ---
 
+## 20. Tiered Review Policy (added 2026-08-06)
+
+CX sekarang punya `gh` CLI valid (login `menala-Tech`) — boleh self-execute `gh pr create/view/merge`. Supaya hemat token CC + speed up throughput, adopt tiered review:
+
+| PR type | CC review wajib? | CX auto-merge boleh? |
+|---|---|---|
+| Docs (STATUS.md, README, CLAUDE.md append) | ❌ skip | ✅ YA self-merge setelah CI green |
+| CSS/label/copy UI tweak, icon swap, skeleton loader | ❌ skip | ✅ YA self-merge |
+| Refactor internal komponen (no props change) | ❌ skip | ✅ YA self-merge |
+| PWA UI feature baru (form, tabel, modal) | ⚠️ light review | ⚠️ tunggu CC 30 min, kalau unresponsive → self-merge |
+| Backend engine, migration Supabase, RPC signature, RLS policy | ✅ **WAJIB** CC review | ❌ **NEVER** self-merge |
+| Cross-repo change (kontrak lintas repo) | ✅ **WAJIB** CC review | ❌ **NEVER** self-merge |
+| Hotfix critical prod bug | ⚠️ light review kalau CC available <15 min | ⚠️ CX self-merge kalau CC unavailable |
+
+### Whitelist file untuk CX self-merge
+
+BOLEH sentuh (self-merge OK):
+- `apps/pwa/src/components/**/*.tsx`, `apps/pwa/src/app/<page>/**/*.tsx`
+- `modules/<modul>/**/*.html`, `modules/<modul>/styles/*.css`
+- `docs/*.md` (append only)
+- Asset di `public/images/` atau `branding/`
+
+TIDAK BOLEH sentuh (kalau touch = otomatis wajib CC):
+- `automation/apps-script/*.js` (Rifim-OS)
+- `gas/*.gs` (RAOS)
+- `sql/*.sql`, migration Supabase (via MCP CC only)
+- `crmApi.js`, `webApp.js` (backend contract)
+- `.env.local`, secrets, GitHub Actions
+
+### Flow CX self-merge
+
+```bash
+git commit -m "..."
+git push -u origin <branch>
+gh pr create --base main --title "..." --body "..."
+gh pr checks
+gh pr merge --squash --delete-branch
+```
+
+### Flow CX butuh CC review
+
+```bash
+gh pr create --draft --base main --title "..." --body "cc @claude waiting review — [alasan]"
+# TIDAK gh pr merge — tunggu CC
+```
+
+Rasional: sesi 2026-08-06 (14 PR) — CC spend ~210k tokens hanya untuk review. Dengan tiered review, target saving ~50-70% per sesi busy. Quality gate tetap ada untuk backend/contract.
+
+---
+
 **Referensi wajib baca:**
 - `rifim-os/CLAUDE.md` (operating manual)
 - `rifim-os/PROJECT_RULES.md` (business rules + integration rules)

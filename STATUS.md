@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-07-26 dinihari (sesi 20 SELESAI + 2 PR merged — production live)*
+*Diupdate: 2026-08-06 (sesi Document Engine + HRIS Absensi Overhaul — 12 PR RIFIM OS + Phase 2/5 RAOS gas landed)*
 
 ## COLLABORATION LOG
 
@@ -9,6 +9,16 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-06 17:30 Claude/CC] N/A — Sesi cross-repo. RIFIM OS: 12 PR
+  Document Engine v1 + HRIS Absensi Overhaul (5 phase). RAOS gas
+  Phase 2 (folder Bulan/Cabang/Nama) + Phase 5 (archive tanggal 1)
+  sudah landed commit 78650a3. Migration raos_071/072 apply — extend
+  raos_attendance dgn late_deduction + edit audit + views. RPC
+  raos_compute_payroll_month update integrate late_deduction_total ke
+  raos_payroll.thp GENERATED.
+- [2026-08-05 20:30 Codex/CX] b1ef9bd feat(hris/absensi) UI phase 3 —
+  Cabang + edit modal + PDF + Foto + Lokasi + Gapok proporsional
+  (PR #33 rifim-os).
 - [2026-08-05 15:05 Claude] docs(task-division) — dokumen
   `docs/TASK_DIVISION_CC_CODEX.md` (identik dengan rifim-os repo) untuk
   pembagian tugas Claude Code Desktop vs Codex Desktop. Cakup 15 aspek +

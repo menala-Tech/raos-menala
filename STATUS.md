@@ -14,8 +14,9 @@ context terkini sebelum edit file. Baca panduan lengkap di
   border warning, badge kategori, parser/strip `<!--SYSMETA:...-->`, dan
   deep link internal/HTTPS. Typecheck lulus; lint 0 error (2 warning lama);
   production build lulus. Companion rifim-os `56e5d1c` memigrasikan semua
-  notifikasi Fonnte ke RPC `raos_073`. Screenshot production menunggu merge,
-  deploy, dan smoke test cabang.
+  notifikasi Fonnte ke RPC `raos_073` (PR #40; source GAS sudah clasp push).
+  PR renderer: #62. Screenshot production menunggu merge, deploy, Web App
+  redeploy, dan smoke test cabang.
 - [2026-08-07 CC] raos_073_chat_system_message_rpc.sql applied +
   committed. 4 RPC baru: raos_post_system_message (SECURITY DEFINER
   service_role), raos_resolve_saldo_room, raos_resolve_driver_room,

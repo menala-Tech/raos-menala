@@ -9,6 +9,14 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-07 CC] raos_073_chat_system_message_rpc.sql applied +
+  committed. 4 RPC baru: raos_post_system_message (SECURITY DEFINER
+  service_role), raos_resolve_saldo_room, raos_resolve_driver_room,
+  raos_resolve_announcement_room, raos_resolve_private_room. Extend
+  chat_messages.type CHECK dgn 'system'. Foundation Sesi 3 chat
+  migration (Fonnte deprecation 100% di rifim-os) — prompt CX di
+  rifim-os/prompts/CX_SESSION_CHAT_MIGRATION.md. Verify resolver
+  return valid UUID Batam saldo + announcement room.
 - [2026-08-06 17:30 Claude/CC] N/A — Sesi cross-repo. RIFIM OS: 12 PR
   Document Engine v1 + HRIS Absensi Overhaul (5 phase). RAOS gas
   Phase 2 (folder Bulan/Cabang/Nama) + Phase 5 (archive tanggal 1)

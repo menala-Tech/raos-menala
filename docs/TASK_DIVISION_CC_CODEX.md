@@ -890,6 +890,35 @@ Rasional: sesi 2026-08-06 (14 PR) — CC spend ~210k tokens hanya untuk review. 
 
 ---
 
+## 21. CC Scope Narrowed 2026-08-06
+
+Policy baru sesi 2026-08-06: **CC dipersempit** menjadi prompt writer + reviewer critical PR + terminal executor + Supabase migration applier. **CX diperluas** menjadi implementer full-stack terkontrol: UI, backend GAS, draft SQL migration, testing, PR create/merge whitelist, dan append `STATUS.md`.
+
+| Task | CC | CX | User |
+|---|---|---|---|
+| Prompt/spec endpoint, RPC, UI, backend | Tulis prompt/spec yang jelas untuk CX, termasuk contract dan acceptance test | Eksekusi implementasi sesuai prompt/spec | Beri requirement bisnis dan prioritas |
+| UI React/HTML, modal, table, styling | Review ringan hanya kalau menyentuh contract atau flow critical | Coding utama, test browser, polish UX | Review visual / approve hasil |
+| Backend GAS code (`automation/apps-script/*.js`, `gas/*.gs`) | Review critical PR dan bantu terminal `clasp push` kalau perlu | Coding endpoint/handler/sync sesuai spec CC | Validasi live behavior |
+| SQL migration file draft (`sql/*.sql`) | Review dan apply migration via Supabase MCP | Tulis draft SQL migration file + rollback note | Approve perubahan schema besar |
+| Supabase apply migration / execute SQL write | **Owner tunggal apply via MCP** | Jangan apply langsung; hanya draft SQL dan test read-only | Confirm production apply jika high-risk |
+| RPC, view, RLS SQL | Review contract/security + apply via MCP | Draft SQL implementation sesuai spec | Confirm business rule / role matrix |
+| Endpoint contract (`crmApi.js`, `webApp.js`, RAOS Web API) | Prompt writer + reviewer critical contract | Coding endpoint sesuai spec, test curl/log | Confirm payload/response sesuai kebutuhan |
+| Testing endpoint/browser/log | Review hasil test critical | Jalankan curl/browser/log test, lampirkan output ke PR | Bantu akun/data test |
+| PR create/view/merge whitelist | Review hanya PR critical/backend/contract/cross-repo | Boleh create/view/merge untuk whitelist docs/UI/internal refactor setelah checks green | Decide jika ada risiko bisnis |
+| Terminal executor (`git push`, `clasp push`, deploy trigger) | Jalankan bila tool/credential eksklusif CC atau diminta user | Jalankan git/gh normal jika sudah authorized | Authorize device login / approval jika diperlukan |
+| Critical PR review | Reviewer wajib untuk backend engine, migration, RLS, RPC signature, cross-repo contract | Siapkan PR body, test evidence, dan fix review comments | Prioritize merge / accept risk |
+| `STATUS.md` append | Review / rekonsiliasi akhir sesi bila perlu | Append entry per commit/PR yang dikerjakan | Confirm status business milestone |
+| `CLAUDE.md`, `PROJECT_RULES.md`, skill files | CC-only / owner docs | Jangan edit | Approve policy-level change |
+| Memory + skill file CC | Maintain memory/skill terkait CC | Konsumsi instruksi yang relevan, jangan ubah skill CC | Minta update memory jika policy berubah |
+
+### Ringkasan praktis
+
+- **CC = prompt writer + critical reviewer + migration applier + terminal executor.**
+- **CX = full-stack implementer terkontrol + tester + PR operator whitelist + status appender.**
+- Kalau ada konflik antara tabel ini dan section lama, **section 21 menang** sampai `CLAUDE.md` / onboarding prompt direkonsiliasi.
+
+---
+
 **Referensi wajib baca:**
 - `rifim-os/CLAUDE.md` (operating manual)
 - `rifim-os/PROJECT_RULES.md` (business rules + integration rules)

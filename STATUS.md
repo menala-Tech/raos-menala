@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-08-06 (sesi Document Engine + HRIS Absensi Overhaul — 12 PR RIFIM OS + Phase 2/5 RAOS gas landed)*
+*Diupdate: 2026-08-07 (Sesi 3 renderer RAOS Chat system message)*
 
 ## COLLABORATION LOG
 
@@ -9,6 +9,13 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-07 Codex/CX] `9561681` — PWA chat render
+  `type='system'`: avatar 🤖, sender “Sistem RAOS”, bubble abu-abu dengan
+  border warning, badge kategori, parser/strip `<!--SYSMETA:...-->`, dan
+  deep link internal/HTTPS. Typecheck lulus; lint 0 error (2 warning lama);
+  production build lulus. Companion rifim-os `56e5d1c` memigrasikan semua
+  notifikasi Fonnte ke RPC `raos_073`. Screenshot production menunggu merge,
+  deploy, dan smoke test cabang.
 - [2026-08-07 CC] raos_073_chat_system_message_rpc.sql applied +
   committed. 4 RPC baru: raos_post_system_message (SECURITY DEFINER
   service_role), raos_resolve_saldo_room, raos_resolve_driver_room,

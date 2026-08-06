@@ -1616,3 +1616,11 @@ Yang SELESAI dari pending list lama:
 | Vercel Deploy | ⏳ Belum | Perlu deploy |
 | Admin Panel | ⏳ Belum | Next session |
 | KPI Dashboard | ⏳ Belum | Next session |
+
+## 2026-08-07 — Saldo P0 F-05
+
+- Migration `raos_074_saldo_mark_paid_rpc.sql` dan `raos_075_saldo_client_id_idempotency.sql` diterapkan serta diverifikasi di Supabase prod.
+- Commit SQL: `d5a8e59`; commit client: `2bc9f38` pada branch `codex/saldo-f05-idempotency`.
+- `submitIsiSaldo()` sekarang memanggil RPC transactional `raos_saldo_submit`, bukan direct INSERT request/chat.
+- `client_id` memakai UUID client dan ikut disimpan di IndexedDB; retry offline memakai UUID yang sama.
+- Validasi lokal: TypeScript lulus, ESLint 0 error (2 warning existing di file lain), dan Next.js production build lulus.

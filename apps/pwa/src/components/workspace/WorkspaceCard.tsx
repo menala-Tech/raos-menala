@@ -11,6 +11,7 @@ import clsx from 'clsx'
  */
 interface Props {
   isMe: boolean
+  isSystem?: boolean
   isPinned?: boolean
   onLongPressStart?: () => void
   onLongPressEnd?: () => void
@@ -21,6 +22,7 @@ interface Props {
 
 export default function WorkspaceCard({
   isMe,
+  isSystem,
   isPinned,
   onLongPressStart,
   onLongPressEnd,
@@ -36,7 +38,9 @@ export default function WorkspaceCard({
       onContextMenu={onContextMenu}
       className={clsx(
         'max-w-[78%] px-3 py-2 rounded-2xl text-sm cursor-pointer select-none',
-        isMe ? 'bg-secondary text-white rounded-br-sm' : 'bg-white text-gray-800 shadow-sm rounded-bl-sm',
+        isSystem
+          ? 'bg-gray-100 text-gray-800 border border-gray-200 border-l-4 border-l-amber-400 rounded-bl-sm shadow-sm'
+          : isMe ? 'bg-secondary text-white rounded-br-sm' : 'bg-white text-gray-800 shadow-sm rounded-bl-sm',
         isPinned && 'ring-1 ring-primary/40',
         className
       )}

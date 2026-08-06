@@ -99,7 +99,7 @@ export interface ChatRoomWithMeta extends ChatRoom {
 export interface ChatMessage {
   id: string
   room_id: string
-  sender_id: string
+  sender_id: string | null
   type: string
   content?: string
   media_url?: string

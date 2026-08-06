@@ -60,7 +60,8 @@ const WorkspaceTimeline = forwardRef<HTMLDivElement, Props>(function WorkspaceTi
         </div>
       )}
       {messages.map(msg => {
-        const isMe = msg.sender_id === user.id
+        const isSystem = msg.type === 'system'
+        const isMe = !isSystem && msg.sender_id === user.id
         const rxGroups = groupedReactions(msg.id)
         return (
           <div
@@ -69,24 +70,28 @@ const WorkspaceTimeline = forwardRef<HTMLDivElement, Props>(function WorkspaceTi
             className={clsx('flex flex-col', isMe ? 'items-end' : 'items-start')}
           >
             {!isMe && (() => {
-              const senderName = (msg as any).user_profiles?.full_name ?? 'Anggota'
+              const senderName = isSystem ? 'Sistem RAOS' : ((msg as any).user_profiles?.full_name ?? 'Anggota')
               const senderRole = (msg as any).user_profiles?.role ?? ''
-              const canTag = !!msg.sender_id && !!props.onTagSender
+              const canTag = !isSystem && !!msg.sender_id && !!props.onTagSender
               return (
-                <button
-                  type="button"
-                  disabled={!canTag}
-                  onClick={() => msg.sender_id && props.onTagSender?.(msg.sender_id, senderName)}
-                  className="text-[10px] font-bold text-primary ml-1 mb-0.5 capitalize hover:underline disabled:no-underline disabled:cursor-default text-left"
-                  title={canTag ? `Ketuk untuk tag @${senderName}` : undefined}
-                >
-                  {senderName}{senderRole ? ` · ${senderRole}` : ''}
-                </button>
+                <div className="flex items-center gap-1 ml-1 mb-0.5">
+                  {isSystem && <span aria-hidden="true" className="text-sm leading-none">🤖</span>}
+                  <button
+                    type="button"
+                    disabled={!canTag}
+                    onClick={() => msg.sender_id && props.onTagSender?.(msg.sender_id, senderName)}
+                    className="text-[10px] font-bold text-primary capitalize hover:underline disabled:no-underline disabled:cursor-default text-left"
+                    title={canTag ? `Ketuk untuk tag @${senderName}` : undefined}
+                  >
+                    {senderName}{!isSystem && senderRole ? ` · ${senderRole}` : ''}
+                  </button>
+                </div>
               )
             })()}
 
             <WorkspaceCard
               isMe={isMe}
+              isSystem={isSystem}
               isPinned={msg.is_pinned}
               onLongPressStart={() => props.onStartLongPress(msg.id, isMe, msg.content)}
               onLongPressEnd={props.onCancelLongPress}

@@ -1,7 +1,7 @@
 'use client'
 
 import {
-  BarChart2, Camera, Check, CheckCheck, CheckSquare, Download, FileText, Lock,
+  BarChart2, Bot, Camera, Check, CheckCheck, CheckSquare, Download, ExternalLink, FileText, Lock,
   MapPin, Mic, Square,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -16,6 +16,7 @@ import {
   TaskCard,
 } from '@/components/business-cards'
 import type { ReadSummaryEntry } from './types'
+import { parseSystemMessage, systemCategoryLabel } from '@/lib/systemMessage'
 
 interface Props {
   msg: ChatMessage
@@ -245,6 +246,34 @@ export default function TimelineMessage(props: Props) {
               </button>
             )}
           </>
+        )
+      })()}
+
+      {/* SYSTEM MESSAGE — metadata comment stripped before display */}
+      {msg.type === 'system' && (() => {
+        const parsed = parseSystemMessage(msg.content ?? '')
+        return (
+          <div className="min-w-[190px]">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">
+                <Bot size={10} aria-hidden="true" />
+                {systemCategoryLabel(parsed.envelope?.category)}
+              </span>
+            </div>
+            <p className="leading-relaxed whitespace-pre-wrap break-words text-gray-800">
+              {parsed.content}
+            </p>
+            {parsed.deepLink && (
+              <a
+                href={parsed.deepLink}
+                target={parsed.deepLink.startsWith('https://') ? '_blank' : undefined}
+                rel={parsed.deepLink.startsWith('https://') ? 'noopener noreferrer' : undefined}
+                className="mt-2 inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-[10px] font-bold text-secondary shadow-sm ring-1 ring-gray-200"
+              >
+                Buka detail <ExternalLink size={10} aria-hidden="true" />
+              </a>
+            )}
+          </div>
         )
       })()}
 

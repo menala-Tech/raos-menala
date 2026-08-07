@@ -9,6 +9,12 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-07 CC+CX] Sesi A saldo P0 + Sesi B chat migration DONE +
+  DEPLOYED. Migration raos_073/074/075 applied + verified. PR #39
+  (rifim-os F-01..F-04 auth+RPC), PR #40 (rifim-os Fonnte deprecation
+  100%), PR #61 (RAOS F-05 client_id) semua merged. Vercel prod READY
+  keduanya. GAS Web App Version 76 aktif (URL /exec preserved).
+  CX reset 12 Agustus — sisa Sesi 2 KPI V2 ditunda.
 - [2026-08-07 CC] raos_073_chat_system_message_rpc.sql applied +
   committed. 4 RPC baru: raos_post_system_message (SECURITY DEFINER
   service_role), raos_resolve_saldo_room, raos_resolve_driver_room,

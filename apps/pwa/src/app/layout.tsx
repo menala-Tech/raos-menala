@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
+import OfflineBadge from '@/components/OfflineBadge'
+import OfflineReadCacheBootstrap from '@/components/OfflineReadCacheBootstrap'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -65,6 +67,8 @@ export default function RootLayout({
         `}} />
       </head>
       <body className={`${inter.className} h-full`}>
+        <OfflineReadCacheBootstrap />
+        <OfflineBadge />
         <div className="min-h-full max-w-md mx-auto relative">
           {children}
         </div>

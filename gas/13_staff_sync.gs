@@ -1,5 +1,5 @@
 // ============================================================
-// 13_staff_sync.gs — Sync Staff RAOS (Soeta) dari SSOT MASTER DATA STAFF
+// 13_staff_sync.gs — Sync Staff RAOS dari SSOT MASTER DATA STAFF
 // ============================================================
 //
 // SUMBER SSOT (WAJIB, lihat SSOT_DATA_SOURCES.md di root workspace):
@@ -7,43 +7,29 @@
 // sistem RIFIM, dipakai bersama oleh semua PWA. RAOS HANYA boleh membaca
 // (read-only), tidak pernah menulis balik ke sheet.
 //
-// RAOS = Bandara Soekarno-Hatta → hanya tarik baris dengan
-// kolom D "ID CABANG" = "ID Rifim Airport Soeta". Cabang lain di sheet
-// (Batam, Jambi, Balikpapan, dll) BUKAN urusan RAOS, dilewati.
-//
 // Arah sync: Google Sheets → Supabase (satu arah). Kolom SSOT (full_name,
 // role, phone, staff_id) di-refresh tiap sync + PIN → password Supabase Auth;
 // kolom milik RAOS sendiri (branch_id / Terminal T1/T2/T3, avatar_url) TIDAK
 // PERNAH ditimpa sync — itu diset admin lewat /admin.
 //
-// Mapping kolom sheet MASTER DATA STAFF (0-based):
-//   A(0) Email    B(1) Nama    C(2) Gaji Staff    D(3) ID CABANG
-//   E(4) ID Staff F(5) Jabatan G(6) No WA Staff  H(7) Pin
-//
-// Mapping jabatan → role RAOS:
-//   STAFF KONTER / PICKUP POINT → 'staff'
-//   KOORDINATOR                 → 'koordinator'
-//   ADMIN                       → 'admin'
-//   MANAGEMENT                  → 'management'
-//   DIREKSI                     → 'direksi'
-//   DRIVER MANAGER              → 'driver_manager' (sesi 22)
+// FASE 3 Poin E (2026-08-08):
+// - kolom "Role Sistem" menjadi override role bila diisi.
+// - bila kosong/tidak ada, fallback ke mapping "Jabatan" existing.
+// - lookup kolom memakai header, bukan posisi fixed, supaya insert Role Sistem
+//   setelah Jabatan tidak menggeser No WA / Pin / RAOS PIN.
 
 const MASTER_STAFF_SHEET_ID =
   PropertiesService.getScriptProperties().getProperty('MASTER_STAFF_SHEET_ID')
   || '1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw'
 
 const MASTER_STAFF_TAB_NAME = 'MASTER DATA STAFF'
+const SYSTEM_ROLE_VALUES = [
+  'staff', 'koordinator', 'admin', 'management', 'direksi', 'driver_manager', 'driver',
+]
 
-// Post sesi 17 lanjutan: RAOS jadi hub multi-PWA — sync SEMUA staff RIFIM
-// dari MASTER DATA STAFF (bukan cuma cabang RAOS). PWA lain (isi-saldo,
-// radms-driver, rifim-os) baca dari user_profiles yang sama.
-// Staff di cabang yang belum di-seed di RAOS branches → branch_id NULL,
-// warning ke LOG SISTEM, tapi TETAP insert supaya PWA lain punya data.
+// Post sesi 17 lanjutan: RAOS jadi hub multi-PWA — sync SEMUA staff RIFIM.
 const SKIP_CABANG_SYNC = [] // kosong = tarik semua
 
-// Staff dikecualikan TOTAL dari absensi + geofence Isi Saldo.
-// Adopsi dari rifim-isi-saldo ABSEN_STAFF_DIKECUALIKAN. Match by full_name
-// (case-insensitive, prefix). Auto-set is_geofence_exempt=true saat sync.
 const GEOFENCE_EXEMPT_STAFF_PATTERNS = [
   /^gusril/i,
   /^hadityawarman/i,
@@ -53,9 +39,8 @@ function isStaffGeofenceExempt_(namaLengkap) {
   const s = String(namaLengkap || '').trim()
   return GEOFENCE_EXEMPT_STAFF_PATTERNS.some(re => re.test(s))
 }
+
 // DEPRECATED post sesi 17 lanjutan — filter dihapus, tarik semua staff RIFIM.
-// Const tetap disimpan untuk backward-compat reference. Pakai SKIP_CABANG_SYNC
-// (kosong = tarik semua) untuk filter opsional di masa depan.
 const RAOS_ALLOWED_BRANCHES_LEGACY = [
   'ID Rifim Airport Soeta', 'ID Rifim Airport Batam', 'ID Rifim Airport Jambi',
   'ID Rifim Airport Balikpapan', 'ID Rifim Airport Manado',
@@ -88,9 +73,7 @@ function callSupabaseAuth_(endpoint, method, body) {
   const res = UrlFetchApp.fetch(`${CONFIG.SUPABASE_URL}/auth/v1/${endpoint}`, opts)
   const code = res.getResponseCode()
   const text = res.getContentText()
-  if (code >= 400) {
-    throw new Error(`Auth API ${code}: ${text}`)
-  }
+  if (code >= 400) throw new Error(`Auth API ${code}: ${text}`)
   return text ? JSON.parse(text) : null
 }
 
@@ -102,7 +85,45 @@ function mapJabatanToRole_(jabatan) {
   if (j === 'ADMIN') return 'admin'
   if (j === 'DRIVER MANAGER' || j === 'DRIVER MGR') return 'driver_manager'
   if (j === 'STAFF KONTER' || j === 'PICKUP POINT') return 'staff'
-  return null // jabatan tidak dikenal → skip baris
+  return null
+}
+
+function normalizeStaffHeader_(raw) {
+  return String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function findStaffColumn_(headers, names, fallback) {
+  const normalized = headers.map(normalizeStaffHeader_)
+  for (let i = 0; i < names.length; i++) {
+    const idx = normalized.indexOf(normalizeStaffHeader_(names[i]))
+    if (idx >= 0) return idx
+  }
+  return fallback
+}
+
+/**
+ * Header-aware index map. Fallback A-H menjaga backward compatibility bila
+ * sheet lama belum memiliki Role Sistem.
+ */
+function getStaffSheetColumns_(headers) {
+  return {
+    email: findStaffColumn_(headers, ['Email'], 0),
+    nama: findStaffColumn_(headers, ['Nama'], 1),
+    gaji: findStaffColumn_(headers, ['Gaji Staff', 'Gaji'], 2),
+    idCabang: findStaffColumn_(headers, ['ID CABANG', 'ID Cabang'], 3),
+    staffId: findStaffColumn_(headers, ['ID Staff', 'Staff ID'], 4),
+    jabatan: findStaffColumn_(headers, ['Jabatan'], 5),
+    roleSistem: findStaffColumn_(headers, ['Role Sistem'], -1),
+    phone: findStaffColumn_(headers, ['No WA Staff', 'No  WA Staff', 'No WA'], 6),
+    pin: findStaffColumn_(headers, ['Pin', 'PIN'], 7),
+  }
+}
+
+function resolveSystemRole_(roleSistemRaw, jabatanRaw) {
+  const explicit = String(roleSistemRaw || '').trim().toLowerCase()
+  if (!explicit) return { role: mapJabatanToRole_(jabatanRaw), source: 'jabatan' }
+  if (SYSTEM_ROLE_VALUES.indexOf(explicit) >= 0) return { role: explicit, source: 'role_sistem' }
+  return { role: null, source: 'role_sistem_invalid', raw: explicit }
 }
 
 /** Parse "Rp 2.700.000" atau "2700000" → 2700000. Return null kalau invalid. */
@@ -138,16 +159,29 @@ function syncStaffFromSSOT() {
 
   try {
     const sh = getMasterStaffSheet_()
-    const rowsRaw = sh.getDataRange().getValues().slice(1)
+    const values = sh.getDataRange().getValues()
+    if (!values.length) throw new Error('MASTER DATA STAFF kosong')
+    const headers = values[0] || []
+    const cols = getStaffSheetColumns_(headers)
+    const rowsRaw = values.slice(1)
     const now = new Date().toISOString()
     const branchMap = kpiBranchMap_()
 
     // ─── 1) Parse + validate semua rows (in-memory, tanpa HTTP) ─────────
-    const validRows = [] // { rowNum, email, nama, staffId, role, phone, gaji, pin, branchId }
+    const validRows = []
     const seenStaffIds = []
     rowsRaw.forEach((row, i) => {
       const rowNum = i + 2
-      const [emailRaw, namaRaw, gajiRaw, idCabangRaw, staffIdRaw, jabatanRaw, phoneRaw, pinRaw] = row
+      const emailRaw = row[cols.email]
+      const namaRaw = row[cols.nama]
+      const gajiRaw = row[cols.gaji]
+      const idCabangRaw = row[cols.idCabang]
+      const staffIdRaw = row[cols.staffId]
+      const jabatanRaw = row[cols.jabatan]
+      const roleSistemRaw = cols.roleSistem >= 0 ? row[cols.roleSistem] : ''
+      const phoneRaw = row[cols.phone]
+      const pinRaw = row[cols.pin]
+
       const idCabang = String(idCabangRaw || '').trim()
       if (SKIP_CABANG_SYNC.indexOf(idCabang) >= 0) return
       if (!idCabang) return
@@ -155,7 +189,8 @@ function syncStaffFromSSOT() {
       const email = String(emailRaw || '').trim().toLowerCase()
       const nama = String(namaRaw || '').replace(/⁠/g, '').trim()
       const staffId = String(staffIdRaw || '').trim()
-      const role = mapJabatanToRole_(jabatanRaw)
+      const roleResult = resolveSystemRole_(roleSistemRaw, jabatanRaw)
+      const role = roleResult.role
       const phone = String(phoneRaw || '').trim() || null
       const gaji = parseGajiSsot_(gajiRaw)
       const branchId = branchMap[idCabang] || null
@@ -169,7 +204,10 @@ function syncStaffFromSSOT() {
         return
       }
       if (!role) {
-        warnings.push(`Baris ${rowNum} (${staffId}): jabatan "${jabatanRaw}" unknown, skip`)
+        const why = roleResult.source === 'role_sistem_invalid'
+          ? `Role Sistem "${roleSistemRaw}" tidak valid`
+          : `jabatan "${jabatanRaw}" unknown`
+        warnings.push(`Baris ${rowNum} (${staffId}): ${why}, skip`)
         skipped++
         return
       }
@@ -182,14 +220,12 @@ function syncStaffFromSSOT() {
     })
 
     // ─── 2) Pre-fetch semua user_profiles source SSOT (1 call) ──────────
-    // Map staff_id → { id (auth uuid), source, branch_id }
     const existingRaw = callSupabase(
       'user_profiles?source=eq.ssot_master_staff&select=id,staff_id,source,branch_id&limit=1000'
     ) || []
     const profilesByStaffId = {}
     existingRaw.forEach(p => { if (p.staff_id) profilesByStaffId[p.staff_id] = p })
 
-    // Manual profiles (email→id) — untuk deteksi source=manual conflict
     const manualRaw = callSupabase(
       'user_profiles?source=eq.manual&select=id&limit=200'
     ) || []
@@ -197,8 +233,8 @@ function syncStaffFromSSOT() {
     manualRaw.forEach(p => { manualAuthIds[p.id] = true })
 
     // ─── 3) Klasifikasi rows → cached / new-auth-needed ─────────────────
-    const cachedRows = [] // sudah ada auth + profile, tinggal update user_profiles
-    const newAuthRows = [] // belum ada auth user → parallel create
+    const cachedRows = []
+    const newAuthRows = []
     validRows.forEach(r => {
       const existing = profilesByStaffId[r.staffId]
       if (existing) {
@@ -231,7 +267,6 @@ function syncStaffFromSSOT() {
           muteHttpExceptions: true,
         }
       })
-      // Batch 50 concurrent
       const AUTH_BATCH = 50
       for (let i = 0; i < requests.length; i += AUTH_BATCH) {
         const batchReq = requests.slice(i, i + AUTH_BATCH)
@@ -245,7 +280,6 @@ function syncStaffFromSSOT() {
             try { r.authId = JSON.parse(res.getContentText()).id; authNew++ }
             catch (e) { errors++; warnings.push(`${r.staffId}: parse auth create response fail`) }
           } else if (code === 422 || res.getContentText().indexOf('already') >= 0) {
-            // Email exists — lookup id
             try {
               const looked = callSupabase('rpc/get_auth_user_id_by_email', 'POST', { p_email: r.email })
               r.authId = Array.isArray(looked) ? looked[0] : looked
@@ -262,10 +296,9 @@ function syncStaffFromSSOT() {
     authCached = cachedRows.length
 
     // ─── 5) Build bulk payload user_profiles upsert ─────────────────────
-    // Skip yg source=manual (jangan timpa admin awal)
     const bulkPayload = []
     validRows.forEach(r => {
-      if (!r.authId) return // gagal create/lookup, skip silent
+      if (!r.authId) return
       if (manualAuthIds[r.authId]) {
         warnings.push(`Baris ${r.rowNum} (${r.staffId}): source=manual, skip`)
         skipped++
@@ -294,10 +327,7 @@ function syncStaffFromSSOT() {
       bulkPayload.push(p)
     })
 
-    // ─── 6a) Dedup bulkPayload by id (auth uuid) — bug DATA sheet SSOT
-    // punya staff_id duplicate (RIF0125/RIF0149/RIF0153 dipakai 2 baris)
-    // → 2 rows map ke authId sama → Postgres "ON CONFLICT cannot affect
-    // row a second time". Winner-last, dan log warning.
+    // ─── 6a) Dedup bulkPayload by id ────────────────────────────────────
     const dedupMap = {}
     const dupWarnings = []
     bulkPayload.forEach(p => {
@@ -355,7 +385,6 @@ function syncStaffFromSSOT() {
       deactivated = deactCount
     }
 
-    // Log warnings (max 50) ke LOG SISTEM
     warnings.slice(0, 50).forEach(w => logSistem('warning', 'syncStaffFromSSOT', 'warning', w))
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
@@ -363,7 +392,7 @@ function syncStaffFromSSOT() {
       `${deactivated} nonaktif, ${skipped} dilewati, ${errors} error, ${warnings.length} peringatan, ${elapsed}s`
     logSistem('sync', 'syncStaffFromSSOT', errors ? 'warning' : 'success', summary)
 
-    try { SpreadsheetApp.getUi().alert('✅ Sync Staff Soeta Selesai\n\n' + summary) }
+    try { SpreadsheetApp.getUi().alert('✅ Sync Staff Selesai\n\n' + summary) }
     catch (e) { /* trigger/webapp context */ }
 
     return { upserted, authNew, authCached, deactivated, skipped, errors, warnings: warnings.length, elapsed_s: Number(elapsed) }
@@ -375,9 +404,7 @@ function syncStaffFromSSOT() {
 
 /**
  * FORCE refresh Supabase Auth password untuk SEMUA staff SSOT yg PIN-nya valid.
- * Pakai kalau admin habis update PIN massal di sheet MASTER DATA STAFF dan mau
- * langsung propagate ke Auth password (staff bisa login PWA pakai PIN baru).
- * Skip staff dengan PIN kosong/tidak valid. Butuh ~10 detik untuk 30 staff.
+ * Header-based agar aman bila Role Sistem disisipkan setelah Jabatan.
  */
 function forceRefreshStaffAuth() {
   const t0 = Date.now()
@@ -385,9 +412,12 @@ function forceRefreshStaffAuth() {
 
   try {
     const sh = getMasterStaffSheet_()
-    const rowsRaw = sh.getDataRange().getValues().slice(1)
+    const values = sh.getDataRange().getValues()
+    if (!values.length) throw new Error('MASTER DATA STAFF kosong')
+    const headers = values[0] || []
+    const cols = getStaffSheetColumns_(headers)
+    const rowsRaw = values.slice(1)
 
-    // Build valid list: staff dengan PIN valid + auth uuid
     const profiles = callSupabase(
       'user_profiles?source=eq.ssot_master_staff&select=id,staff_id&limit=1000'
     ) || []
@@ -396,8 +426,8 @@ function forceRefreshStaffAuth() {
 
     const targets = []
     rowsRaw.forEach(row => {
-      const staffId = String(row[4] || '').trim()
-      const pin = normalizePin_(row[7])
+      const staffId = String(row[cols.staffId] || '').trim()
+      const pin = normalizePin_(row[cols.pin])
       if (!staffId) return
       if (!pin.valid) { skippedNoPin++; return }
       const authId = authByStaffId[staffId]
@@ -405,7 +435,6 @@ function forceRefreshStaffAuth() {
       targets.push({ staffId, authId, password: pin.value })
     })
 
-    // Parallel PUT /auth/v1/admin/users/{id} batch 50
     const requests = targets.map(t => ({
       url: CONFIG.SUPABASE_URL + '/auth/v1/admin/users/' + t.authId,
       method: 'put',

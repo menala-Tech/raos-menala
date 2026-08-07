@@ -9,6 +9,11 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-07 CC] feat(saldo): skip approval flow — chat submit langsung
+  processable Finance, hapus tombol Approve/Reject koord (poin 2+6). Migration
+  raos_076 relax mark_paid guard status IN ('pending','approved'). SaldoRequestCard
+  view-only. approveSaldoRequest/rejectSaldoRequest deprecated (backward compat
+  di /validasi-saldo page). Response label 'not_approved' → 'not_processable'.
 - [2026-08-07 CC+CX] Sesi A saldo P0 + Sesi B chat migration DONE +
   DEPLOYED. Migration raos_073/074/075 applied + verified. PR #39
   (rifim-os F-01..F-04 auth+RPC), PR #40 (rifim-os Fonnte deprecation

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { Wallet, CheckCircle2, XCircle, Clock } from 'lucide-react'
-import { approveSaldoRequest, rejectSaldoRequest } from '@/lib/saldoRequest'
 import { supabase } from '@/lib/supabase'
 
 interface SaldoContent {
@@ -24,6 +23,11 @@ interface SaldoContent {
 
 interface Props {
   raw: string
+  // Props di bawah dipertahankan untuk backward compat caller. Sesi 2026-08-07:
+  // skip approval flow — SaldoRequestCard sekarang view-only, tidak lagi expose
+  // tombol Setujui/Tolak untuk role koord/admin/mgmt/direksi. Field ini tidak
+  // dipakai internal tapi tetap ada di interface Props supaya call-site (chat
+  // page dll) tidak perlu diubah.
   messageId?: string
   currentUserId: string
   currentUserRole: string
@@ -38,15 +42,9 @@ function parse(raw: string): SaldoContent | null {
   }
 }
 
-const canApprove = (role: string) =>
-  ['koordinator', 'admin', 'management', 'direksi'].includes(role)
-
-export default function SaldoRequestCard({ raw, messageId, currentUserId, currentUserRole, onUpdated }: Props) {
+export default function SaldoRequestCard({ raw }: Props) {
   const data = parse(raw)
   const requestId = data?.request_id
-  const [busy, setBusy] = useState(false)
-  const [rejectMode, setRejectMode] = useState(false)
-  const [reason, setReason] = useState('')
   const [liveData, setLiveData] = useState<SaldoContent | null>(data)
 
   useEffect(() => {
@@ -91,39 +89,21 @@ export default function SaldoRequestCard({ raw, messageId, currentUserId, curren
 
   const live = liveData ?? data
   const nominalFmt = `Rp${Number(live.nominal).toLocaleString('id-ID')}`
-  // is_processed adalah status FINAL dari admin (via centang sheet).
-  // approve/reject koordinator hanya untuk validasi audit, tidak
-  // mempengaruhi pengiriman ke sheet.
+  // Sesi 2026-08-07 (poin 2+6): skip approval flow. Label status disederhanakan:
+  //   pending  → 'Menunggu diproses' (siap dilunasi Finance langsung)
+  //   approved → 'Menunggu Admin Isi' (legacy backward compat, kalau ada
+  //              request dari sebelum deploy yang sudah di-approve)
+  //   processed → 'Sudah Diisi oleh Admin'
   const statusChip = (() => {
     if (live.is_processed) return { icon: CheckCircle2, label: 'Sudah Diisi oleh Admin', cls: 'bg-green-100 text-green-700' }
     switch (live.status) {
       case 'rejected': return { icon: XCircle, label: 'Ditolak', cls: 'bg-red-100 text-red-700' }
       case 'cancelled': return { icon: XCircle, label: 'Dibatalkan', cls: 'bg-gray-100 text-gray-600' }
-      case 'approved': return { icon: Clock, label: 'Validasi ✓ — Menunggu Admin', cls: 'bg-blue-100 text-blue-700' }
-      default: return { icon: Clock, label: 'Menunggu', cls: 'bg-amber-100 text-amber-700' }
+      case 'approved': return { icon: Clock, label: 'Menunggu Admin Isi', cls: 'bg-blue-100 text-blue-700' }
+      default: return { icon: Clock, label: 'Menunggu diproses', cls: 'bg-amber-100 text-amber-700' }
     }
   })()
   const StatusIcon = statusChip.icon
-
-  const isPending = live.status === 'pending' && !live.is_processed
-  const showApproveBtn = isPending && canApprove(currentUserRole)
-
-  async function handleApprove() {
-    setBusy(true)
-    const r = await approveSaldoRequest(live.request_id, currentUserId, messageId)
-    setBusy(false)
-    if (!r.ok) alert(r.error ?? 'Gagal setujui')
-    else onUpdated?.()
-  }
-
-  async function handleReject() {
-    if (!reason.trim()) { alert('Isi alasan penolakan.'); return }
-    setBusy(true)
-    const r = await rejectSaldoRequest(live.request_id, currentUserId, reason.trim(), messageId)
-    setBusy(false)
-    if (!r.ok) alert(r.error ?? 'Gagal tolak')
-    else { setRejectMode(false); onUpdated?.() }
-  }
 
   return (
     <div className="min-w-[240px] max-w-[320px] rounded-xl bg-white text-gray-900 border border-primary/30 p-3 shadow-sm">
@@ -167,48 +147,6 @@ export default function SaldoRequestCard({ raw, messageId, currentUserId, curren
           </div>
         )}
       </div>
-
-      {showApproveBtn && !rejectMode && (
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <button
-            disabled={busy}
-            onClick={() => setRejectMode(true)}
-            className="text-xs font-semibold py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50">
-            Tolak
-          </button>
-          <button
-            disabled={busy}
-            onClick={handleApprove}
-            className="text-xs font-semibold py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
-            Setujui
-          </button>
-        </div>
-      )}
-
-      {rejectMode && (
-        <div className="mt-3 space-y-2">
-          <input
-            autoFocus
-            value={reason}
-            onChange={e => setReason(e.target.value)}
-            placeholder="Alasan tolak..."
-            className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              disabled={busy}
-              onClick={() => { setRejectMode(false); setReason('') }}
-              className="text-xs font-semibold py-1.5 rounded-lg bg-gray-100 text-gray-600">
-              Batal
-            </button>
-            <button
-              disabled={busy}
-              onClick={handleReject}
-              className="text-xs font-semibold py-1.5 rounded-lg bg-red-600 text-white disabled:opacity-50">
-              Kirim
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

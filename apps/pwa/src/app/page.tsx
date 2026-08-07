@@ -11,6 +11,20 @@ import { logActivity } from '@/lib/activity'
 
 type Mode = 'password' | 'magic-link' | 'forgot-password'
 
+type BridgeResult = {
+  ok?: boolean
+  reason?: string
+  message?: string
+  email?: string
+  ssot_pin?: string
+}
+
+type DriverEmailResult = {
+  ok?: boolean
+  state?: 'unbound' | 'match'
+  reason?: string
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const [checkingSession, setCheckingSession] = useState(true)
@@ -32,26 +46,123 @@ export default function LoginPage() {
     })
   }, [router])
 
+  async function signInAndRoute(loginEmail: string, loginPassword: string, expectedRole?: string) {
+    const { data, error: signError } = await supabase.auth.signInWithPassword({
+      email: loginEmail,
+      password: loginPassword,
+    })
+    if (signError || !data.user) throw new Error('Kredensial login tidak valid.')
+
+    const { data: profile, error: profileError } = await supabase.from('user_profiles')
+      .select('role,driver_id,is_active').eq('id', data.user.id).single()
+
+    if (profileError || !profile || profile.is_active === false) {
+      await supabase.auth.signOut()
+      throw new Error('Profil akun tidak aktif atau tidak ditemukan.')
+    }
+    if (expectedRole && profile.role !== expectedRole) {
+      await supabase.auth.signOut()
+      throw new Error(`Akun ini bukan role ${expectedRole}.`)
+    }
+
+    void logActivity('login', `role=${profile.role ?? 'unknown'}`)
+    router.push(defaultLandingForRole(profile.role))
+    return profile
+  }
+
+  async function handleDriverLogin(driverId: string, driverEmail: string) {
+    if (!/^\S+@\S+\.\S+$/.test(driverEmail)) {
+      throw new Error('Masukkan email yang aktif di HP driver.')
+    }
+
+    const { data: verifyRaw, error: verifyError } = await supabase.rpc('raos_verify_driver_email', {
+      p_driver_id: driverId,
+      p_email: driverEmail,
+    })
+    if (verifyError) {
+      if (/raos_verify_driver_email|function/i.test(verifyError.message || '')) {
+        throw new Error('Backend login driver belum aktif. Apply migration raos_080 terlebih dahulu.')
+      }
+      throw new Error('Gagal memverifikasi ID Driver dan email.')
+    }
+
+    const verify = (verifyRaw || {}) as DriverEmailResult
+    if (!verify.ok) {
+      const reasonMessage: Record<string, string> = {
+        driver_not_found: 'ID Driver tidak terdaftar atau sudah nonaktif.',
+        invalid_email: 'Format email driver tidak valid.',
+        email_mismatch: 'Email tidak cocok dengan email yang sudah terikat ke ID Driver ini.',
+      }
+      throw new Error(reasonMessage[verify.reason || ''] || 'ID Driver / email tidak cocok.')
+    }
+
+    // Auth account driver existing tetap memakai identity internal yang sudah
+    // diprovision: <driver_id>@driver.rifim.local dengan password awal ID Driver.
+    // User tidak perlu mengetahui identity internal tersebut.
+    const internalEmail = `${driverId}@driver.rifim.local`
+    const profile = await signInAndRoute(internalEmail, driverId, 'driver')
+
+    // First successful login: bind email sekali ke raos_drivers. Sesudah itu
+    // semua login berikutnya harus memakai email yang sama.
+    if (verify.state === 'unbound' && profile.driver_id) {
+      const { data: bindRaw, error: bindError } = await supabase.rpc('raos_bind_my_driver_login_email', {
+        p_email: driverEmail,
+      })
+      const bind = (bindRaw || {}) as { ok?: boolean; reason?: string }
+      if (bindError || !bind.ok) {
+        await supabase.auth.signOut()
+        const bindReason: Record<string, string> = {
+          email_already_used: 'Email ini sudah dipakai oleh driver lain.',
+          already_bound_other_email: 'ID Driver sudah terikat ke email lain.',
+        }
+        throw new Error(bindReason[bind.reason || ''] || 'Gagal mengikat email driver. Hubungi Admin.')
+      }
+    }
+  }
+
+  async function handleStaffLogin(loginId: string, raosPin: string) {
+    const { data: bridgeRaw, error: bridgeError } = await supabase.rpc('raos_verify_and_bridge', {
+      p_login_id: loginId,
+      p_raos_pin: raosPin,
+    })
+
+    const bridge = (bridgeRaw || {}) as BridgeResult
+    if (!bridgeError && bridge.ok && bridge.email && bridge.ssot_pin) {
+      await signInAndRoute(bridge.email, bridge.ssot_pin)
+      return
+    }
+
+    if (!bridgeError && bridge.ok === false) {
+      if (bridge.reason === 'bad_pin') throw new Error('PIN RAOS salah.')
+      if (bridge.reason === 'inactive') throw new Error('Akun tidak aktif.')
+      if (bridge.reason === 'no_ssot_pin') throw new Error('SSoT PIN belum tersinkron. Hubungi Admin.')
+      if (bridge.reason !== 'not_found') throw new Error(bridge.message || 'Login RAOS gagal.')
+    }
+
+    // Backward compatibility hanya untuk akun manual/admin yang belum berada
+    // di raos_credentials. Koordinator/staff SSOT tetap diarahkan ke bridge.
+    await signInAndRoute(loginId, raosPin)
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
-    // Driver login pakai ID Driver (numeric-only, dari SSOT sheet) sebagai
-    // username. Kalau input full numeric ≥6 digit, map ke dummy email
-    // <id>@driver.rifim.local — matches auth user yang di-provision GAS
-    // sync driver airport/external.
-    const trimmed = email.trim()
-    const isDriverId = /^\d{6,}$/.test(trimmed)
-    const loginEmail = isDriverId ? `${trimmed}@driver.rifim.local` : trimmed
-    const loginPassword = isDriverId && !password ? trimmed : password
-    const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword })
-    if (error || !data.user) { setError('Email/ID Driver atau PIN salah.'); setLoading(false); return }
-    // Route ke landing sesuai role (staff → /dashboard, driver → /driver-workspace, dst)
-    const { data: profile } = await supabase.from('user_profiles')
-      .select('role').eq('id', data.user.id).single()
-    // Audit login sukses — fire-and-forget, tidak block redirect.
-    void logActivity('login', `role=${profile?.role ?? 'unknown'}`)
-    router.push(defaultLandingForRole(profile?.role))
+    setInfo('')
+
+    const loginId = email.trim()
+    const isDriverId = /^\d{6,}$/.test(loginId)
+
+    try {
+      if (isDriverId) {
+        await handleDriverLogin(loginId, password.trim().toLowerCase())
+      } else {
+        await handleStaffLogin(loginId.toLowerCase(), password.trim())
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login gagal. Coba lagi.')
+      setLoading(false)
+    }
   }
 
   async function handleMagicLink(e: React.FormEvent) {
@@ -112,9 +223,10 @@ export default function LoginPage() {
     )
   }
 
+  const driverLoginMode = /^\d{6,}$/.test(email.trim())
+
   return (
     <div className="min-h-screen bg-secondary flex flex-col">
-      {/* Hero */}
       <div className="relative h-52 w-full overflow-hidden flex-shrink-0">
         <Image
           src="/images/hero-airport.png"
@@ -123,7 +235,6 @@ export default function LoginPage() {
           className="object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-secondary/30 via-secondary/60 to-secondary" />
-        {/* Brand strip di atas hero */}
         <div className="absolute top-10 left-0 right-0 px-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MenalaMark size={30} />
@@ -133,20 +244,18 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Logo & Title */}
       <div className="flex flex-col items-center px-6 -mt-14 pb-6 relative z-10">
         <MenalaLogo size={110} variant="splash" tone="onNavy" />
         <p className="text-primary/90 text-xs font-bold text-center mt-3 tracking-widest uppercase">
           Airport Operation System
         </p>
         <p className="text-white/40 text-xs text-center mt-3">
-          {mode === 'password'      && 'Silakan masuk untuk melanjutkan'}
-          {mode === 'magic-link'    && 'Masuk cepat tanpa PIN'}
+          {mode === 'password' && (driverLoginMode ? 'Driver: ID Driver + email di HP' : 'Staff/Koordinator: email + PIN RAOS')}
+          {mode === 'magic-link' && 'Masuk cepat tanpa PIN'}
           {mode === 'forgot-password' && 'Atur ulang PIN Anda'}
         </p>
       </div>
 
-      {/* Form Card */}
       <div className="bg-white rounded-t-3xl px-6 pt-6 pb-10 shadow-2xl flex-1">
         {mode !== 'password' && (
           <button
@@ -157,42 +266,54 @@ export default function LoginPage() {
           </button>
         )}
 
-        {/* PASSWORD MODE */}
         {mode === 'password' && (
           <>
-            <p className="text-gray-800 font-bold text-base mb-4 text-center">Masuk ke Akun</p>
+            <p className="text-gray-800 font-bold text-base mb-2 text-center">Masuk ke Akun</p>
+            <p className="text-gray-400 text-xs mb-4 text-center">
+              Driver masukkan ID Driver. Staff/Koordinator masukkan email.
+            </p>
             <form onSubmit={handleLogin} className="space-y-3">
               <div className="relative">
                 <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
-                <input type="text" placeholder="Email / ID Staff / ID Driver" value={email}
-                  onChange={e => setEmail(e.target.value)}
+                <input type="text" placeholder="Email Staff/Koordinator atau ID Driver" value={email}
+                  onChange={e => { setEmail(e.target.value); setPassword(''); setError('') }}
                   className="input pl-10" autoComplete="username" required />
               </div>
               <div className="relative">
-                <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />
+                {driverLoginMode
+                  ? <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
+                  : <Lock className="absolute left-3 top-3.5 text-gray-400" size={18} />}
                 <input
-                  type={showPass ? 'text' : 'password'}
-                  inputMode="numeric"
-                  placeholder="PIN" value={password}
+                  type={driverLoginMode ? 'email' : (showPass ? 'text' : 'password')}
+                  inputMode={driverLoginMode ? 'email' : 'numeric'}
+                  placeholder={driverLoginMode ? 'Email yang aktif di HP driver' : 'PIN RAOS'}
+                  value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="input pl-10 pr-10" autoComplete="current-password" required
+                  className="input pl-10 pr-10"
+                  autoComplete={driverLoginMode ? 'email' : 'current-password'}
+                  required
                 />
-                <button type="button" onClick={() => setShowPass(!showPass)}
-                  className="absolute right-3 top-3.5 text-gray-400">
-                  {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+                {!driverLoginMode && (
+                  <button type="button" onClick={() => setShowPass(!showPass)}
+                    className="absolute right-3 top-3.5 text-gray-400">
+                    {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                )}
               </div>
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center gap-2 text-gray-600 cursor-pointer">
                   <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="rounded" />
                   Ingat saya
                 </label>
-                <button type="button" onClick={() => switchMode('forgot-password')}
-                  className="text-primary font-semibold text-xs">
-                  Lupa PIN?
-                </button>
+                {!driverLoginMode && (
+                  <button type="button" onClick={() => switchMode('forgot-password')}
+                    className="text-primary font-semibold text-xs">
+                    Lupa PIN?
+                  </button>
+                )}
               </div>
 
+              {info && <p className="text-green-600 text-sm text-center bg-green-50 py-2 rounded-lg">{info}</p>}
               {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
 
               <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={loading}>
@@ -201,17 +322,21 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <div className="flex items-center my-4">
-              <div className="flex-1 border-t border-gray-200" />
-              <span className="px-3 text-gray-400 text-xs">atau masuk dengan</span>
-              <div className="flex-1 border-t border-gray-200" />
-            </div>
+            {!driverLoginMode && (
+              <>
+                <div className="flex items-center my-4">
+                  <div className="flex-1 border-t border-gray-200" />
+                  <span className="px-3 text-gray-400 text-xs">atau masuk dengan</span>
+                  <div className="flex-1 border-t border-gray-200" />
+                </div>
 
-            <button onClick={() => switchMode('magic-link')}
-              className="btn-secondary flex items-center justify-center gap-2">
-              <Send size={16} />
-              Link Email (Tanpa PIN)
-            </button>
+                <button onClick={() => switchMode('magic-link')}
+                  className="btn-secondary flex items-center justify-center gap-2">
+                  <Send size={16} />
+                  Link Email (Tanpa PIN)
+                </button>
+              </>
+            )}
 
             <p className="text-center text-gray-400 text-xs mt-4">
               Belum punya akun?{' '}
@@ -220,7 +345,6 @@ export default function LoginPage() {
           </>
         )}
 
-        {/* MAGIC LINK MODE */}
         {mode === 'magic-link' && (
           <form onSubmit={handleMagicLink} className="space-y-4">
             <p className="text-sm font-bold text-gray-800 mb-1">Masuk dengan Link Email</p>
@@ -234,7 +358,7 @@ export default function LoginPage() {
                 className="input pl-10" autoComplete="username" required />
             </div>
             {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
-            {info  && <p className="text-green-600 text-sm text-center bg-green-50 py-2 rounded-lg">{info}</p>}
+            {info && <p className="text-green-600 text-sm text-center bg-green-50 py-2 rounded-lg">{info}</p>}
             <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={loading}>
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
               {loading ? 'Mengirim...' : 'Kirim Link Masuk'}
@@ -242,7 +366,6 @@ export default function LoginPage() {
           </form>
         )}
 
-        {/* FORGOT PASSWORD MODE */}
         {mode === 'forgot-password' && (
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <p className="text-sm font-bold text-gray-800 mb-1">Lupa PIN?</p>
@@ -257,14 +380,13 @@ export default function LoginPage() {
                 className="input pl-10" autoComplete="username" required />
             </div>
             {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
-            {info  && <p className="text-green-600 text-sm text-center bg-green-50 py-2 rounded-lg">{info}</p>}
+            {info && <p className="text-green-600 text-sm text-center bg-green-50 py-2 rounded-lg">{info}</p>}
             <button type="submit" className="btn-primary" disabled={loading}>
               {loading ? 'Mengirim...' : 'Kirim Link Reset'}
             </button>
           </form>
         )}
 
-        {/* Footer */}
         <div className="mt-6 pt-4 border-t border-gray-100">
           <div className="flex items-center justify-center gap-1.5 text-gray-400 mb-1">
             <ShieldCheck size={13} />

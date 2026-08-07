@@ -1635,3 +1635,18 @@ Yang SELESAI dari pending list lama:
 - `submitIsiSaldo()` sekarang memanggil RPC transactional `raos_saldo_submit`, bukan direct INSERT request/chat.
 - `client_id` memakai UUID client dan ikut disimpan di IndexedDB; retry offline memakai UUID yang sama.
 - Validasi lokal: TypeScript lulus, ESLint 0 error (2 warning existing di file lain), dan Next.js production build lulus.
+
+## 2026-08-07 sore — FASE 1 backlog Isi Saldo (poin 3+9+10+11)
+
+**Poin 3 (F-03 auto-check Lunas AIST):** Verified OK — bookmarklet `aist-fill-v2` sudah `MutationObserver` 30s + auto call `finance_saldo_raos_mark_paid` setelah AIST konfirmasi success. No code change.
+
+**Poin 9 (auto-sync realisasi → Target Staff):** Verified OK — view `raos_target_tercapai_bulan` (raos_070b1) live-aggregate dari `raos_saldo_requests WHERE is_processed=true`. Setiap `mark_paid` langsung tercermin di view. No trigger needed by design.
+
+**Poin 10+11 (Target Cabang → Target Staff auto-prorate):**
+- Root cause: `target_staff_default` NULL di semua 9 cabang → target=0 → bonus=0.
+- Fix: chain fallback `override > branch default > auto-prorate (target_cabang ÷ jumlah staff aktif)` di 3 tempat:
+  - RPC `raos_compute_payroll_month` → migration **raos_077** (applied prod)
+  - GAS `_finKpiTargetBranchList_` + `_finKpiTargetStaffList_` (rifim-os#46)
+  - UI Finance `loadTargetCabang` badge `auto ÷N`
+- Verified prod: 8/9 cabang dapat prorate valid (SOETA belum ada staff dgn branch_id assigned).
+- PR: raos-menala#69 (migration) + rifim-os#46 (GAS+UI) — merged.

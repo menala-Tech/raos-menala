@@ -959,7 +959,7 @@ function saldoLifecycleMeta(req: {
 }): SaldoLifecycleMeta {
   if (req.is_processed) {
     return {
-      status: 'paid', label: 'PAID', emoji: '🔵', icon: Wallet,
+      status: 'paid', label: 'SUDAH DIISI', emoji: '✅', icon: Wallet,
       badgeCls: 'bg-sky-100 text-sky-700', bgSoft: 'bg-sky-50', textStrong: 'text-sky-600', dot: 'bg-sky-500',
     }
   }
@@ -976,7 +976,7 @@ function saldoLifecycleMeta(req: {
     }
   }
   return {
-    status: 'pending', label: 'PENDING', emoji: '🟡', icon: Clock,
+    status: 'pending', label: 'BELUM DIISI', emoji: '⏰', icon: Clock,
     badgeCls: 'bg-amber-100 text-amber-700', bgSoft: 'bg-amber-50', textStrong: 'text-amber-600', dot: 'bg-amber-400',
   }
 }

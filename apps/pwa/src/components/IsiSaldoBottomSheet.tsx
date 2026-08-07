@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Wallet, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { X, Wallet, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { submitIsiSaldo } from '@/lib/saldoRequest'
 
@@ -45,7 +45,6 @@ export default function IsiSaldoBottomSheet({
   const [lookupState, setLookupState] = useState<'idle' | 'searching' | 'found' | 'not_found' | 'error'>('idle')
   const [lookupErrMsg, setLookupErrMsg] = useState<string>('')
   const [selectedNominal, setSelectedNominal] = useState<number | null>(null)
-  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const debounceRef = useRef<number | null>(null)
 
@@ -58,16 +57,16 @@ export default function IsiSaldoBottomSheet({
     if (!q) { setDriver(null); setLookupState('idle'); return }
     setLookupState('searching')
     debounceRef.current = window.setTimeout(async () => {
-      // Feedback 3 Agustus 2026: lookup terasa lambat. Optimasi:
-      //   (1) Debounce 400ms → 250ms
-      //   (2) Exact + case-insensitive fallback digabung jadi 1 query via
-      //       `.or()` — sebelumnya 2 roundtrip berurutan
-      //   (3) Branch name di-fetch async setelah driver di-set (non-blocking
-      //       UI). User langsung lihat status "found" tanpa nunggu branch.
+      // Feedback 2026-08-07 (Isi Saldo UX #1+#2):
+      //   (1) Debounce 250ms → 180ms — trigger lebih cepat setelah ketik
+      //   (2) Query drivers + join branches DALAM 1 ROUNDTRIP via FK embed
+      //       (raos_drivers_branch_id_fkey) — sebelumnya 2 RTT sequential
+      //   (3) Branch name langsung tersedia saat state 'found' → tidak
+      //       ada flash 'tidak diketahui' + form ready-to-submit lebih cepat
       const qEsc = q.replace(/[,()"]/g, '')
       const { data, error: lookupErr } = await supabase
         .from('raos_drivers')
-        .select('id, driver_id, name, branch_id')
+        .select('id, driver_id, name, branch_id, branches(name)')
         .eq('is_active', true)
         .or(`driver_id.eq.${qEsc},driver_id.ilike.${qEsc}`)
         .limit(1)
@@ -81,50 +80,57 @@ export default function IsiSaldoBottomSheet({
       }
       setLookupErrMsg('')
       if (data) {
-        // Set driver dulu (UI cepat), branch name menyusul async
-        setDriver({ ...(data as DriverLookup), branch_name: null })
+        // Supabase FK embed: branches shape = { name: string } | null
+        const branchRel = (data as unknown as { branches?: { name?: string | null } | null }).branches
+        setDriver({
+          id: data.id,
+          driver_id: data.driver_id,
+          name: data.name,
+          branch_id: data.branch_id,
+          branch_name: branchRel?.name ?? null,
+        })
         setLookupState('found')
-        if (data.branch_id) {
-          supabase
-            .from('branches').select('name').eq('id', data.branch_id).maybeSingle()
-            .then(({ data: br }) => {
-              if (br?.name) setDriver(prev => prev && prev.id === data.id
-                ? { ...prev, branch_name: br.name } : prev)
-            })
-        }
       } else {
         setDriver(null)
         setLookupState('not_found')
       }
-    }, 250)
+    }, 180)
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current) }
   }, [driverIdInput])
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     if (!driver) { setError('ID Driver tidak valid. Cek ejaan atau minta admin daftarkan driver dulu.'); return }
     if (!selectedNominal) { setError('Pilih nominal dulu.'); return }
-    setSubmitting(true)
 
-    const clientMsgId = crypto.randomUUID()
-    const result = await submitIsiSaldo({
+    // Feedback 2026-08-07 (Isi Saldo UX #3+#4): submit rasanya lambat karena
+    // spinner block seluruh sheet selama RTT RPC (500-1500ms). Fix optimistic:
+    //   (1) Snapshot input → close sheet SEGERA
+    //   (2) RPC fire-in-background, bubble muncul via realtime subscribe
+    //       chat page (INSERT chat_messages di raos_saldo_submit RPC)
+    //   (3) Kalau RPC error → alert() (chat page pattern) supaya user tahu
+    //   (4) Offline queue tetap bekerja: submitIsiSaldo enqueue kalau
+    //       network fail; result.queued=true → sudah dianggap ok
+    const payload = {
       userId, branchId, branchSlug: branchSlugStr, branchName: branchNameStr,
-      fullName: userFullName, roomId, clientMsgId,
+      fullName: userFullName, roomId,
+      clientMsgId: crypto.randomUUID(),
       nominal: selectedNominal,
       allowedNominals: branchNominalOptions,
       driverIdRef: driver.id,
       driverLoginId: driver.driver_id,
       driverName: driver.name,
       driverBranchName: driver.branch_name ?? null,
-    })
-    if (!result.ok) {
-      setSubmitting(false)
-      setError(result.error ?? 'Gagal ajukan isi saldo')
-      return
     }
-    setSubmitting(false)
-    onSubmitted()
+    onSubmitted() // close sheet immediately
+    void submitIsiSaldo(payload).then(result => {
+      if (!result.ok) {
+        window.alert('Gagal ajukan isi saldo: ' + (result.error ?? 'unknown error'))
+      }
+      // ok=true (termasuk queued=true untuk offline) → no-op, bubble akan
+      // muncul via realtime subscribe di chat page ketika RPC selesai
+    })
   }
 
   return (
@@ -226,10 +232,10 @@ export default function IsiSaldoBottomSheet({
           {error && <p className="text-red-500 text-xs bg-red-50 py-2 px-3 rounded-lg">{error}</p>}
 
           <button type="submit"
-            disabled={submitting || !driver || !selectedNominal}
+            disabled={!driver || !selectedNominal}
             className="btn-primary flex items-center justify-center gap-2 disabled:opacity-50">
-            {submitting ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
-            {submitting ? 'Mengirim...' : 'Kirim Pengajuan'}
+            <Wallet size={16} />
+            Kirim Pengajuan
           </button>
         </form>
       </div>

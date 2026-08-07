@@ -173,6 +173,12 @@ async function syncSaldoRequestMessageStatus(messageId: string | undefined, stat
   }
 }
 
+/**
+ * @deprecated Sesi 2026-08-07: skip approval flow (poin 2+6). SaldoRequestCard
+ * tidak lagi memanggil function ini. Dipertahankan untuk backward compat kalau
+ * ada consumer lain (mis. reminder GAS atau audit script). Finance sekarang
+ * boleh mark_paid langsung dari status='pending' tanpa via approval.
+ */
 export async function approveSaldoRequest(requestId: string, approverId: string, messageId?: string): Promise<{ ok: boolean; error?: string }> {
   const { data: row, error } = await supabase
     .from('raos_saldo_requests')
@@ -206,6 +212,10 @@ export async function approveSaldoRequest(requestId: string, approverId: string,
   return { ok: true }
 }
 
+/**
+ * @deprecated Sesi 2026-08-07: skip approval flow (poin 2+6). SaldoRequestCard
+ * tidak lagi memanggil function ini. Dipertahankan untuk backward compat.
+ */
 export async function rejectSaldoRequest(requestId: string, approverId: string, reason: string, messageId?: string): Promise<{ ok: boolean; error?: string }> {
   const { data: row, error } = await supabase
     .from('raos_saldo_requests')

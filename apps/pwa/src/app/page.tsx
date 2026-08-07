@@ -25,6 +25,12 @@ type DriverEmailResult = {
   reason?: string
 }
 
+type LoginProfile = {
+  role?: string | null
+  driver_id?: string | null
+  is_active?: boolean | null
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const [checkingSession, setCheckingSession] = useState(true)
@@ -46,7 +52,7 @@ export default function LoginPage() {
     })
   }, [router])
 
-  async function signInAndRoute(loginEmail: string, loginPassword: string, expectedRole?: string) {
+  async function authenticate(loginEmail: string, loginPassword: string, expectedRole?: string): Promise<LoginProfile> {
     const { data, error: signError } = await supabase.auth.signInWithPassword({
       email: loginEmail,
       password: loginPassword,
@@ -65,8 +71,17 @@ export default function LoginPage() {
       throw new Error(`Akun ini bukan role ${expectedRole}.`)
     }
 
+    return profile
+  }
+
+  function finishLogin(profile: LoginProfile) {
     void logActivity('login', `role=${profile.role ?? 'unknown'}`)
     router.push(defaultLandingForRole(profile.role))
+  }
+
+  async function signInAndRoute(loginEmail: string, loginPassword: string, expectedRole?: string) {
+    const profile = await authenticate(loginEmail, loginPassword, expectedRole)
+    finishLogin(profile)
     return profile
   }
 
@@ -100,10 +115,10 @@ export default function LoginPage() {
     // <driver_id>@driver.rifim.local dengan password awal ID Driver.
     // User cukup memasukkan ID Driver + email aktif di HP.
     const internalEmail = `${driverId}@driver.rifim.local`
-    const profile = await signInAndRoute(internalEmail, driverId, 'driver')
+    const profile = await authenticate(internalEmail, driverId, 'driver')
 
-    // Jika belum pernah terikat, email pada login sukses pertama dibinding sekali.
-    // Login berikutnya wajib memakai email yang sama.
+    // Login sukses pertama mengikat email sekali sebelum redirect. Dengan ini,
+    // race/duplikasi binding gagal tertangkap sebelum user masuk workspace.
     if (verify.state === 'unbound' && profile.driver_id) {
       const { data: bindRaw, error: bindError } = await supabase.rpc('raos_bind_my_driver_login_email', {
         p_email: driverEmail,
@@ -118,6 +133,8 @@ export default function LoginPage() {
         throw new Error(bindReason[bind.reason || ''] || 'Gagal mengikat email driver. Hubungi Admin.')
       }
     }
+
+    finishLogin(profile)
   }
 
   async function handleStaffLogin(loginId: string, raosPin: string) {

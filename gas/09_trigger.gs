@@ -74,10 +74,11 @@ function setupAllTriggers() {
   // sheet "Form Isi Saldo" jadi arsip pasif. Manual sync tetap tersedia
   // via menu 💰 Isi Saldo → 🔄 Sync ke Sheet kalau butuh update sheet.
 
-  // Reminder chat "SALDO BELUM DIPROSES" untuk request >5 menit yang belum
-  // dicentang. Cron 15 MENIT (dari 5) — cukup, kirim reminder tetap tepat waktu.
+  // Poin 7: reminder chat "BELUM DIISI" pertama setelah >5 menit dan
+  // berulang tiap 5 menit selama request belum diproses. Dedup authoritative
+  // via raos_saldo_requests.last_reminded_at.
   ScriptApp.newTrigger('reminderSaldoBelumDiisi')
-    .timeBased().everyMinutes(15).create()
+    .timeBased().everyMinutes(5).create()
 
   // [DEPRECATED sesi 2026-08-05] syncDriverQueueToSheet dihapus —
   // /antrian-driver PWA sudah realtime Supabase, sheet backup tidak dipakai.

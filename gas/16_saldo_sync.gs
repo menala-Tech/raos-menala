@@ -225,131 +225,103 @@ function updateTargetStaffPencapaian_(requestId) {
 }
 
 /**
- * Reminder chat 5-menit: request pending > 5 menit, is_processed=false,
- * belum ada reminder → post pesan ke room "Pengisian Saldo" cabang.
- * Format WA-style seperti gambar user.
+ * Poin 7 (2026-08-08): cron 5-menit reminder chat "Belum Diisi".
+ * Request eligible: belum diproses, umur >5 menit, reminder terakhir
+ * NULL atau sudah >5 menit. Post WAJIB via raos_post_system_message.
  */
 function reminderSaldoBelumDiisi() {
+  const lock = LockService.getScriptLock()
+  if (!lock.tryLock(10000)) {
+    logSistem('cron', 'reminderSaldoBelumDiisi', 'skipped',
+      'Run sebelumnya masih aktif — skip duplicate reminder')
+    return { success: true, skipped: true }
+  }
+
   try {
+    const now = new Date()
+    const nowIso = now.toISOString()
+    const cutoffIso = new Date(now.getTime() - 5 * 60 * 1000).toISOString()
+
     const rows = callSupabase(
-      'raos_saldo_requests?is_processed=eq.false&status=neq.rejected&status=neq.cancelled&select=' +
-      'id,request_no,requested_at,nominal,' +
+      'raos_saldo_requests?is_processed=eq.false&status=in.(pending,approved)' +
+      '&requested_at=lt.' + encodeURIComponent(cutoffIso) +
+      '&or=(last_reminded_at.is.null,last_reminded_at.lt.' + encodeURIComponent(cutoffIso) + ')' +
+      '&select=id,request_no,requested_at,nominal,driver_name,' +
       'staff:user_profiles!staff_id(full_name),' +
       'branch:branches!branch_id(id,name)' +
-      '&order=requested_at.asc'
+      '&order=requested_at.asc&limit=50'
     ) || []
 
-    // Ambil sheet Form Isi Saldo untuk update Alert Terkirim + Alert Terakhir per baris
-    let saldoSheet = null
-    let saldoIdMap = {}
-    try {
-      const ss = getSaldoSpreadsheet_()
-      saldoSheet = ss.getSheetByName(SALDO_SHEET_NAME)
-      if (saldoSheet && saldoSheet.getLastRow() > 1) {
-        const idCol = saldoSheet.getRange(2, SALDO_COL.REQ_ID, saldoSheet.getLastRow() - 1, 1).getValues().flat()
-        idCol.forEach((id, i) => { if (id) saldoIdMap[id] = i + 2 }) // rowNum
-      }
-    } catch (e) { /* sheet belum ada, skip mark */ }
+    if (!rows.length) {
+      logSistem('cron', 'reminderSaldoBelumDiisi', 'success',
+        'Tidak ada request saldo yang perlu reminder')
+      return { success: true, reminded: 0, failed: 0 }
+    }
 
-    const now = new Date()
-    const groupedByBranch = {}
+    let reminded = 0
+    let failed = 0
 
     rows.forEach(r => {
-      if (!r.branch) return
-      const requested = new Date(r.requested_at)
-      const menit = Math.floor((now - requested) / 60000)
-      if (menit < 5) return
-      const key = r.branch.id
-      if (!groupedByBranch[key]) {
-        groupedByBranch[key] = { branch: r.branch, items: [] }
-      }
-      const jamStr = Utilities.formatDate(requested, 'Asia/Jakarta', 'HH:mm')
-      groupedByBranch[key].items.push({
-        nama: r.staff?.full_name || '(unknown)',
-        nominal: Number(r.nominal) || 0,
-        request_no: r.request_no,
-        jamStr,
-        menit,
-      })
-    })
+      if (!r.branch?.id) return
 
-    Object.values(groupedByBranch).forEach(g => {
-      const items = g.items
-      const tanggal = Utilities.formatDate(now, 'Asia/Jakarta', 'dd MMMM yyyy')
-      const bulletList = items.map(it =>
-        `• ${it.nama} — Login ${it.request_no.split('-').pop()} — Rp ${it.nominal.toLocaleString('id-ID')} (request ${it.jamStr}, sudah ${it.menit} menit)`
-      ).join('\n')
-
-      const content =
-        `🔴 RIFIM - SALDO BELUM DIPROSES\n\n` +
-        `Cabang :\n${g.branch.name}\n\n` +
-        `${items.length} permintaan belum dicentang "Sudah Diisi" (>5 menit) :\n${bulletList}\n\n` +
-        `Tanggal :\n${tanggal}\n\n` +
-        `Mohon segera diisi di AIST, lalu centang "Sudah Diisi" di sheet.\n\n` +
-        `-----------------------\nPT Rifim International Gemilang`
-
-      // Cari room "Pengisian Saldo" cabang — 3-tier fallback:
-      // 1. Room dengan branch_id = cabang saat ini (mis. Batam Airport)
-      // 2. Room dengan branch_id = parent cabang (mis. T1/T2/T3 → parent Soeta)
-      // 3. Room global (branch_id NULL)
-      const rooms = callSupabase(
-        `chat_rooms?is_active=eq.true&or=(name.ilike.*pengisian%20saldo*,name.ilike.*isi%20saldo*)&branch_id=eq.${g.branch.id}&select=id`
-      ) || []
-      let roomId = rooms[0]?.id
-      // Fallback tier 2: parent branch
-      if (!roomId) {
-        const parentBranch = callSupabase(`branches?id=eq.${g.branch.id}&select=parent_branch_id`) || []
-        const parentId = parentBranch[0]?.parent_branch_id
-        if (parentId) {
-          const parentRooms = callSupabase(
-            `chat_rooms?is_active=eq.true&or=(name.ilike.*pengisian%20saldo*,name.ilike.*isi%20saldo*)&branch_id=eq.${parentId}&select=id`
-          ) || []
-          roomId = parentRooms[0]?.id
-        }
-      }
-      // Fallback tier 3: global room
-      if (!roomId) {
-        const globalRooms = callSupabase(
-          `chat_rooms?is_active=eq.true&or=(name.ilike.*pengisian%20saldo*,name.ilike.*isi%20saldo*)&branch_id=is.null&select=id`
-        ) || []
-        roomId = globalRooms[0]?.id
-      }
-      if (!roomId) {
-        // Downgrade warning ke info — room belum di-setup untuk cabang ini
-        // adalah kondisi expected (admin belum bikin), bukan error kritis
-        logSistem('info', 'reminderSaldoBelumDiisi', 'skipped',
-          `Room "Pengisian Saldo" belum di-setup untuk ${g.branch.name} — skip reminder (buat room di /admin bulk-create)`)
-        return
-      }
-
-      const botUserId = PropertiesService.getScriptProperties().getProperty('RAOS_BOT_USER_ID')
-      const msgPayload = { room_id: roomId, type: 'text', content }
-      if (botUserId) msgPayload.sender_id = botUserId
       try {
-        callSupabase('chat_messages', 'POST', msgPayload)
-      } catch (postErr) {
-        logSistem('warning', 'reminderSaldoBelumDiisi', 'warning',
-          `Gagal post reminder ${g.branch.name}: ${postErr.message}`)
-        return
-      }
-
-      // Mark Alert Terkirim + Alert Terakhir di sheet Form Isi Saldo
-      if (saldoSheet) {
-        const nowDate = new Date()
-        items.forEach(it => {
-          const requestId = rows.find(r => r.request_no === it.request_no)?.id
-          if (!requestId) return
-          const rowNum = saldoIdMap[requestId]
-          if (!rowNum) return
-          saldoSheet.getRange(rowNum, SALDO_COL.ALERT_SENT).setValue(true)
-          saldoSheet.getRange(rowNum, SALDO_COL.ALERT_LAST).setValue(nowDate)
+        const roomId = callSupabase('rpc/raos_resolve_saldo_room', 'POST', {
+p_branch_id: r.branch.id,
         })
+        if (!roomId) throw new Error(`Room Pengisian Saldo tidak ditemukan untuk ${r.branch.name}`)
+
+        const requested = new Date(r.requested_at)
+        const minutes = Math.max(5, Math.floor((now.getTime() - requested.getTime()) / 60000))
+        const content = [
+'⏰ BELUM DIISI — PENGAJUAN SALDO',
+'',
+`Cabang: ${r.branch.name}`,
+`No Request: ${r.request_no || '-'}`,
+`Staff: ${r.staff?.full_name || '-'}`,
+`Driver: ${r.driver_name || '-'}`,
+`Nominal: Rp ${(Number(r.nominal) || 0).toLocaleString('id-ID')}`,
+`Menunggu: ${minutes} menit`,
+'',
+'Mohon segera proses pengisian saldo di AIST melalui Finance RIFIM OS.',
+        ].join('
+')
+
+        callSupabase('rpc/raos_post_system_message', 'POST', {
+p_room_id: roomId,
+p_content: content,
+p_category: 'saldo_reminder',
+p_metadata: {
+  source: 'raos_gas',
+  event: 'saldo_belum_diisi',
+  request_id: r.id,
+  request_no: r.request_no,
+  branch_id: r.branch.id,
+  branch_name: r.branch.name,
+  reminded_at: nowIso,
+},
+        })
+
+        // Update hanya setelah post system message berhasil.
+        callSupabase(
+`raos_saldo_requests?id=eq.${encodeURIComponent(r.id)}`,
+'PATCH',
+{ last_reminded_at: nowIso }
+        )
+        reminded++
+      } catch (rowErr) {
+        failed++
+        logSistem('error', 'reminderSaldoBelumDiisi', 'error',
+`${r.request_no || r.id}: ${rowErr.message}`)
       }
     })
 
-    logSistem('cron', 'reminderSaldoBelumDiisi', 'success',
-      `${Object.keys(groupedByBranch).length} cabang di-remind`)
+    logSistem('cron', 'reminderSaldoBelumDiisi', failed ? 'warning' : 'success',
+      `${reminded} request di-remind, ${failed} error`)
+    return { success: failed === 0, reminded, failed }
   } catch (e) {
     logSistem('error', 'reminderSaldoBelumDiisi', 'error', e.message)
+    return { success: false, message: e.message }
+  } finally {
+    lock.releaseLock()
   }
 }

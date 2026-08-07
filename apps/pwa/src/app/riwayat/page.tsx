@@ -559,6 +559,41 @@ export default function RiwayatPage() {
           </div>
         ))}
 
+        {/* Poin 8 (2026-08-07): Total Pengisian Saldo summary card di atas list.
+            Muncul hanya di tab 'saldo' + ada minimal 1 request. Tampilkan
+            jumlah request + total nominal + total sudah diisi. */}
+        {!loading && tab === 'saldo' && saldoRequests.length > 0 && (() => {
+          const totalNominal = saldoRequests.reduce((sum, r) => sum + (Number(r.nominal) || 0), 0)
+          const paidCount = saldoRequests.filter(r => r.is_processed).length
+          const paidNominal = saldoRequests
+            .filter(r => r.is_processed)
+            .reduce((sum, r) => sum + (Number(r.nominal) || 0), 0)
+          const pendingNominal = totalNominal - paidNominal
+          return (
+            <div className="card bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">
+                Total Pengisian Saldo
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] text-gray-500">Total Diajukan ({saldoRequests.length})</p>
+                  <p className="text-base font-black text-gray-800">Rp{totalNominal.toLocaleString('id-ID')}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-500">Sudah Diisi ({paidCount})</p>
+                  <p className="text-base font-black text-emerald-600">Rp{paidNominal.toLocaleString('id-ID')}</p>
+                </div>
+                {pendingNominal > 0 && (
+                  <div className="col-span-2 pt-2 border-t border-gray-200/50 flex justify-between items-center">
+                    <p className="text-[11px] text-gray-500">Belum Diisi ({saldoRequests.length - paidCount})</p>
+                    <p className="text-sm font-bold text-amber-600">Rp{pendingNominal.toLocaleString('id-ID')}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Isi Saldo list — 4-state lifecycle: Pending 🟡 → Approved 🟢 → Paid 🔵 / Rejected 🔴 */}
         {!loading && (tab === 'semua' || tab === 'saldo') && saldoRequests.map(req => {
           const meta = saldoLifecycleMeta(req)

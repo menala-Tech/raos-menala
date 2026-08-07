@@ -96,14 +96,14 @@ export default function LoginPage() {
       throw new Error(reasonMessage[verify.reason || ''] || 'ID Driver / email tidak cocok.')
     }
 
-    // Auth account driver existing tetap memakai identity internal yang sudah
-    // diprovision: <driver_id>@driver.rifim.local dengan password awal ID Driver.
-    // User tidak perlu mengetahui identity internal tersebut.
+    // Auth internal driver tetap memakai identity yang sudah diprovision:
+    // <driver_id>@driver.rifim.local dengan password awal ID Driver.
+    // User cukup memasukkan ID Driver + email aktif di HP.
     const internalEmail = `${driverId}@driver.rifim.local`
     const profile = await signInAndRoute(internalEmail, driverId, 'driver')
 
-    // First successful login: bind email sekali ke raos_drivers. Sesudah itu
-    // semua login berikutnya harus memakai email yang sama.
+    // Jika belum pernah terikat, email pada login sukses pertama dibinding sekali.
+    // Login berikutnya wajib memakai email yang sama.
     if (verify.state === 'unbound' && profile.driver_id) {
       const { data: bindRaw, error: bindError } = await supabase.rpc('raos_bind_my_driver_login_email', {
         p_email: driverEmail,
@@ -139,8 +139,6 @@ export default function LoginPage() {
       if (bridge.reason !== 'not_found') throw new Error(bridge.message || 'Login RAOS gagal.')
     }
 
-    // Backward compatibility hanya untuk akun manual/admin yang belum berada
-    // di raos_credentials. Koordinator/staff SSOT tetap diarahkan ke bridge.
     await signInAndRoute(loginId, raosPin)
   }
 

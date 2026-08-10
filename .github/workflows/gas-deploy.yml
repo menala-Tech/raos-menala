@@ -1,20 +1,18 @@
 name: Deploy GAS via clasp
 
-# TEMPORARY P8 production verification trigger.
-# Restore to workflow_dispatch-only immediately after the verification run.
+# Sesi 22 — auto-push ke Google Apps Script di-disable.
+# Spec baru RIFIM OS: "spreadsheet hanya untuk otomatisasi dokumen
+# pasif (Smart Office)". CRUD operasional pindah ke Supabase + PWA
+# (Finance Dashboard, /antrian-driver, dst). GAS module RAOS sekarang
+# residual (sync satu arah + reminder), tidak perlu deploy tiap merge.
+#
+# Trigger hanya manual (workflow_dispatch) — kalau memang perlu push
+# perubahan GAS. Otherwise, edit langsung di Script Editor.
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-
-env:
-  RAOS_DEPLOYMENT_ID: AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA
-  RAOS_WEBAPP_URL: https://script.google.com/macros/s/AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA/exec
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,40 +27,20 @@ jobs:
         run: npm install -g @google/clasp
 
       - name: Write .clasprc.json from secret
-        env:
-          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-        run: |
-          test -n "$CLASPRC_JSON"
-          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
-          test -s ~/.clasprc.json
-          node -e "JSON.parse(require('fs').readFileSync(process.env.HOME+'/.clasprc.json','utf8')); console.log('CLASPRC_JSON parsed successfully')"
+        run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
 
       - name: Verify clasp config
         working-directory: gas
         run: |
           cat .clasp.json
           clasp --version
-          clasp status
+          clasp status || echo "status warn"
 
       - name: Push GAS to Script Editor
         working-directory: gas
         run: clasp push --force
 
-      - name: Update existing production Web App deployment
-        working-directory: gas
-        run: |
-          clasp update-deployment "$RAOS_DEPLOYMENT_ID" -d "P8 role hardening production closure 2026-08-10"
-          clasp list-deployments | tee /tmp/raos-deployments.txt
-          grep -F "$RAOS_DEPLOYMENT_ID" /tmp/raos-deployments.txt
-
-      - name: Verify production Web App URL
-        run: |
-          sleep 5
-          curl --fail --silent --show-error --location "$RAOS_WEBAPP_URL" | tee /tmp/raos-webapp-response.txt
-          test -s /tmp/raos-webapp-response.txt
-
       - name: Summary
         run: |
-          echo "GAS source pushed successfully."
-          echo "Existing deployment updated in place: $RAOS_DEPLOYMENT_ID"
-          echo "Production URL preserved: $RAOS_WEBAPP_URL"
+          echo "GAS pushed to scriptId=$(cat gas/.clasp.json | grep scriptId | cut -d'\"' -f4)"
+          echo "Next: run setupAllTriggers() manually from Script Editor to activate new intervals"

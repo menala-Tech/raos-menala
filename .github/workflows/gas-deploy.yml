@@ -1,14 +1,6 @@
 name: Deploy GAS via clasp
 
-# Sesi 22 — auto-push ke Google Apps Script di-disable.
-# Spec baru RIFIM OS: "spreadsheet hanya untuk otomatisasi dokumen
-# pasif (Smart Office)". CRUD operasional pindah ke Supabase + PWA
-# (Finance Dashboard, /antrian-driver, dst). GAS module RAOS sekarang
-# residual (sync satu arah + reminder), tidak perlu deploy tiap merge.
-#
-# Normal state: workflow_dispatch only.
-# P8 closure: temporary push trigger below executes this one production redeploy;
-# this workflow is restored to manual-only immediately after the run is triggered.
+# Temporary P8 closure trigger. Restore to workflow_dispatch only after verified run.
 on:
   workflow_dispatch:
   push:
@@ -16,6 +8,9 @@ on:
       - main
     paths:
       - .github/workflows/gas-deploy.yml
+  pull_request:
+    branches:
+      - main
 
 jobs:
   deploy:

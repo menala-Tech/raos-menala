@@ -6,10 +6,16 @@ name: Deploy GAS via clasp
 # (Finance Dashboard, /antrian-driver, dst). GAS module RAOS sekarang
 # residual (sync satu arah + reminder), tidak perlu deploy tiap merge.
 #
-# Trigger hanya manual (workflow_dispatch) — kalau memang perlu push
-# perubahan GAS. Otherwise, edit langsung di Script Editor.
+# Normal state: workflow_dispatch only.
+# P8 closure: temporary push trigger below executes this one production redeploy;
+# this workflow is restored to manual-only immediately after the run is triggered.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/gas-deploy.yml
 
 jobs:
   deploy:
@@ -40,7 +46,22 @@ jobs:
         working-directory: gas
         run: clasp push --force
 
+      - name: Redeploy existing RAOS Web App
+        working-directory: gas
+        env:
+          RAOS_DEPLOYMENT_ID: AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA
+          RAOS_WEBAPP_URL: https://script.google.com/macros/s/AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA/exec
+        run: |
+          clasp list-deployments
+          clasp update-deployment "$RAOS_DEPLOYMENT_ID" -d "P8 role smoke closure 2026-08-10 ${GITHUB_SHA::12}"
+          clasp list-deployments
+          body="$(curl -fsSL "$RAOS_WEBAPP_URL")"
+          printf '%s\n' "$body"
+          node -e 'const x=JSON.parse(process.argv[1]); if(!x.ok || x.service!=="RAOS Web API") process.exit(1)' "$body"
+
       - name: Summary
         run: |
-          echo "GAS pushed to scriptId=$(cat gas/.clasp.json | grep scriptId | cut -d'\"' -f4)"
-          echo "Next: run setupAllTriggers() manually from Script Editor to activate new intervals"
+          echo "GAS pushed and existing Web App redeployed."
+          echo "scriptId=$(cat gas/.clasp.json | grep scriptId | cut -d'\"' -f4)"
+          echo "deploymentId=AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA"
+          echo "URL unchanged: https://script.google.com/macros/s/AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA/exec"

@@ -2,13 +2,14 @@
 // 21_web_api.gs — RAOS Web App API untuk Rifim OS Portal
 // ============================================================
 //
-// Endpoint POST publik untuk trigger semua fungsi maintenance/sync RAOS
-// dari Portal Rifim OS ("Admin Console"). Admin cukup buka Portal, klik
-// tombol, RAOS jalan di background.
+// Endpoint POST publik untuk trigger fungsi maintenance/sync RAOS
+// dari Portal Rifim OS ("Admin Console").
 //
 // AUTH: Portal kirim Supabase Auth JWT (access_token) di body.
 //       RAOS verify via /auth/v1/user + cek role di user_profiles.
-//       Hanya admin/direksi/management yang boleh trigger action.
+//       P8 role contract:
+//       - admin/direksi/direktur: boleh trigger action
+//       - management: read-only (system_log_recent)
 //
 // CORS: pakai Content-Type text/plain di request Portal untuk hindari
 //       CORS preflight (GAS Web App tidak set CORS header untuk OPTIONS).
@@ -28,6 +29,9 @@ var _WEB_API_ALLOWED_ACTIONS = {
   'force_refresh_staff_auth':  { fn: 'forceRefreshStaffAuth',          label: 'Force Refresh Staff Auth Password' },
   'force_refresh_driver_auth': { fn: 'forceRefreshDriverAirportAuth',  label: 'Force Refresh Driver Airport Auth Password' },
 };
+
+var _WEB_API_READ_ROLES = ['admin', 'management', 'direksi', 'direktur'];
+var _WEB_API_WRITE_ROLES = ['admin', 'direksi', 'direktur'];
 
 function doGet(e) {
   return _webJson({
@@ -77,6 +81,7 @@ function _doPostImpl_(e) {
   }
   if (!caller.ok) return _webJson(caller);
 
+  // P8: Management boleh monitoring saja, tidak boleh menjalankan mutation/maintenance.
   if (action === 'system_log_recent') {
     var limit = Math.min(parseInt(body.limit || 50, 10) || 50, 200);
     var since = body.since || null;
@@ -88,6 +93,10 @@ function _doPostImpl_(e) {
     } catch (err) {
       return _webJson({ ok: false, action: action, error: err.message || String(err) });
     }
+  }
+
+  if (_WEB_API_WRITE_ROLES.indexOf(caller.role) < 0) {
+    return _webJson({ ok: false, error: 'role_read_only', role: caller.role, action: action });
   }
 
   var spec = _WEB_API_ALLOWED_ACTIONS[action];
@@ -135,11 +144,11 @@ function _webVerifyCaller_(token) {
   if (!profs || !profs[0]) return { ok: false, error: 'profile_not_found' };
   var p = profs[0];
   if (!p.is_active) return { ok: false, error: 'inactive' };
-  var ROLE_ADMIN = ['admin', 'direksi', 'management'];
-  if (ROLE_ADMIN.indexOf(p.role) < 0) {
-    return { ok: false, error: 'role_denied', role: p.role };
+  var role = String(p.role || '').toLowerCase();
+  if (_WEB_API_READ_ROLES.indexOf(role) < 0) {
+    return { ok: false, error: 'role_denied', role: role };
   }
-  return { ok: true, user_id: user.id, email: user.email, role: p.role, full_name: p.full_name };
+  return { ok: true, user_id: user.id, email: user.email, role: role, full_name: p.full_name };
 }
 
 function _webJson(obj) {

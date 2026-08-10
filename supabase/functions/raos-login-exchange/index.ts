@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.110.5'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SERVICE_KEY = Deno.env.get('SUPABASE_SECRET_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+const PORTAL_ROLES = new Set(['admin','direksi','direktur','management','koordinator'])
 
 function allowedOrigin(origin: string | null) {
   if (!origin) return true
@@ -38,26 +39,43 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json()
     const login_id = String(body?.login_id || '').trim().slice(0,160)
-    const raos_pin = String(body?.raos_pin || '').trim().slice(0,64)
-    if (!login_id || !raos_pin) return Response.json({ ok:false, reason:'invalid_input', message:'ID/email dan PIN RAOS wajib diisi.' }, { status:400, headers })
+    const raos_pin = String(body?.raos_pin || '').trim().slice(0,128)
+    if (!login_id || !raos_pin) return Response.json({ ok:false, reason:'invalid_input', message:'ID/email dan PIN wajib diisi.' }, { status:400, headers })
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth:{ persistSession:false, autoRefreshToken:false, detectSessionInUrl:false } })
 
-    // P8 verifier first. Until P8_05 is applied, fall back server-side to the
-    // existing bridge; ssot_pin never leaves this Edge Function.
     let verified: any = null
     const safe = await admin.rpc('raos_verify_login_secret', { p_login_id:login_id, p_raos_pin:raos_pin })
     if (!safe.error && safe.data?.ok && safe.data?.email) {
       verified = safe.data
     } else {
       const legacy = await admin.rpc('raos_verify_and_bridge', { p_login_id:login_id, p_raos_pin:raos_pin })
-      if (!legacy.error && legacy.data?.ok && legacy.data?.email) verified = legacy.data
-      else return Response.json({ ok:false, reason:legacy.data?.reason || 'invalid_credentials', message:legacy.data?.message || 'ID/email atau PIN RAOS salah.' }, { status:401, headers })
+      if (!legacy.error && legacy.data?.ok && legacy.data?.email) {
+        verified = legacy.data
+      } else if (login_id.includes('@')) {
+        // Compatibility fallback for active portal accounts that predate
+        // raos_credentials. Verify the existing Supabase Auth password
+        // server-side; never create or expose a new PIN.
+        const authClient = createClient(SUPABASE_URL, SERVICE_KEY, { auth:{ persistSession:false, autoRefreshToken:false, detectSessionInUrl:false } })
+        const signed = await authClient.auth.signInWithPassword({ email:login_id.toLowerCase(), password:raos_pin })
+        const userId = signed.data?.user?.id
+        if (signed.error || !userId) {
+          return Response.json({ ok:false, reason:legacy.data?.reason || 'invalid_credentials', message:legacy.data?.message || 'ID/email atau PIN/password salah.' }, { status:401, headers })
+        }
+        const profile = await admin.from('user_profiles').select('id,email,role,is_active').eq('id',userId).maybeSingle()
+        const role = String(profile.data?.role || '').toLowerCase()
+        if (profile.error || !profile.data?.is_active || !PORTAL_ROLES.has(role)) {
+          return Response.json({ ok:false, reason:'portal_access_denied', message:'Akun tidak aktif atau role tidak boleh mengakses Portal.' }, { status:403, headers })
+        }
+        verified = { ok:true, email:profile.data.email || login_id.toLowerCase(), role, user_id:userId }
+      } else {
+        return Response.json({ ok:false, reason:legacy.data?.reason || 'invalid_credentials', message:legacy.data?.message || 'ID/email atau PIN salah.' }, { status:401, headers })
+      }
     }
 
     const { data:link, error:linkError } = await admin.auth.admin.generateLink({ type:'magiclink', email:verified.email })
     const tokenHash = link?.properties?.hashed_token
-    if (linkError || !tokenHash) return Response.json({ ok:false, reason:'session_exchange_failed', message:'Gagal membuat sesi RAOS.' }, { status:500, headers })
+    if (linkError || !tokenHash) return Response.json({ ok:false, reason:'session_exchange_failed', message:'Gagal membuat sesi Portal.' }, { status:500, headers })
 
     return Response.json({ ok:true, token_hash:tokenHash, verification_type:'email', role:verified.role, user_id:verified.user_id }, { headers })
   } catch {

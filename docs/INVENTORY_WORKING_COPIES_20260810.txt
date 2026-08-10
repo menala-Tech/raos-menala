@@ -1,0 +1,5 @@
+SESI 0 INVENTORY — 2026-08-10
+Physical ZIPs: 18
+Active: 17
+Skip: P8_PREPRODUCTION_REAUDITED_PACKAGE_NOT_APPLIED.zip (V1), superseded by V2.
+Active: AIST portable agent; Fase3 UI; HRIS attendance; HRIS contract activation; HRIS payroll V2; HRIS target sync; master modules; RAOS P2/P4/P5; canonical storage V4; Smart Office V2; System V3; P6 closure; P7 preproduction; P7 RAOS release; P8 V2.

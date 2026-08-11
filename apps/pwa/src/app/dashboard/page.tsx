@@ -16,6 +16,9 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
+import { can } from '@/lib/accessPolicy'
+import { branchDateKey, branchHour } from '@/lib/branchTime'
+import { useNetworkStatus } from '@/lib/useNetworkStatus'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -43,23 +46,28 @@ export default function DashboardPage() {
     { enabled: !!sessionUserId, ttlMs: 30 * 60 * 1000 }
   )
 
-  const today = new Date().toISOString().split('T')[0]
+  const branchTimeZone=(user as any)?.branches?.timezone as string | undefined
+  const today = branchDateKey(branchTimeZone)
   const { data: stats } = useCachedQuery(
-    ['dashboard-stats', sessionUserId, today],
+    ['dashboard-stats', sessionUserId, branchTimeZone ?? 'default', today],
     async () => {
+      // 36h network window safely covers one local civil day across WIB/WITA/WIT.
+      const since = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString()
       const { data: scans } = await supabase
         .from('scan_orders')
-        .select('status')
+        .select('status, scanned_at')
         .eq('staff_id', sessionUserId!)
-        .gte('scanned_at', today)
-      const s = scans || []
+        .gte('scanned_at', since)
+      const s = (scans || []).filter(x =>
+        !!x.scanned_at && branchDateKey(branchTimeZone, new Date(x.scanned_at)) === today
+      )
       return {
         total: s.length,
         valid: s.filter(x => x.status === 'valid').length,
         pending: s.filter(x => x.status === 'pending').length,
       }
     },
-    { enabled: !!sessionUserId, ttlMs: 5 * 60 * 1000, refreshIntervalMs: 5 * 60 * 1000 }
+    { enabled: !!sessionUserId && !!user, ttlMs: 5 * 60 * 1000, refreshIntervalMs: 5 * 60 * 1000 }
   )
 
   const { data: unreadNotifData } = useCachedQuery(
@@ -78,34 +86,25 @@ export default function DashboardPage() {
   const statsData = stats ?? { total: 0, valid: 0, pending: 0 }
 
   const role = user?.role ?? ''
-  const isKoordPlus = ['koordinator', 'admin', 'management', 'direksi'].includes(role)
-  const isAdmin     = isKoordPlus // legacy alias — kept untuk minimal diff
-  const isDriverMgr = role === 'driver_manager'
+  const online = useNetworkStatus()
+
 
   const quick = [
-    { href: '/scan',     icon: ScanLine,      label: 'Scan\nBarcode',    color: 'bg-blue-600',   bg: 'bg-blue-50' },
-    { href: '/absensi',  icon: UserCheck,     label: 'Absensi',          color: 'bg-green-600',  bg: 'bg-green-50' },
-    { href: '/riwayat',  icon: Clock,         label: 'Riwayat',          color: 'bg-orange-500', bg: 'bg-orange-50' },
-    { href: '/chat',     icon: MessageCircle, label: 'Chat\nRoom',       color: 'bg-purple-600', bg: 'bg-purple-50' },
-    { href: '/kpi',      icon: TrendingUp,    label: 'KPI\nSaya',        color: 'bg-pink-600',   bg: 'bg-pink-50' },
-    { href: '/status',   icon: PieChart,      label: 'Status\nValidasi', color: 'bg-teal-600',   bg: 'bg-teal-50' },
-    { href: '/drivers',  icon: Car,           label: 'Driver &\nKendaraan', color: 'bg-indigo-600', bg: 'bg-indigo-50' },
-    ...(isDriverMgr
-      ? [{ href: '/antrian-driver', icon: Car, label: 'Antrian\nDriver', color: 'bg-amber-600', bg: 'bg-amber-50' }]
-      : []),
-    ...(isKoordPlus
-      ? [{ href: '/validasi-saldo', icon: ClipboardCheck, label: 'Validasi\nSaldo', color: 'bg-amber-600', bg: 'bg-amber-50' }]
-      : []),
-    ...(isAdmin
-      ? [
-          { href: '/admin',   icon: ShieldCheck,  label: 'Panel\nAdmin',     color: 'bg-secondary', bg: 'bg-gray-50' },
-          { href: '/laporan', icon: FileBarChart,  label: 'Laporan &\nAnalitik', color: 'bg-cyan-700', bg: 'bg-cyan-50' },
-        ]
-      : []),
+    ...(can(role,'scan:create') ? [{ href:'/scan', icon:ScanLine, label:'Scan\nBarcode', color:'bg-blue-600', bg:'bg-blue-50' }] : []),
+    ...(can(role,'attendance:self') ? [{ href:'/absensi', icon:UserCheck, label:'Absensi', color:'bg-green-600', bg:'bg-green-50' }] : []),
+    ...((can(role,'history:self')||can(role,'history:branch:read')) ? [{ href:'/riwayat', icon:Clock, label:'Riwayat', color:'bg-orange-500', bg:'bg-orange-50' }] : []),
+    { href:'/chat', icon:MessageCircle, label:'Chat\nRoom', color:'bg-purple-600', bg:'bg-purple-50' },
+    ...((can(role,'kpi:self')||can(role,'kpi:branch:read')) ? [{ href:'/kpi', icon:TrendingUp, label:'KPI &\nTarget', color:'bg-pink-600', bg:'bg-pink-50' }] : []),
+    ...((can(role,'history:self')||can(role,'history:branch:read')) ? [{ href:'/status', icon:PieChart, label:'Status\nScan', color:'bg-teal-600', bg:'bg-teal-50' }] : []),
+    ...(can(role,'driver:read') ? [{ href:'/drivers', icon:Car, label:'Driver &\nKendaraan', color:'bg-indigo-600', bg:'bg-indigo-50' }] : []),
+    ...(can(role,'queue:branch:read') ? [{ href:'/antrian-driver', icon:Car, label:'Antrian\nDriver', color:'bg-amber-600', bg:'bg-amber-50' }] : []),
+    ...(can(role,'saldo:branch:read') ? [{ href:'/validasi-saldo', icon:ClipboardCheck, label:'Riwayat\nSaldo', color:'bg-amber-600', bg:'bg-amber-50' }] : []),
+    ...(can(role,'admin:panel') ? [{ href:'/admin', icon:ShieldCheck, label:'Panel\nAdmin', color:'bg-secondary', bg:'bg-gray-50' }] : []),
+    ...(can(role,'report:read') ? [{ href:'/laporan', icon:FileBarChart, label:'Laporan &\nAnalitik', color:'bg-cyan-700', bg:'bg-cyan-50' }] : []),
   ]
 
   const greeting = () => {
-    const h = new Date().getHours()
+    const h = branchHour((user as any)?.branches?.timezone)
     if (h < 12) return 'Selamat Pagi'
     if (h < 15) return 'Selamat Siang'
     if (h < 18) return 'Selamat Sore'
@@ -144,11 +143,11 @@ export default function DashboardPage() {
               <span className="text-white/30 text-xs">•</span>
               <span className="text-xs text-white/50 truncate">{(user as any)?.branches?.name ?? ''}</span>
               <span className="bg-green-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                Online
+                {online ? 'Online' : 'Offline'}
               </span>
             </div>
           </div>
-          <DateTimeStack />
+          <DateTimeStack timeZone={(user as any)?.branches?.timezone} />
         </div>
 
         {/* Stats */}
@@ -193,23 +192,17 @@ export default function DashboardPage() {
           <MiniCalendar />
         </div>
 
-        {/* Target Hari Ini */}
+        {/* Aktivitas Hari Ini */}
         <div className="card">
           <h2 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
             <Target size={16} className="text-primary" />
-            Target Hari Ini
+            Aktivitas Hari Ini
           </h2>
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-500">Scan Valid</span>
-                <span className="text-xs font-bold text-gray-700">{statsData.valid} / 20</span>
-              </div>
-              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-green-500 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min((statsData.valid / 20) * 100, 100)}%` }}
-                />
+                <span className="text-xs text-gray-500">Scan Valid Hari Ini</span>
+                <span className="text-xs font-bold text-gray-700">{statsData.valid}</span>
               </div>
             </div>
           </div>
@@ -221,9 +214,9 @@ export default function DashboardPage() {
             <AlertCircle size={20} className="text-yellow-600 flex-shrink-0" />
             <div>
               <p className="text-xs font-bold text-yellow-800">
-                {statsData.pending} scan menunggu validasi koordinator
+                {statsData.pending} scan menunggu proses
               </p>
-              <p className="text-[10px] text-yellow-600 mt-0.5">Koordinator belum memvalidasi</p>
+              <p className="text-[10px] text-yellow-600 mt-0.5">Menunggu proses sesuai hak akses Admin/Direksi</p>
             </div>
           </div>
         )}
@@ -237,7 +230,7 @@ export default function DashboardPage() {
         {/* Footer brand */}
         <div className="pt-2 pb-4 flex items-center justify-center gap-2 opacity-40">
           <ShieldCheck size={12} className="text-gray-500" />
-          <span className="text-[10px] text-gray-500">RIFIM AIRPORT OPERATION SYSTEM • Bandara Soekarno-Hatta</span>
+          <span className="text-[10px] text-gray-500">MENALA AIRPORT OPERATION SYSTEM • {(user as any)?.branches?.name ?? 'Multi Cabang'}</span>
         </div>
       </div>
     </AppShell>

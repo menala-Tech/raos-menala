@@ -1,21 +1,26 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { loadProfileLabels } from '@/lib/chatProfileDirectory'
+import { can } from '@/lib/accessPolicy'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
+import CoordinatorSaldoHistory from '@/components/CoordinatorSaldoHistory'
+import CoordinatorInvoiceValidation from '@/components/CoordinatorInvoiceValidation'
 import Link from 'next/link'
 import clsx from 'clsx'
 import { ArrowLeft, Wallet, CheckCircle2, Clock, XCircle, Search } from 'lucide-react'
-import { approveSaldoRequest, rejectSaldoRequest } from '@/lib/saldoRequest'
 
 /**
  * Halaman validasi koordinator untuk pengajuan Isi Saldo cabang-nya.
  * - Total nominal per status (Menunggu / Sudah Diisi / Ditolak)
  * - List semua request cabang scope (RLS enforce is_branch_in_scope)
- * - Tombol Setujui / Tolak untuk request pending
+ * - View-only untuk Koordinator/Management; Finance mutation tetap melalui RPC canonical Admin/Direksi.
  *
  * Roadmap poin 12: "Di halaman Validasi Koordinator ada Jumlah nominal
  * seluruh pengisian saldo di Cabang tersebut yg sudah di isi oleh admin
@@ -42,9 +47,8 @@ export default function ValidasiSaldoPage() {
   const [me, setMe] = useState<{ id: string; role: string; branch_id: string | null } | null>(null)
   const [filter, setFilter] = useState<'semua' | 'pending' | 'sudah' | 'ditolak'>('semua')
   const [search, setSearch] = useState('')
-  const [busyId, setBusyId] = useState<string | null>(null)
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) { router.push('/'); return }
@@ -52,23 +56,33 @@ export default function ValidasiSaldoPage() {
       .select('id, role, branch_id').eq('id', session.user.id).single()
     if (!profile) { router.push('/dashboard'); return }
     const role = profile.role
-    if (!['koordinator', 'admin', 'management', 'direksi'].includes(role)) {
+    if (!can(role,'saldo:branch:read')) {
       router.push('/dashboard'); return
     }
     setMe({ id: profile.id, role, branch_id: profile.branch_id })
+    const cached=cacheReadSync<SaldoRequest[]>(['saldo-history',profile.id,role,profile.branch_id],10*60*1000)
+    if(cached){setRequests(cached);setLoading(false)}
 
     // RLS enforce scope by is_branch_in_scope — cukup query semua.
     const { data } = await supabase.from('raos_saldo_requests')
       .select('id, request_no, nominal, status, is_processed, requested_at, processed_at, rejection_reason,' +
-        'staff:user_profiles!staff_id(full_name, staff_id),' +
+        'staff_id,' +
         'branch:branches!branch_id(name, slug)')
       .order('requested_at', { ascending: false })
       .limit(500)
-    setRequests((data ?? []) as unknown as SaldoRequest[])
+    const rawRows=(data ?? []) as any[]
+    let labels:any[]=[]
+    try{labels=await loadProfileLabels(rawRows.map(r=>r.staff_id))}catch(error){console.warn('[saldo-history] staff labels failed',error)}
+    const labelMap=new Map(labels.map((p:any)=>[p.user_id,p]))
+    const rows=rawRows.map(r=>({...r,staff:r.staff_id?{full_name:labelMap.get(r.staff_id)?.full_name ?? 'Staff',staff_id:labelMap.get(r.staff_id)?.staff_id ?? '-'}:null})) as unknown as SaldoRequest[]
+    setRequests(rows)
+    cacheWriteSync(['saldo-history',profile.id,role,profile.branch_id],rows)
     setLoading(false)
-  }
+  }, [router])
 
-  useEffect(() => { load() }, [router])
+  useEffect(() => { void load() }, [load])
+
+  useRealtimeRefresh(`saldo-history-${me?.id ?? 'anon'}`,[{table:'raos_saldo_requests'}],()=>void load(),350,!!me?.id)
 
   const filtered = requests.filter(r => {
     if (filter === 'pending' && (r.is_processed || r.status !== 'pending')) return false
@@ -89,24 +103,7 @@ export default function ValidasiSaldoPage() {
     ditolak:  requests.filter(r => r.status === 'rejected' || r.status === 'cancelled').reduce((s, r) => s + Number(r.nominal), 0),
   }
 
-  async function handleApprove(id: string) {
-    if (!me) return
-    setBusyId(id)
-    const r = await approveSaldoRequest(id, me.id)
-    if (!r.ok) alert(r.error ?? 'Gagal setujui')
-    else await load()
-    setBusyId(null)
-  }
-  async function handleReject(id: string) {
-    if (!me) return
-    const reason = prompt('Alasan tolak:')
-    if (!reason?.trim()) return
-    setBusyId(id)
-    const r = await rejectSaldoRequest(id, me.id, reason.trim())
-    if (!r.ok) alert(r.error ?? 'Gagal tolak')
-    else await load()
-    setBusyId(null)
-  }
+  // View-only. Finance owns mark-paid mutation.
 
   return (
     <AppShell>
@@ -117,7 +114,7 @@ export default function ValidasiSaldoPage() {
         </div>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
-            <h1 className="font-black text-xl">Validasi Isi Saldo</h1>
+            <h1 className="font-black text-xl">Riwayat Isi Saldo</h1>
             <p className="text-white/50 text-xs mt-0.5">Cabang scope Anda</p>
           </div>
           <DateTimeStack />
@@ -147,6 +144,9 @@ export default function ValidasiSaldoPage() {
             <p className="text-sm font-black text-gray-800 mt-1">Rp{totals.ditolak.toLocaleString('id-ID')}</p>
           </div>
         </div>
+
+        <CoordinatorSaldoHistory />
+        <CoordinatorInvoiceValidation />
 
         {/* Filter tabs */}
         <div className="flex gap-1.5 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
@@ -200,18 +200,6 @@ export default function ValidasiSaldoPage() {
                   </div>
                   {req.rejection_reason && (
                     <p className="text-[11px] text-red-500 mt-1">{req.rejection_reason}</p>
-                  )}
-                  {isPending && (
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      <button disabled={busyId === req.id} onClick={() => handleReject(req.id)}
-                        className="text-xs font-semibold py-1.5 rounded-lg bg-red-50 text-red-600 disabled:opacity-50">
-                        Tolak
-                      </button>
-                      <button disabled={busyId === req.id} onClick={() => handleApprove(req.id)}
-                        className="text-xs font-semibold py-1.5 rounded-lg bg-green-600 text-white disabled:opacity-50">
-                        Setujui
-                      </button>
-                    </div>
                   )}
                 </div>
               </div>

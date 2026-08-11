@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, Bell, CheckCircle2, ScanLine, UserCheck, Megaphone,
@@ -73,14 +75,18 @@ export default function NotificationsPage() {
   const [userId, setUserId] = useState<string | null>(null)
 
   const loadNotifications = useCallback(async (uid: string, f: Filter, s: StatusFilter) => {
-    setLoading(true)
+    const cacheKey=['notifications',uid,f,s] as const
+    const cached=cacheReadSync<Notification[]>(cacheKey, 10*60*1000)
+    if(cached){ setNotifications(cached); setLoading(false) } else setLoading(true)
     let q = supabase.from('notifications').select('*').eq('user_id', uid)
     const since = windowStart(f)
     if (since) q = q.gte('created_at', since.toISOString())
     if (s === 'unread')   q = q.neq('status', 'read').neq('status', 'archived')
     if (s === 'archived') q = q.eq('status', 'archived')
     const { data } = await q.order('created_at', { ascending: false }).limit(100)
-    setNotifications((data ?? []) as Notification[])
+    const rows=(data ?? []) as Notification[]
+    setNotifications(rows)
+    cacheWriteSync(cacheKey,rows)
     setLoading(false)
   }, [])
 
@@ -89,10 +95,8 @@ export default function NotificationsPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/'); return }
       setUserId(session.user.id)
-      await loadNotifications(session.user.id, filter, statusFilter)
     }
     init()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
   useEffect(() => {
@@ -100,17 +104,14 @@ export default function NotificationsPage() {
     void loadNotifications(userId, filter, statusFilter)
   }, [userId, filter, statusFilter, loadNotifications])
 
-  // Realtime — cross-device sync: INSERT/UPDATE/DELETE dari device lain
-  useEffect(() => {
-    if (!userId) return
-    const ch = supabase
-      .channel(`notif-user-${userId}`)
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-        () => { void loadNotifications(userId, filter, statusFilter) })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [userId, filter, statusFilter, loadNotifications])
+
+  useRealtimeRefresh(
+    `notifications-${userId ?? 'anon'}-${filter}-${statusFilter}`,
+    [{table:'notifications',filter:userId?`user_id=eq.${userId}`:undefined}],
+    ()=>userId?void loadNotifications(userId,filter,statusFilter):undefined,
+    250,
+    !!userId,
+  )
 
   // Auto-mark read: batch semua unread saat halaman dibuka (RPC cross-device sync)
   useEffect(() => {

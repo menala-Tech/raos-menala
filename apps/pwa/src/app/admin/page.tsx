@@ -3,6 +3,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { can } from '@/lib/accessPolicy'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, CheckCircle2, XCircle, ShieldCheck,
@@ -32,7 +36,9 @@ export default function AdminPage() {
   const [editingStaff, setEditingStaff] = useState<any | null>(null)
   const [showCreateRoom, setShowCreateRoom] = useState(false)
 
-  const loadData = useCallback(async (_uid: string) => {
+  const loadData = useCallback(async (uid: string) => {
+    const cached=cacheReadSync<any>(['admin-page',uid],5*60*1000)
+    if(cached){setPendingScans(cached.pendingScans);setStaffList(cached.staffList);setBranches(cached.branches);setLoading(false)}
     const [{ data: scans }, { data: staff }, { data: branchData }] = await Promise.all([
       supabase
         .from('scan_orders')
@@ -49,6 +55,7 @@ export default function AdminPage() {
     setPendingScans(scans ?? [])
     setStaffList(staff ?? [])
     setBranches(branchData ?? [])
+    cacheWriteSync(['admin-page',uid],{pendingScans:scans??[],staffList:staff??[],branches:branchData??[]})
     setLoading(false)
   }, [])
 
@@ -61,7 +68,7 @@ export default function AdminPage() {
         .select('*, branches(*)')
         .eq('id', session.user.id)
         .single()
-      if (!profile || !['koordinator', 'admin', 'management', 'direksi'].includes(profile.role)) {
+      if (!profile || !can(profile.role,'admin:panel')) {
         router.push('/dashboard')
         return
       }
@@ -117,11 +124,13 @@ export default function AdminPage() {
     setProcessing(null)
   }
 
-  const isAdmin = user && ['admin', 'management', 'direksi'].includes(user.role)
+  useRealtimeRefresh(`admin-${user?.id ?? 'anon'}`,[{table:'scan_orders'},{table:'user_profiles'},{table:'branches'}],()=>user?.id?loadData(user.id):undefined,300,!!user?.id)
+
+  const isAdmin = !!user && can(user.role,'admin:panel')
 
   return (
     <AppShell>
-      <div className="bg-secondary text-white px-4 pt-10 pb-4">
+      <div className="bg-secondary text-white px-4 pt-10 pb-4 sticky top-0 z-30">
         <div className="flex items-center gap-3">
           <Link href="/dashboard"><ArrowLeft size={22} /></Link>
           <div>
@@ -156,7 +165,7 @@ export default function AdminPage() {
               onClick={async () => {
                 if (!confirm('Buat room "Pengisian Saldo" untuk semua 9 cabang aktif? (skip yang sudah ada)')) return
                 const { data, error } = await supabase.rpc('seed_room_per_branch', { p_room_name: 'Pengisian Saldo' })
-                if (error) { alert('Gagal: ' + error.message); return }
+                if (error) { console.warn('[admin] RPC failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Operasi Admin gagal.')); return }
                 const rows = data as { branch_slug: string; created: boolean }[]
                 const created = rows.filter(r => r.created).length
                 alert(`✅ Selesai — ${created} room baru, ${rows.length - created} sudah ada.`)
@@ -170,7 +179,7 @@ export default function AdminPage() {
               onClick={async () => {
                 if (!confirm('Buat room "Driver" untuk semua 9 cabang aktif? (skip yang sudah ada)')) return
                 const { data, error } = await supabase.rpc('seed_room_per_branch', { p_room_name: 'Driver' })
-                if (error) { alert('Gagal: ' + error.message); return }
+                if (error) { console.warn('[admin] RPC failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Operasi Admin gagal.')); return }
                 const rows = data as { branch_slug: string; created: boolean }[]
                 const created = rows.filter(r => r.created).length
                 alert(`✅ Selesai — ${created} room baru, ${rows.length - created} sudah ada.`)
@@ -187,13 +196,13 @@ export default function AdminPage() {
                 if (!branchId) return
                 const force = confirm('Force rebalance? (OK = hapus semua assignment cabang ini lalu redistribute, Cancel = hanya assign driver yang belum punya staff)')
                 const { data, error } = await supabase.rpc('raos_random_assign_drivers', { p_branch_id: branchId, p_force: force })
-                if (error) { alert('Gagal: ' + error.message + '\n\nCatatan: hanya role management/direksi yang boleh trigger ini.'); return }
+                if (error) { console.warn('[admin] random assign failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Random assign driver gagal.')); return }
                 alert(`✅ ${data} driver ter-assign${force ? ' (rebalanced)' : ''}`)
               }}
               className="w-full flex items-center gap-2 text-sm text-secondary font-medium py-2 px-3 bg-amber-500/10 rounded-lg text-left"
             >
               <QrCode size={16} className="text-amber-600" />
-              🎲 Random Assign Driver → Staff (management/direksi only)
+              🎲 Random Assign Driver → Staff (Admin/Direksi only)
             </button>
             <button
               onClick={async () => {
@@ -453,7 +462,7 @@ function CreateProyekRoomModal({
       p_branch_id: branchId || null,
     })
     setSaving(false)
-    if (error) { setError('Gagal buat room: ' + error.message); return }
+    if (error) { console.warn('[admin] create room failed', runtimeTechnicalMessage(error)); setError(runtimeMessage(error,'Gagal membuat room.')); return }
     onCreated()
   }
 

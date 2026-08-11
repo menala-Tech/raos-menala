@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { loadProfileLabels } from '@/lib/chatProfileDirectory'
 import { cacheReadSync, cacheWriteSync, cacheInvalidate } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
@@ -14,6 +15,10 @@ import {
 import Link from 'next/link'
 import clsx from 'clsx'
 import type { ScanOrder, Attendance, UserProfile } from '@/types'
+import { can } from '@/lib/accessPolicy'
+import { branchDateKey } from '@/lib/branchTime'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 
 type Tab = 'semua' | 'scan' | 'absensi' | 'saldo' | 'antrian'
 
@@ -84,6 +89,7 @@ export default function RiwayatPage() {
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<{ type: 'scan' | 'absensi'; data: any } | null>(null)
   const [showSummary, setShowSummary] = useState(false)
+  const [refreshNonce,setRefreshNonce]=useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -93,9 +99,10 @@ export default function RiwayatPage() {
 
       const { from, to } = rangeToDates(dateRange)
       const fromIso = from.toISOString()
-      const fromDate = from.toISOString().split('T')[0]
+      const tz=(profile as any)?.branches?.timezone ?? 'Asia/Jakarta'
+      const fromDate = branchDateKey(tz,from)
       const toIso = to.toISOString()
-      const toDate = to.toISOString().split('T')[0]
+      const toDate = branchDateKey(tz,to)
       const userId = session.user.id
 
       // Cache-first 2-phase: instant render kalau ada, background refresh selalu.
@@ -140,9 +147,7 @@ export default function RiwayatPage() {
         supabase.from('raos_saldo_requests')
           .select(
             'id, request_no, nominal, status, is_processed, requested_at,' +
-            'approved_at, processed_at, rejection_reason, note, driver_name,' +
-            'approved_by_user:user_profiles!approved_by(full_name),' +
-            'processed_by_user:user_profiles!processed_by(full_name)'
+            'approved_at, processed_at, rejection_reason, note, driver_name, approved_by, processed_by'
           )
           .eq('staff_id', userId)
           .gte('requested_at', fromIso).lte('requested_at', toIso)
@@ -158,10 +163,18 @@ export default function RiwayatPage() {
       ])
       if (cancelled) return
 
+      const rawSaldo=(saldoData ?? []) as any[]
+      let labels:any[]=[]
+      try{labels=await loadProfileLabels(rawSaldo.flatMap(r=>[r.approved_by,r.processed_by]))}catch(error){console.warn('[riwayat] processor labels failed',error)}
+      const labelMap=new Map(labels.map((p:any)=>[p.user_id,p]))
+      const safeSaldo=rawSaldo.map(r=>({...r,
+        approved_by_user:r.approved_by?{full_name:labelMap.get(r.approved_by)?.full_name ?? 'Petugas'}:null,
+        processed_by_user:r.processed_by?{full_name:labelMap.get(r.processed_by)?.full_name ?? 'Petugas'}:null,
+      }))
       const fresh = {
         scans: (scanData ?? []) as ScanOrder[],
         absensies: (attData ?? []) as Attendance[],
-        saldoRequests: (saldoData ?? []) as unknown as SaldoRequest[],
+        saldoRequests: safeSaldo as unknown as SaldoRequest[],
         queueRows: (queueData ?? []) as unknown as QueueRow[],
       }
       setScans(fresh.scans)
@@ -173,7 +186,9 @@ export default function RiwayatPage() {
     }
     load()
     return () => { cancelled = true }
-  }, [router, dateRange, profile])
+  }, [router, dateRange, profile, refreshNonce])
+
+  useRealtimeRefresh(`riwayat-${profile?.id ?? 'anon'}`,[{table:'scan_orders'},{table:'raos_attendance'},{table:'raos_saldo_requests'},{table:'raos_driver_queue'}],()=>setRefreshNonce(n=>n+1),350,!!profile?.id)
 
   const filteredScans = scans.filter(s => {
     if (statusFilter !== 'semua' && s.status !== statusFilter) return false
@@ -226,10 +241,9 @@ export default function RiwayatPage() {
   ]
 
   const role = profile?.role ?? ''
-  const canEdit = ['koordinator', 'management', 'admin', 'direksi'].includes(role)
-  const canDelete = ['admin', 'direksi'].includes(role)
-  const canEditQueue = canEdit
-  const canDeleteQueue = canDelete
+  const canEdit = can(role,'saldo:mutate')
+  const canDelete = can(role,'staff:mutate')
+  const canEditQueue = can(role,'queue:operate')
   const orderCount = scans.length
 
   // Invalidate cache riwayat setelah mutation supaya next visit fetch fresh
@@ -243,7 +257,7 @@ export default function RiwayatPage() {
     if (!canDelete) return
     if (!confirm(`Hapus scan ${row.scan_id}?`)) return
     const { error } = await supabase.from('scan_orders').delete().eq('id', row.id)
-    if (error) { alert('Gagal hapus scan: ' + error.message); return }
+    if (error) { console.warn('[riwayat] delete scan failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal menghapus scan.')); return }
     setScans(prev => prev.filter(r => r.id !== row.id))
     invalidateRiwayat()
   }
@@ -252,42 +266,19 @@ export default function RiwayatPage() {
     if (!canDelete) return
     if (!confirm(`Hapus absensi tanggal ${row.date}?`)) return
     const { error } = await supabase.from('raos_attendance').delete().eq('id', row.id)
-    if (error) { alert('Gagal hapus absensi: ' + error.message); return }
+    if (error) { console.warn('[riwayat] delete attendance failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal menghapus absensi.')); return }
     setAbsensies(prev => prev.filter(r => r.id !== row.id))
     invalidateRiwayat()
   }
 
-  async function deleteSaldo(row: SaldoRequest) {
-    if (!canDelete) return
-    if (!confirm(`Hapus pengajuan saldo ${row.request_no}?`)) return
-    const { error } = await supabase.from('raos_saldo_requests').delete().eq('id', row.id)
-    if (error) { alert('Gagal hapus saldo: ' + error.message); return }
-    setSaldoRequests(prev => prev.filter(r => r.id !== row.id))
-    invalidateRiwayat()
-  }
-
-  async function cancelSaldo(row: SaldoRequest) {
-    if (!canEdit) return
-    if (row.is_processed || row.status !== 'pending') {
-      alert('Hanya pengajuan status Pending yang bisa dibatalkan.')
-      return
-    }
-    const reason = prompt('Alasan pembatalan pengajuan?')
-    if (!reason) return
-    const { error } = await supabase.from('raos_saldo_requests').update({
-      status: 'rejected', rejection_reason: reason, approved_by: profile?.id, approved_at: new Date().toISOString(),
-    }).eq('id', row.id)
-    if (error) { alert('Gagal batalkan: ' + error.message); return }
-    setSaldoRequests(prev => prev.map(r => r.id === row.id ? { ...r, status: 'rejected', rejection_reason: reason } : r))
-    invalidateRiwayat()
-  }
+  // Saldo financial lifecycle is RPC-only. No direct cancel/delete mutation from Riwayat.
 
   async function editScanStatus(row: ScanOrder) {
     if (!canEdit) return
     const next = row.status === 'pending' ? 'valid' : row.status === 'valid' ? 'rejected' : 'pending'
     if (!confirm(`Ubah status scan ${row.scan_id} dari ${row.status} → ${next}?`)) return
     const { error } = await supabase.from('scan_orders').update({ status: next }).eq('id', row.id)
-    if (error) { alert('Gagal ubah status: ' + error.message); return }
+    if (error) { console.warn('[riwayat] status update failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal mengubah status.')); return }
     setScans(prev => prev.map(r => r.id === row.id ? { ...r, status: next } as ScanOrder : r))
     invalidateRiwayat()
   }
@@ -297,21 +288,11 @@ export default function RiwayatPage() {
     setQueueBusy(row.id); setQueueErr('')
     const { error } = await supabase.rpc('raos_complete_queue', { p_queue_id: row.id })
     setQueueBusy(null)
-    if (error) { setQueueErr(error.message); return }
+    if (error) { console.warn('[riwayat] queue mutation failed', runtimeTechnicalMessage(error)); setQueueErr(runtimeMessage(error,'Operasi antrean gagal.')); return }
     setQueueRows(prev => prev.map(r => r.id === row.id ? { ...r, status: 'completed', completed_at: new Date().toISOString() } : r))
     invalidateRiwayat()
   }
 
-  async function deleteQueueRow(row: QueueRow) {
-    if (!canDeleteQueue) return
-    if (!confirm(`Hapus riwayat antrian driver ${row.driver?.name ?? ''}?`)) return
-    setQueueBusy(row.id); setQueueErr('')
-    const { error } = await supabase.from('raos_driver_queue').delete().eq('id', row.id)
-    setQueueBusy(null)
-    if (error) { setQueueErr(error.message); return }
-    setQueueRows(prev => prev.filter(r => r.id !== row.id))
-    invalidateRiwayat()
-  }
 
   return (
     <AppShell>
@@ -646,26 +627,6 @@ export default function RiwayatPage() {
                     Alasan: {req.rejection_reason}
                   </p>
                 )}
-                {(canEdit || canDelete) && (
-                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
-                    {canEdit && meta.status === 'pending' && (
-                      <button
-                        onClick={() => cancelSaldo(req)}
-                        className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100"
-                      >
-                        Batalkan
-                      </button>
-                    )}
-                    {canDelete && (
-                      <button
-                        onClick={() => deleteSaldo(req)}
-                        className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1"
-                      >
-                        <Trash2 size={11} /> Hapus
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
           )
@@ -719,7 +680,7 @@ export default function RiwayatPage() {
                     )}
                   </div>
                 )}
-                {(canEditQueue || canDeleteQueue) && (row.status === 'called' || row.status === 'waiting') && (
+                {canEditQueue && row.status === 'called' && (
                   <div className="flex items-center gap-2 mt-2">
                     {canEditQueue && row.status === 'called' && (
                       <button
@@ -728,15 +689,6 @@ export default function RiwayatPage() {
                         className="text-[11px] font-semibold px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
                       >
                         Tandai Selesai
-                      </button>
-                    )}
-                    {canDeleteQueue && (
-                      <button
-                        onClick={() => deleteQueueRow(row)}
-                        disabled={busy}
-                        className="text-[11px] font-semibold px-2 py-1 rounded-md bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-50 flex items-center gap-1"
-                      >
-                        <Trash2 size={11} /> Hapus
                       </button>
                     )}
                   </div>

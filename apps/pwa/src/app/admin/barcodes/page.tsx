@@ -3,7 +3,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { can } from '@/lib/accessPolicy'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import AppShell from '@/components/layout/AppShell'
+import BrandLoadingShell from '@/components/BrandLoadingShell'
 import { ArrowLeft, Printer, QrCode, Search, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
@@ -72,15 +76,21 @@ export default function BarcodesPage() {
   const [search, setSearch] = useState('')
   const [branch, setBranch] = useState('all')
   const [authorized, setAuthorized] = useState(false)
+  const [viewerId, setViewerId] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (uid: string) => {
+    const cacheKey=['driver-barcodes',uid] as const
+    const cached=cacheReadSync<Driver[]>(cacheKey,30*60*1000)
+    if(cached){setDrivers(cached);setFiltered(cached);setLoading(false)}
     const { data } = await supabase
       .from('raos_drivers')
       .select('id, driver_id, name, barcode, vehicle_type, vehicle_plate, branches(code, name)')
       .eq('is_active', true)
       .order('driver_id')
-    setDrivers((data ?? []) as Driver[])
-    setFiltered((data ?? []) as Driver[])
+    const rows=(data ?? []) as Driver[]
+    setDrivers(rows)
+    setFiltered(rows)
+    cacheWriteSync(cacheKey,rows)
     setLoading(false)
   }, [])
 
@@ -93,12 +103,13 @@ export default function BarcodesPage() {
         .select('role')
         .eq('id', session.user.id)
         .single()
-      if (!profile || !['admin', 'management', 'koordinator', 'direksi'].includes(profile.role)) {
+      if (!profile || !can(profile.role,'driver:barcode:manage')) {
         router.push('/dashboard')
         return
       }
+      setViewerId(session.user.id)
       setAuthorized(true)
-      load()
+      void load(session.user.id)
     }
     init()
   }, [router, load])
@@ -117,7 +128,11 @@ export default function BarcodesPage() {
     setFiltered(result)
   }, [search, branch, drivers])
 
-  if (!authorized) return null
+  const branchOptions=Array.from(new Map(drivers.flatMap(d=>{const b=Array.isArray(d.branches)?d.branches[0]:d.branches;return b?.code?[[b.code,b.name] as const]:[]})).entries())
+
+  useRealtimeRefresh(`driver-barcodes-${viewerId ?? 'anon'}`,[{table:'raos_drivers'}],()=>authorized&&viewerId?void load(viewerId):undefined,500,!!viewerId&&authorized)
+
+  if (!authorized || (loading && drivers.length===0)) return <BrandLoadingShell label="Memuat QR Driver..." />
 
   return (
     <>
@@ -165,9 +180,7 @@ export default function BarcodesPage() {
               className="input text-sm w-28"
             >
               <option value="all">Semua</option>
-              <option value="T1">Terminal 1</option>
-              <option value="T2">Terminal 2</option>
-              <option value="T3">Terminal 3</option>
+              {branchOptions.map(([code,name]) => <option key={code} value={code}>{name}</option>)}
             </select>
           </div>
           <button

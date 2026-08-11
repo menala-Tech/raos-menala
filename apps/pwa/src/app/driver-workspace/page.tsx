@@ -6,9 +6,14 @@ import Link from 'next/link'
 import clsx from 'clsx'
 import { Car, CheckCircle2, Clock, LogOut, MessageCircle, Phone, Play, Wallet, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { cacheReadSync, cacheWriteSync, cacheClearAll } from '@/lib/apiCache'
+import { clearOfflineReadCache } from '@/lib/offlineReadCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import BrandLoadingShell from '@/components/BrandLoadingShell'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
+import DriverSaldoHistory from '@/components/DriverSaldoHistory'
 import { formatInTimezone, tzLabel } from '@/lib/timezone'
 
 /**
@@ -25,7 +30,7 @@ import { formatInTimezone, tzLabel } from '@/lib/timezone'
  *   - raos_saldo_requests_driver_own (WHERE driver_id = my driver_id)
  *
  * Driver TIDAK bisa write ke antrean atau saldo — semua manajemen
- * dilakukan staff/koord via /antrian-driver dan Finance Dashboard.
+ * dilakukan role yang memiliki capability queue:operate melalui /antrian-driver dan Finance Dashboard.
  */
 
 interface DriverProfile {
@@ -77,15 +82,23 @@ export default function DriverWorkspacePage() {
     }
     setProfile(prof as unknown as DriverProfile)
     const branchId = (prof as any).raos_drivers?.branch_id ?? null
+    const cacheKey=['driver-workspace',session.user.id,'driver',branchId] as const
+    const cached=cacheReadSync<{branchName:string;branchTz:string|null;myQueue:QueueEntry|null;saldoHistory:SaldoEntry[]}>(cacheKey,10*60*1000)
+    if(cached){setBranchName(cached.branchName);setBranchTz(cached.branchTz);setMyQueue(cached.myQueue);setSaldoHistory(cached.saldoHistory);setLoading(false)}
+    let resolvedBranchName=''
+    let resolvedBranchTz:string|null=null
     if (branchId) {
       const { data: b } = await supabase.from('branches').select('name, timezone').eq('id', branchId).single()
       if (b) {
-        setBranchName(b.name)
-        setBranchTz(b.timezone ?? null)
+        resolvedBranchName=b.name
+        resolvedBranchTz=b.timezone ?? null
+        setBranchName(resolvedBranchName)
+        setBranchTz(resolvedBranchTz)
       }
     }
 
     // Antrean aktif driver ini (status waiting/called)
+    let qRow:QueueEntry|null=null
     if (prof.driver_id) {
       const { data: q } = await supabase.from('raos_driver_queue')
         .select('id, position, status, joined_at, called_at')
@@ -94,43 +107,66 @@ export default function DriverWorkspacePage() {
         .order('joined_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      setMyQueue(q as QueueEntry | null)
+      qRow=q as QueueEntry | null
+      setMyQueue(qRow)
     }
 
     // Riwayat Isi Saldo 30 hari terakhir yang di-address ke driver ini
     const from = new Date(Date.now() - 30 * 86400000).toISOString()
     const { data: sh } = await supabase.from('raos_saldo_requests')
       .select('id, request_no, nominal, status, is_processed, requested_at, processed_at, rejection_reason')
+      .eq('driver_id', prof.driver_id)
       .gte('requested_at', from)
       .order('requested_at', { ascending: false })
       .limit(30)
-    setSaldoHistory((sh ?? []) as SaldoEntry[])
+    const saldoRows=(sh ?? []) as SaldoEntry[]
+    setSaldoHistory(saldoRows)
+    cacheWriteSync(cacheKey,{branchName:resolvedBranchName,branchTz:resolvedBranchTz,myQueue:qRow,saldoHistory:saldoRows})
 
     setLoading(false)
   }, [router])
 
-  useEffect(() => { load() }, [load])
-
-  // Realtime — subscribe changes ke antrean & saldo driver
-  useEffect(() => {
+  const refreshOperational = useCallback(async () => {
     if (!profile?.driver_id) return
-    const ch = supabase.channel(`driver-ws:${profile.id}`)
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'raos_driver_queue',
-        filter: `driver_id=eq.${profile.driver_id}`,
-      }, () => { void load() })
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'raos_saldo_requests',
-        filter: `driver_id=eq.${profile.driver_id}`,
-      }, () => { void load() })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [profile?.id, profile?.driver_id, load])
+    const from = new Date(Date.now() - 30 * 86400000).toISOString()
+    const [{ data: q }, { data: sh }] = await Promise.all([
+      supabase.from('raos_driver_queue')
+        .select('id, position, status, joined_at, called_at')
+        .eq('driver_id', profile.driver_id)
+        .in('status', ['waiting', 'called'])
+        .order('joined_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase.from('raos_saldo_requests')
+        .select('id, request_no, nominal, status, is_processed, requested_at, processed_at, rejection_reason')
+        .eq('driver_id', profile.driver_id)
+        .gte('requested_at', from)
+        .order('requested_at', { ascending: false })
+        .limit(30),
+    ])
+    const qRow=q as QueueEntry | null
+    const saldoRows=(sh ?? []) as SaldoEntry[]
+    setMyQueue(qRow)
+    setSaldoHistory(saldoRows)
+    cacheWriteSync(['driver-workspace',profile.id,'driver',profile.raos_drivers?.branch_id ?? null],{branchName,branchTz,myQueue:qRow,saldoHistory:saldoRows})
+  },[profile,branchName,branchTz])
+
+  useEffect(() => { void load() }, [load])
+  useRealtimeRefresh(`driver-workspace-${profile?.id ?? 'anon'}`,[
+    {table:'raos_driver_queue',filter:profile?.driver_id?`driver_id=eq.${profile.driver_id}`:undefined},
+    {table:'raos_saldo_requests',filter:profile?.driver_id?`driver_id=eq.${profile.driver_id}`:undefined},
+  ],refreshOperational,300,!!profile?.driver_id)
+
 
   async function logout() {
+    cacheClearAll()
+    await clearOfflineReadCache()
+    localStorage.removeItem('raos_install_variant')
     await supabase.auth.signOut()
     router.push('/')
   }
+
+  if (loading && !profile) return <BrandLoadingShell label="Memuat Driver Workspace..." />
 
   return (
     <AppShell>
@@ -153,7 +189,7 @@ export default function DriverWorkspacePage() {
               {profile?.raos_drivers?.vehicle_plate && <> · {profile.raos_drivers.vehicle_plate}</>}
             </p>
           </div>
-          <DateTimeStack />
+          <DateTimeStack timeZone={branchTz ?? 'Asia/Jakarta'} />
         </div>
       </div>
 
@@ -190,6 +226,8 @@ export default function DriverWorkspacePage() {
                 {saldoHistory.map(s => <SaldoRow key={s.id} entry={s} branchTz={branchTz} />)}
               </div>
             </div>
+
+            <DriverSaldoHistory />
           </>
         )}
       </div>

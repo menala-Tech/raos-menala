@@ -4,11 +4,11 @@ import type React from 'react'
 import { forwardRef } from 'react'
 import { MessageCircle, SmilePlus } from 'lucide-react'
 import clsx from 'clsx'
+import { can } from '@/lib/accessPolicy'
 import type { ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, UserProfile } from '@/types'
 import type { DriverPayload, QueuePayload } from '@/lib/actionCardParser'
 import WorkspaceCard from './WorkspaceCard'
 import type { ActionMenu, ReadSummaryEntry } from './types'
-import { PIN_ROLES } from './types'
 import TimelineMessage from './TimelineMessage'
 
 interface Props {
@@ -38,7 +38,7 @@ interface Props {
 
 const WorkspaceTimeline = forwardRef<HTMLDivElement, Props>(function WorkspaceTimeline(props, bottomRef) {
   const { messages, user } = props
-  const canPin = PIN_ROLES.includes(user.role)
+  const canPin = can(user.role, 'chat:moderate')
 
   const groupedReactions = (msgId: string) => {
     const list = props.reactions[msgId] ?? []

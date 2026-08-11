@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Loader2, PhoneCall, CheckCircle2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { can } from '@/lib/accessPolicy'
+import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 import type { QueueHistoryItem, QueueSummary } from './types'
 
 interface Props {
@@ -13,13 +15,11 @@ interface Props {
   onChanged?: () => void
 }
 
-const CAN_ACT = ['staff','koordinator','admin','management','direksi']
-
 export default function WorkspaceQueueSummary({
   summary, history, branchId, currentUserRole, onChanged,
 }: Props) {
   const [busy, setBusy] = useState<string | null>(null)
-  const canAct = currentUserRole ? CAN_ACT.includes(currentUserRole) : false
+  const canAct = can(currentUserRole,'queue:operate')
 
   async function callDriver(position: number) {
     if (!branchId) return
@@ -28,7 +28,7 @@ export default function WorkspaceQueueSummary({
       p_branch_id: branchId, p_position: position,
     })
     setBusy(null)
-    if (error) alert('Gagal panggil driver: ' + error.message)
+    if (error) { console.warn('[WorkspaceQueueSummary] call failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal panggil driver.')) }
     else onChanged?.()
   }
 
@@ -36,7 +36,7 @@ export default function WorkspaceQueueSummary({
     setBusy(`done-${id}`)
     const { error } = await supabase.rpc('raos_complete_queue', { p_queue_id: id })
     setBusy(null)
-    if (error) alert('Gagal tandai selesai: ' + error.message)
+    if (error) { console.warn('[WorkspaceQueueSummary] complete failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal tandai selesai.')) }
     else onChanged?.()
   }
 

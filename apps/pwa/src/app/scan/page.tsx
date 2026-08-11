@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
 import BarcodeScanner from '@/components/BarcodeScanner'
-import { checkGeofence, shouldBlockByGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
+import { checkGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
 import { logActivity } from '@/lib/activity'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
@@ -14,6 +14,8 @@ import { DateTimeStack } from '@/components/DateTimeHeader'
 import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
+import { useSystemConfigNumber } from '@/lib/useSystemConfig'
+import { deriveOperationalGate } from '@/lib/operational-geofence-gate'
 
 type ScanState = 'idle' | 'scanning' | 'success' | 'error'
 
@@ -33,59 +35,52 @@ export default function ScanPage() {
   // tetap available kalau butuh switch ke manual per sesi.
   const [inputMode, setInputMode] = useState<'camera' | 'manual'>('camera')
   const inputRef = useRef<HTMLInputElement>(null)
-
+  const { value: geofenceTolerance } = useSystemConfigNumber('GEOFENCE_TOLERANCE_METER', GEOFENCE_TOLERANCE_METERS)
+  const operationalGate = deriveOperationalGate({
+    role: user?.role,
+    geofence,
+    locationStatus,
+    toleranceMeters: geofenceTolerance,
+    isGeofenceExempt: (user as any)?.is_geofence_exempt,
+  })
   useEffect(() => {
-    async function init() {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { router.push('/'); return }
-      const { data } = await supabase
-        .from('user_profiles')
-        .select('*, branches(*)')
-        .eq('id', session.user.id)
-        .single()
+    let active=true
+    let stopGps:(()=>void)|undefined
+    async function init(){
+      const {data:{session}}=await supabase.auth.getSession()
+      if(!session){router.push('/');return}
+      const {data,error}=await supabase.from('user_profiles').select('*, branches(*)').eq('id',session.user.id).single()
+      if(!active||error||!data)return
       setUser(data)
+      stopGps=requestLocationTiered({
+        onFix:async fix=>{
+          if(!active)return
+          setLocation({lat:fix.lat,lng:fix.lng})
+          const g=await checkGeofence(fix.lat,fix.lng,data.branch_id)
+          if(!active)return
+          setGeofence(g); setLocationStatus(g.isValid?'valid':'invalid')
+        },
+        onUnavailable:()=>active&&setLocationStatus('unavailable')
+      })
     }
-    init()
-
-    // GPS tiered — coarse dulu (~1s wifi/cell) supaya UI langsung siap,
-    // refine (GPS asli, non-blocking) menyusul untuk presisi lebih baik.
-    // Geofence check filter by user.branch_id supaya hanya pickup point
-    // di Terminal user yang dicek (staff T3 tidak divalidasi ke PP T1/T2).
-    // Init user perlu selesai dulu supaya branch_id available; fetch ulang
-    // di sini pakai getSession().
-    let userBranchId: string | null = null
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) return
-      supabase.from('user_profiles').select('branch_id').eq('id', session.user.id).single()
-        .then(({ data }) => { userBranchId = data?.branch_id ?? null })
-    })
-
-    const abort = requestLocationTiered({
-      onFix: async fix => {
-        setLocation({ lat: fix.lat, lng: fix.lng })
-        const result = await checkGeofence(fix.lat, fix.lng, userBranchId)
-        setGeofence(result)
-        setLocationStatus(result.isValid ? 'valid' : 'invalid')
-      },
-      onUnavailable: () => setLocationStatus('unavailable'),
-    })
-    return abort
-  }, [router])
+    void init()
+    return()=>{active=false;stopGps?.()}
+  },[router])
 
   const handleScan = useCallback(async (barcode: string) => {
     if (!barcode.trim() || !user) return
 
-    if (shouldBlockByGeofence(user.role, geofence, locationStatus, (user as any).is_geofence_exempt)) {
+    if (!operationalGate.scan_order) {
       setScanState('error')
       const overshoot = geofence?.overshootMeters
       setLastScan({
-        error: locationStatus === 'unavailable'
+        error: operationalGate.reason ?? (locationStatus === 'unavailable'
           ? 'GPS tidak terdeteksi. Scan dibatalkan — aktifkan lokasi HP lalu coba lagi.'
           : locationStatus === 'checking'
             ? 'Menunggu lokasi terdeteksi. Coba beberapa detik lagi.'
             : overshoot === null || overshoot === undefined
               ? 'Data pickup point cabang belum di-setup. Hubungi admin untuk konfigurasi lokasi.'
-              : `Anda berada ${overshoot}m di luar radius pickup point ${geofence?.nearestPointName ?? 'lokasi cabang'}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m. Scan dibatalkan.`,
+              : `Anda berada ${overshoot}m di luar radius pickup point ${geofence?.nearestPointName ?? 'lokasi cabang'}. Batas toleransi ${geofenceTolerance}m. Scan dibatalkan.`),
       })
       return
     }
@@ -160,7 +155,7 @@ export default function ScanPage() {
     }
 
     if (inputRef.current) inputRef.current.value = ''
-  }, [user, location, geofence, locationStatus])
+  }, [user, location, geofence, locationStatus, geofenceTolerance, operationalGate])
 
   function reset() {
     setScanState('idle')
@@ -179,7 +174,7 @@ export default function ScanPage() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="font-black text-xl">Scan Barcode</h1>
-            <p className="text-white/50 text-xs mt-0.5">Validasi Order Driver — Bandara Soekarno-Hatta</p>
+            <p className="text-white/50 text-xs mt-0.5">Validasi Order Driver — {(user as any)?.branches?.name ?? 'Cabang'}</p>
           </div>
           <DateTimeStack />
         </div>
@@ -196,7 +191,7 @@ export default function ScanPage() {
           {locationStatus === 'invalid' && geofence && (geofence.overshootMeters === null || geofence.nearestPointName === null) &&
             'Data pickup point cabang belum di-setup — hubungi admin.'}
           {locationStatus === 'invalid' && geofence && geofence.overshootMeters !== null && user?.role === 'staff' &&
-            `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${GEOFENCE_TOLERANCE_METERS}m — scan akan diblok kalau lewat.`}
+            `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${geofenceTolerance}m — scan akan diblok kalau lewat.`}
           {locationStatus === 'invalid' && geofence && geofence.distanceMeters !== null && user?.role !== 'staff' &&
             `Di luar radius ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Scan tetap bisa (bypass role).`}
           {locationStatus === 'unavailable' && user?.role === 'staff' && 'GPS tidak terdeteksi — scan diblok. Aktifkan lokasi HP.'}

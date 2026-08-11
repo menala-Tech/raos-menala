@@ -1,7 +1,7 @@
 'use client'
 
 import type React from 'react'
-import { Phone, FileText, Car, Building2, User, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { Phone, FileText, Car, Building2, User, Info } from 'lucide-react'
 import clsx from 'clsx'
 import { parseActionCard, type DriverPayload } from '@/lib/actionCardParser'
 
@@ -33,17 +33,11 @@ type DriverProps = {
 
 export function DriverActionCard({
   rawContent,
-  currentRole,
-  onApprove,
-  onReject,
-  onActivate,
-  busy,
 }: DriverProps) {
   const parsed = parseActionCard(rawContent)
   if (!parsed || parsed.kind !== 'driver') return null
 
   const status = parsed.status ?? 'pending'
-  const canManage = ['admin', 'management', 'direksi', 'koordinator', 'staff', 'supervisor', 'hr', 'driver_manager'].includes((currentRole ?? '').toLowerCase())
   const initials = parsed.name
     .split(/\s+/)
     .map(s => s[0])
@@ -73,43 +67,10 @@ export function DriverActionCard({
           {parsed.note && <p className="rounded-md bg-purple-50 px-2 py-1 text-xs text-purple-900">{parsed.note}</p>}
         </div>
       </div>
-      {canManage && status !== 'rejected' && status !== 'active' && (
-        <div className="flex gap-2 border-t border-purple-100 px-3 py-2 bg-gray-50">
-          {status === 'pending' && (
-            <>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onApprove?.(parsed)}
-                className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-              >
-                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                Setujui
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onReject?.(parsed)}
-                className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50 transition-colors"
-              >
-                <XCircle className="h-3.5 w-3.5" />
-                Tolak
-              </button>
-            </>
-          )}
-          {status === 'approved' && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onActivate?.(parsed)}
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
-            >
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-              Aktifkan Driver
-            </button>
-          )}
-        </div>
-      )}
+      <div className="flex items-center gap-2 border-t border-purple-100 px-3 py-2 bg-purple-50 text-[11px] text-purple-800">
+        <Info className="h-3.5 w-3.5 flex-shrink-0" />
+        <span>Presentation only - perubahan driver dilakukan melalui engine Driver canonical.</span>
+      </div>
     </div>
   )
 }

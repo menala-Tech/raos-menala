@@ -1,139 +1,121 @@
 // ============================================================
-// 11_drive_sync.gs - Sync Foto Absensi Selfie ke Google Drive
+// 11_drive_sync.gs — RAOS selfie + backup writer V4
 // ============================================================
-// Struktur folder BARU (sesi 2026-08-05):
-//   {root ABSENSI_PHOTOS_ROOT_ID}/{Bulan YYYY-MM Nama}/{Cabang}/{Nama Staff (RIF****)}/foto.jpg
+// Replacement writer. Mempertahankan public function existing:
+//   syncSelfiePhotosToGDrive() — trigger 30 menit
+//   backupHarian()             — trigger 02:00
 //
-// Contoh:
-//   1Aq-tMtVm89.../2026-08 Agustus/ID Rifim Airport Batam/Audra Agung pratama (RIF0120)/2026-08-05_<id>_masuk.jpg
-//
-// Struktur LAMA (Pickup Point/Bulan) — foto historical tetap di lokasi lama,
-// tidak di-migrate. Sync baru langsung ke struktur baru.
-//
-// Foto selfie absensi diupload staff ke Supabase Storage (bucket 'selfies')
-// dari aplikasi PWA. Script ini memindahkan salinannya ke folder Google Drive
-// resmi RAOS, terorganisir per Bulan-Cabang-Staff sesuai request HRIS
-// (Rifim-OS modul Absensi baca link foto dari raos_attendance).
-//
-// Kenapa lewat GAS (bukan langsung dari PWA)? Karena GAS berjalan di akun
-// Google yang sama pemilik folder Drive ini - tidak perlu simpan credential
-// Google tambahan di aplikasi web (yang berisiko bocor di sisi client).
-// ============================================================
+// Destination V4:
+// ABSENSI/YYYY/MM_Bulan/01_FOTO_ABSENSI/<Pickup Point>/...
+// RAOS_PWA/YYYY/MM_Bulan/04_BACKUP_SPREADSHEET/...
 
-const MONTH_NAMES_ID = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
-]
+const RAOS_DRIVE_SYNC_BATCH = 250
+
+function _raosSafeFilePart_(value, fallback) {
+  const s = String(value || fallback || '').trim()
+    .replace(/[\\/:*?"<>|#%{}~&]/g, '-')
+    .replace(/\s+/g, ' ')
+    .substring(0, 100)
+  return s || String(fallback || 'unknown')
+}
+
+function _raosDownloadSelfieBlob_(url, fileName) {
+  const target = String(url || '').trim()
+  if (!target) return null
+  const res = UrlFetchApp.fetch(target, { muteHttpExceptions: true, followRedirects: true })
+  const code = res.getResponseCode()
+  if (code < 200 || code >= 300) {
+    throw new Error(`Foto HTTP ${code}: ${target.substring(0, 120)}`)
+  }
+  return res.getBlob().setName(fileName)
+}
+
+function _raosDriveLookupMaps_() {
+  const pickupRows = callSupabase('pickup_points?select=id,name&limit=1000') || []
+  const profileRows = callSupabase('user_profiles?select=id,staff_id,full_name&limit=2000') || []
+  const pickup = {}
+  const profile = {}
+  pickupRows.forEach(row => { if (row.id) pickup[row.id] = row.name || row.id })
+  profileRows.forEach(row => {
+    if (row.id) profile[row.id] = { name: row.full_name || row.staff_id || row.id, staff_id: row.staff_id || '' }
+  })
+  return { pickup, profile }
+}
+
+function _raosPendingSelfieRows_() {
+  // Fetch recent unsynced candidates. Client-side condition avoids fragile PostgREST OR encoding.
+  const rows = callSupabase(
+    'raos_attendance?select=id,staff_id,pickup_point_id,date,selfie_in_url,selfie_out_url,selfie_in_drive_synced,selfie_out_drive_synced,created_at&order=date.desc&limit=' + RAOS_DRIVE_SYNC_BATCH
+  ) || []
+  return rows.filter(row =>
+    (!!row.selfie_in_url && row.selfie_in_drive_synced !== true) ||
+    (!!row.selfie_out_url && row.selfie_out_drive_synced !== true)
+  )
+}
+
+function _raosSyncOneSelfie_(row, side, maps) {
+  const urlKey = side === 'in' ? 'selfie_in_url' : 'selfie_out_url'
+  const flagKey = side === 'in' ? 'selfie_in_drive_synced' : 'selfie_out_drive_synced'
+  const url = String(row[urlKey] || '').trim()
+  if (!url || row[flagKey] === true) return false
+
+  const profile = maps.profile[row.staff_id] || {}
+  const pickupName = _raosSafeFilePart_(maps.pickup[row.pickup_point_id], 'Tanpa Pickup Point')
+  const dateText = String(row.date || Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd'))
+  const when = new Date(`${dateText}T12:00:00+07:00`)
+  const staffCode = _raosSafeFilePart_(profile.staff_id || row.staff_id, 'staff')
+  const staffName = _raosSafeFilePart_(profile.name, 'staff')
+  const ext = /\.png(?:\?|$)/i.test(url) ? 'png' : 'jpg'
+  const fileName = `${dateText}_${staffCode}_${staffName}_${side === 'in' ? 'MASUK' : 'PULANG'}.${ext}`
+
+  const blob = _raosDownloadSelfieBlob_(url, fileName)
+  raosCanonicalSaveBlob_('absensi', 'foto_absensi', blob, fileName, when, pickupName)
+
+  const patch = {}
+  patch[flagKey] = true
+  callSupabase('raos_attendance?id=eq.' + encodeURIComponent(row.id), 'PATCH', patch)
+  return true
+}
 
 function syncSelfiePhotosToGDrive() {
-  if (!CONFIG.DRIVE.ABSENSI_PHOTOS_ROOT_ID) {
-    logSistem('error', 'syncSelfiePhotosToGDrive', 'error', 'ABSENSI_PHOTOS_ROOT_ID belum diset')
-    return
+  let synced = 0, failed = 0
+  const errors = []
+  try {
+    const maps = _raosDriveLookupMaps_()
+    const rows = _raosPendingSelfieRows_()
+    rows.forEach(row => {
+      ;['in', 'out'].forEach(side => {
+        try {
+          if (_raosSyncOneSelfie_(row, side, maps)) synced++
+        } catch (err) {
+          failed++
+          errors.push(`${row.id}/${side}: ${err.message || err}`)
+        }
+      })
+    })
+    const summary = `${synced} foto tersinkron, ${failed} gagal`
+    try { logSistem('sync', 'syncSelfiePhotosToGDrive', failed ? 'warning' : 'success', summary) } catch (_) {}
+    errors.slice(0, 20).forEach(msg => { try { logSistem('sync', 'syncSelfiePhotosToGDrive', 'warning', msg) } catch (_) {} })
+    return { success: failed === 0, synced, failed, errors }
+  } catch (err) {
+    try { logSistem('error', 'syncSelfiePhotosToGDrive', 'error', err.message || String(err)) } catch (_) {}
+    throw err
   }
+}
 
-  // Query embed: user_profiles(full_name, staff_id) + branches(name, slug)
-  // Backward: pickup_points(code) tetap di-fetch supaya kalau branch/staff kosong bisa fallback
-  const rows = callSupabase(
-    'raos_attendance?select=id,date,staff_id,branch_id,selfie_in_url,selfie_out_url,selfie_in_drive_synced,selfie_out_drive_synced,' +
-      'user_profiles!raos_attendance_staff_id_fkey(full_name,staff_id),' +
-      'branches!raos_attendance_branch_id_fkey(name,slug),' +
-      'pickup_points(code)' +
-    '&or=(and(selfie_in_url.not.is.null,selfie_in_drive_synced.eq.false),and(selfie_out_url.not.is.null,selfie_out_drive_synced.eq.false))' +
-    '&limit=50'
-  )
-
-  if (!rows || !rows.length) {
-    logSistem('sync', 'syncSelfiePhotosToGDrive', 'success', 'Tidak ada foto baru untuk disync')
-    return
+function backupHarian() {
+  try {
+    const file = raosCanonicalBackupActiveSpreadsheet_(new Date())
+    try { logSistem('backup', 'backupHarian', 'success', `Backup canonical: ${file.getName()} (${file.getId()})`) } catch (_) {}
+    return { success: true, file_id: file.getId(), file_name: file.getName(), url: file.getUrl() }
+  } catch (err) {
+    try { logSistem('backup', 'backupHarian', 'error', err.message || String(err)) } catch (_) {}
+    throw err
   }
-
-  let synced = 0, errors = 0
-
-  rows.forEach(row => {
-    try {
-      const folder = getStructuredAttendanceFolder(row)
-
-      if (row.selfie_in_url && !row.selfie_in_drive_synced) {
-        copySelfieToDrive(row.selfie_in_url, folder, `${row.date}_${row.id}_masuk.jpg`)
-        callSupabase(`raos_attendance?id=eq.${row.id}`, 'PATCH', { selfie_in_drive_synced: true })
-        synced++
-      }
-      if (row.selfie_out_url && !row.selfie_out_drive_synced) {
-        copySelfieToDrive(row.selfie_out_url, folder, `${row.date}_${row.id}_pulang.jpg`)
-        callSupabase(`raos_attendance?id=eq.${row.id}`, 'PATCH', { selfie_out_drive_synced: true })
-        synced++
-      }
-    } catch (e) {
-      errors++
-      logSistem('error', 'syncSelfiePhotosToGDrive', 'error', `attendance.id=${row.id}: ${e.message}`)
-    }
-  })
-
-  logSistem('sync', 'syncSelfiePhotosToGDrive', 'success', `${synced} foto disync (struktur baru Bulan/Cabang/Nama), ${errors} error`)
 }
 
-/** Unduh file dari Supabase Storage lalu simpan ke folder Drive tujuan. */
-function copySelfieToDrive(storagePath, folder, fileName) {
-  const url = `${CONFIG.SUPABASE_URL}/storage/v1/object/selfies/${storagePath}`
-  const res = UrlFetchApp.fetch(url, {
-    headers: {
-      'apikey': CONFIG.SUPABASE_KEY,
-      'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`,
-    },
-    muteHttpExceptions: true,
-  })
-  if (res.getResponseCode() >= 400) {
-    throw new Error(`Gagal unduh foto dari storage (${res.getResponseCode()}): ${storagePath}`)
-  }
-  folder.createFile(res.getBlob().setName(fileName))
-}
-
-/**
- * Struktur BARU: root/[Bulan YYYY-MM Nama]/[Cabang]/[Nama Staff (RIF****)]/
- * Fallback per level kalau data hilang:
- *   - Bulan wajib (dari date)
- *   - Cabang: branches.name -> fallback pickup_points.code -> 'Lainnya'
- *   - Staff:  user_profiles.full_name + (staff_id) -> fallback 'staff-unknown-<id>'
- */
-function getStructuredAttendanceFolder(row) {
-  const root = DriveApp.getFolderById(CONFIG.DRIVE.ABSENSI_PHOTOS_ROOT_ID)
-
-  const d = new Date(row.date)
-  const monthFolderName = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')} ${MONTH_NAMES_ID[d.getMonth()]}`
-  const monthFolder = getOrCreateSubfolder(root, monthFolderName)
-
-  let cabangName = null
-  if (row.branches && row.branches.name) cabangName = String(row.branches.name).trim()
-  else if (row.pickup_points && row.pickup_points.code) cabangName = mapPickupPointCodeToFolderName(row.pickup_points.code)
-  if (!cabangName) cabangName = 'Lainnya'
-  cabangName = sanitizeFolderName(cabangName)
-  const cabangFolder = getOrCreateSubfolder(monthFolder, cabangName)
-
-  let staffName = null
-  if (row.user_profiles && row.user_profiles.full_name) {
-    const fn = String(row.user_profiles.full_name).trim()
-    const code = row.user_profiles.staff_id ? String(row.user_profiles.staff_id).trim().toUpperCase() : ''
-    staffName = code ? `${fn} (${code})` : fn
-  }
-  if (!staffName) staffName = `staff-unknown-${(row.staff_id || 'no-id').substring(0, 8)}`
-  staffName = sanitizeFolderName(staffName)
-  return getOrCreateSubfolder(cabangFolder, staffName)
-}
-
-function sanitizeFolderName(name) {
-  return String(name).replace(/[<>:"/\\|?*]/g, ' ').replace(/\s+/g, ' ').trim() || 'Lainnya'
-}
-
-/** "T1.PP2" -> "T1 - Pickup Point 2". Fallback ke null kalau kode tidak dikenal. */
-function mapPickupPointCodeToFolderName(code) {
-  if (!code) return null
-  const match = code.match(/^(T\d)\.PP(\d)$/)
-  if (!match) return null
-  return `${match[1]} - Pickup Point ${match[2]}`
-}
-
-function getOrCreateSubfolder(parentFolder, name) {
-  const existing = parentFolder.getFoldersByName(name)
-  if (existing.hasNext()) return existing.next()
-  return parentFolder.createFolder(name)
+// Compatibility helper untuk caller lama. V4 mengembalikan subfolder di bawah
+// canonical root, bukan root legacy yang diberikan caller.
+function getOrCreateSubfolder(parent, name) {
+  return raosCanonicalGetOrCreateFolder_(parent, name)
 }

@@ -7,6 +7,9 @@ import AppShell from '@/components/layout/AppShell'
 import { ArrowLeft, CheckCircle2, Clock, XCircle } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
+import { can } from '@/lib/accessPolicy'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 
 type RangeKey = 'today' | '7d' | '30d'
 
@@ -22,6 +25,7 @@ export default function StatusPage() {
   const [range, setRange] = useState<RangeKey>('today')
   const [counts, setCounts] = useState({ valid: 0, pending: 0, rejected: 0 })
   const [loading, setLoading] = useState(true)
+  const [refreshNonce,setRefreshNonce]=useState(0)
 
   useEffect(() => {
     async function load() {
@@ -35,8 +39,11 @@ export default function StatusPage() {
         .eq('id', session.user.id)
         .single()
       setUser(profile)
+      const cacheKey=['status',session.user.id,profile?.role,profile?.branch_id,range] as const
+      const cached=cacheReadSync<{valid:number;pending:number;rejected:number}>(cacheKey,10*60*1000)
+      if(cached){setCounts(cached);setLoading(false)}
 
-      const isAdmin = profile && ['koordinator', 'admin', 'management', 'direksi'].includes(profile.role)
+      const isBranchReader = profile && can(profile.role,'history:branch:read')
 
       const since = new Date()
       if (range === 'today') since.setHours(0, 0, 0, 0)
@@ -48,19 +55,23 @@ export default function StatusPage() {
         .select('status')
         .gte('scanned_at', since.toISOString())
 
-      if (!isAdmin) query = query.eq('staff_id', session.user.id)
+      if (!isBranchReader) query = query.eq('staff_id', session.user.id)
 
       const { data: scans } = await query
 
-      setCounts({
+      const fresh={
         valid: scans?.filter(s => s.status === 'valid').length ?? 0,
         pending: scans?.filter(s => s.status === 'pending').length ?? 0,
         rejected: scans?.filter(s => s.status === 'rejected').length ?? 0,
-      })
+      }
+      setCounts(fresh)
+      cacheWriteSync(cacheKey,fresh)
       setLoading(false)
     }
     load()
-  }, [router, range])
+  }, [router, range, refreshNonce])
+
+  useRealtimeRefresh(`status-${user?.id ?? 'anon'}`,[{table:'scan_orders'}],()=>setRefreshNonce(n=>n+1),300,!!user?.id)
 
   const total = counts.valid + counts.pending + counts.rejected
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0)
@@ -76,7 +87,7 @@ export default function StatusPage() {
 
   return (
     <AppShell>
-      <div className="bg-secondary text-white px-4 pt-10 pb-4">
+      <div className="bg-secondary text-white px-4 pt-10 pb-4 sticky top-0 z-30">
         <div className="flex items-center gap-3 mb-4">
           <Link href="/dashboard"><ArrowLeft size={22} /></Link>
           <h1 className="font-bold text-base">Status Validasi</h1>

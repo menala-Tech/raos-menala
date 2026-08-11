@@ -4,7 +4,7 @@ import { MessageCircle } from 'lucide-react'
 import clsx from 'clsx'
 import type { ChatRoomWithMeta } from '@/types'
 import WorkspaceListItem from './WorkspaceListItem'
-import { matchesFilter, type FilterTab } from './types'
+import { formatRoomPreview, matchesFilter, type FilterTab } from './types'
 
 interface Props {
   rooms: ChatRoomWithMeta[]
@@ -20,7 +20,12 @@ export default function WorkspaceList({ rooms, filterTab, onFilterChange, search
   const q = searchQuery.trim().toLowerCase()
   const filtered = rooms
     .filter(r => matchesFilter(r, filterTab))
-    .filter(r => !q || r.name.toLowerCase().includes(q) || (r.last_message_content ?? '').toLowerCase().includes(q))
+    .filter(r => {
+      if (!q) return true
+      const roomName = String(r.name ?? '').toLowerCase()
+      const preview = formatRoomPreview(r.last_message_content, r.last_message_sender, r.description).toLowerCase()
+      return roomName.includes(q) || preview.includes(q)
+    })
 
   return (
     <>

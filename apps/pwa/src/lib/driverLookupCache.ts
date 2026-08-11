@@ -14,70 +14,74 @@ interface DriverCacheEnvelope {
   drivers: CachedDriverLookup[]
 }
 
-const CACHE_PREFIX = 'raos_driver_lookup_cache_v2:'
+const CACHE_KEY = 'raos_driver_lookup_cache_v1'
 const CACHE_TTL_MS = 30 * 60 * 1000
 const MAX_STALE_MS = 24 * 60 * 60 * 1000
 
 let memory: DriverCacheEnvelope | null = null
-let memoryScope: string | null = null
 let refreshPromise: Promise<CachedDriverLookup[]> | null = null
-
-async function getScopeId(): Promise<string> {
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.user?.id) throw new Error('driver_cache_session_missing')
-  return session.user.id
-}
-
-function cacheKey(scopeId: string): string {
-  return CACHE_PREFIX + scopeId
-}
 
 function normalizeId(value: string): string {
   return value.trim().toUpperCase()
 }
 
-function loadEnvelope(scopeId: string): DriverCacheEnvelope | null {
-  if (memory && memoryScope === scopeId) return memory
+function loadEnvelope(): DriverCacheEnvelope | null {
+  if (memory) return memory
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(cacheKey(scopeId))
+    const raw = window.localStorage.getItem(CACHE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as DriverCacheEnvelope
     if (parsed?.version !== 1 || !Array.isArray(parsed.drivers) || !parsed.storedAt) return null
-    if (Date.now() - parsed.storedAt > MAX_STALE_MS) {
-      window.localStorage.removeItem(cacheKey(scopeId))
-      return null
-    }
+    if (Date.now() - parsed.storedAt > MAX_STALE_MS) return null
     memory = parsed
-    memoryScope = scopeId
     return parsed
   } catch {
     return null
   }
 }
 
-function saveEnvelope(scopeId: string, drivers: CachedDriverLookup[]): void {
-  const next: DriverCacheEnvelope = { version: 1, storedAt: Date.now(), drivers }
+function saveEnvelope(drivers: CachedDriverLookup[]): void {
+  const next: DriverCacheEnvelope = {
+    version: 1,
+    storedAt: Date.now(),
+    drivers,
+  }
   memory = next
-  memoryScope = scopeId
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(cacheKey(scopeId), JSON.stringify(next))
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(next))
   } catch {
-    // localStorage full/private mode: memory cache tetap bekerja.
+    // Ignore storage quota/private mode; memory cache still helps this session.
   }
 }
 
-function findDriverInEnvelope(scopeId: string, driverLoginId: string): CachedDriverLookup | null {
-  const q = normalizeId(driverLoginId)
-  if (!q) return null
-  const envelope = loadEnvelope(scopeId)
-  if (!envelope) return null
-  return envelope.drivers.find(d => normalizeId(d.driver_id) === q) ?? null
+function mapDriverRow(row: {
+  id: string
+  driver_id: string
+  name: string
+  branch_id: string | null
+  branches?: { name?: string | null } | null
+}): CachedDriverLookup {
+  return {
+    id: row.id,
+    driver_id: row.driver_id,
+    name: row.name,
+    branch_id: row.branch_id,
+    branch_name: row.branches?.name ?? null,
+  }
 }
 
-function isEnvelopeFresh(scopeId: string): boolean {
-  const envelope = loadEnvelope(scopeId)
+export function findDriverInCache(driverLoginId: string): CachedDriverLookup | null {
+  const q = normalizeId(driverLoginId)
+  if (!q) return null
+  const envelope = loadEnvelope()
+  if (!envelope) return null
+  return envelope.drivers.find(driver => normalizeId(driver.driver_id) === q) ?? null
+}
+
+export function isDriverCacheFresh(): boolean {
+  const envelope = loadEnvelope()
   return !!envelope && Date.now() - envelope.storedAt <= CACHE_TTL_MS
 }
 
@@ -85,36 +89,30 @@ export async function fetchDriverDirect(driverLoginId: string): Promise<CachedDr
   const q = normalizeId(driverLoginId)
   if (!q) return null
 
-  const qEsc = q.replace(/[,()\"]/g, '')
   const { data, error } = await supabase
     .from('raos_drivers')
     .select('id, driver_id, name, branch_id, branches(name)')
     .eq('is_active', true)
-    .or(`driver_id.eq.${qEsc},driver_id.ilike.${qEsc}`)
+    .eq('driver_id', q)
     .limit(1)
     .maybeSingle()
 
   if (error) throw error
   if (!data) return null
 
-  const branchRel = (data as unknown as { branches?: { name?: string | null } | null }).branches
-  return {
-    id: data.id,
-    driver_id: data.driver_id,
-    name: data.name,
-    branch_id: data.branch_id,
-    branch_name: branchRel?.name ?? null,
-  }
+  return mapDriverRow(data as {
+    id: string
+    driver_id: string
+    name: string
+    branch_id: string | null
+    branches?: { name?: string | null } | null
+  })
 }
 
-/**
- * Warm cache per Supabase user. Data tetap dibatasi RLS sehingga cache tidak
- * pernah memperluas scope cabang/role. Key localStorage memakai user id agar
- * data user sebelumnya tidak bocor ke sesi berikutnya pada device bersama.
- */
 export async function refreshDriverCache(force = false): Promise<CachedDriverLookup[]> {
-  const scopeId = await getScopeId()
-  if (!force && isEnvelopeFresh(scopeId)) return loadEnvelope(scopeId)?.drivers ?? []
+  if (!force && isDriverCacheFresh()) {
+    return loadEnvelope()?.drivers ?? []
+  }
   if (refreshPromise) return refreshPromise
 
   refreshPromise = (async () => {
@@ -126,18 +124,17 @@ export async function refreshDriverCache(force = false): Promise<CachedDriverLoo
 
     if (error) throw error
 
-    const drivers: CachedDriverLookup[] = (data ?? []).map(row => {
-      const branchRel = (row as unknown as { branches?: { name?: string | null } | null }).branches
-      return {
-        id: row.id,
-        driver_id: row.driver_id,
-        name: row.name,
-        branch_id: row.branch_id,
-        branch_name: branchRel?.name ?? null,
-      }
-    })
+    const drivers = (data ?? []).map(row =>
+      mapDriverRow(row as {
+        id: string
+        driver_id: string
+        name: string
+        branch_id: string | null
+        branches?: { name?: string | null } | null
+      }),
+    )
 
-    saveEnvelope(scopeId, drivers)
+    saveEnvelope(drivers)
     return drivers
   })()
 
@@ -152,10 +149,11 @@ export async function lookupDriverCached(driverLoginId: string): Promise<{
   driver: CachedDriverLookup | null
   source: 'cache' | 'network'
 }> {
-  const scopeId = await getScopeId()
-  const cached = findDriverInEnvelope(scopeId, driverLoginId)
+  const cached = findDriverInCache(driverLoginId)
   if (cached) {
-    if (!isEnvelopeFresh(scopeId)) void refreshDriverCache(true).catch(() => {})
+    if (!isDriverCacheFresh()) {
+      void refreshDriverCache(true).catch(() => {})
+    }
     return { driver: cached, source: 'cache' }
   }
 
@@ -170,21 +168,10 @@ export function primeDriverCache(): void {
   })
 }
 
-export async function clearDriverLookupCache(): Promise<void> {
+export function clearDriverLookupCache(): void {
   memory = null
-  memoryScope = null
   if (typeof window === 'undefined') return
   try {
-    const scopeId = await getScopeId()
-    window.localStorage.removeItem(cacheKey(scopeId))
-  } catch {
-    try {
-      const keys: string[] = []
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const key = window.localStorage.key(i)
-        if (key?.startsWith(CACHE_PREFIX)) keys.push(key)
-      }
-      keys.forEach(key => window.localStorage.removeItem(key))
-    } catch {}
-  }
+    window.localStorage.removeItem(CACHE_KEY)
+  } catch {}
 }

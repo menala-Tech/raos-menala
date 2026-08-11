@@ -15,9 +15,17 @@ export default function SelfieCapture({ onCapture }: Props) {
   const [error, setError] = useState('')
 
   const startCamera = useCallback(async () => {
+    setError('')
     try {
+      streamRef.current?.getTracks().forEach(t => t.stop())
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 480, height: 480 },
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 720 },
+          height: { ideal: 1280 },
+          aspectRatio: { ideal: 9 / 16 },
+        },
+        audio: false,
       })
       streamRef.current = stream
       if (videoRef.current) {
@@ -25,13 +33,11 @@ export default function SelfieCapture({ onCapture }: Props) {
         await videoRef.current.play()
       }
     } catch {
-      setError('Tidak bisa mengakses kamera depan. Periksa izin kamera.')
+      setError('Tidak bisa mengakses kamera belakang. Periksa izin kamera lalu coba lagi.')
     }
   }, [])
 
   useEffect(() => {
-    // Koneksi ke sistem eksternal (kamera) — pola resmi React docs untuk effect.
-     
     startCamera()
     return () => {
       streamRef.current?.getTracks().forEach(t => t.stop())
@@ -41,15 +47,14 @@ export default function SelfieCapture({ onCapture }: Props) {
   function takePhoto() {
     const video = videoRef.current
     const canvas = canvasRef.current
-    if (!video || !canvas) return
+    if (!video || !canvas || !video.videoWidth || !video.videoHeight) return
 
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.translate(canvas.width, 0)
-    ctx.scale(-1, 1)
-    ctx.drawImage(video, 0, 0)
+    // Kamera belakang tidak dimirror. Foto disimpan sesuai orientasi sensor/video.
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
     setCaptured(dataUrl)
@@ -67,28 +72,36 @@ export default function SelfieCapture({ onCapture }: Props) {
 
   if (error) {
     return (
-      <div className="bg-gray-900 rounded-xl h-64 flex flex-col items-center justify-center gap-2 px-4">
+      <div className="bg-gray-900 rounded-xl min-h-[28rem] flex flex-col items-center justify-center gap-2 px-4">
         <AlertCircle size={32} className="text-red-400" />
         <p className="text-white/70 text-xs text-center">{error}</p>
+        <button type="button" onClick={startCamera} className="btn-secondary mt-2">
+          Coba Kamera Lagi
+        </button>
       </div>
     )
   }
 
   return (
     <div className="space-y-3">
-      <div className="bg-gray-900 rounded-xl overflow-hidden relative h-64 flex items-center justify-center">
+      <div className="bg-gray-900 rounded-xl overflow-hidden relative min-h-[28rem] max-h-[70vh] aspect-[9/16] mx-auto flex items-center justify-center">
         {captured ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={captured} alt="Selfie" className="w-full h-full object-cover" />
+          <img src={captured} alt="Foto full body absensi" className="w-full h-full object-cover" />
         ) : (
           <video
             ref={videoRef}
             playsInline
             muted
-            className="w-full h-full object-cover -scale-x-100"
+            className="w-full h-full object-cover"
           />
         )}
         <canvas ref={canvasRef} className="hidden" />
+        {!captured && (
+          <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-black/55 px-3 py-2 text-center text-xs text-white">
+            Gunakan kamera belakang dan pastikan badan terlihat penuh di dalam frame.
+          </div>
+        )}
       </div>
 
       {!captured ? (
@@ -98,7 +111,7 @@ export default function SelfieCapture({ onCapture }: Props) {
           className="btn-primary flex items-center justify-center gap-2"
         >
           <Camera size={18} />
-          Ambil Foto
+          Ambil Foto Full Body
         </button>
       ) : (
         <button

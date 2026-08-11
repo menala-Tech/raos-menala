@@ -283,8 +283,7 @@ p_branch_id: r.branch.id,
 `Menunggu: ${minutes} menit`,
 '',
 'Mohon segera proses pengisian saldo di AIST melalui Finance RIFIM OS.',
-        ].join('
-')
+        ].join('\n')
 
         callSupabase('rpc/raos_post_system_message', 'POST', {
 p_room_id: roomId,

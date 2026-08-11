@@ -59,8 +59,10 @@ const withPWA = require('@ducanh2912/next-pwa').default({
           cacheableResponse: { statuses: [0, 200] },
         },
       },
-      // ─── Supabase REST/Auth GET — NetworkOnly (data operasional + RLS
-      // sensitive, JANGAN cache — cegah leak antar user + stale data).
+      // ─── Supabase REST/Auth GET tetap NetworkOnly di Workbox.
+      // Offline READ operasional ditangani client cache per-user di
+      // src/lib/offlineReadCache.ts. Ini mencegah response RLS user A
+      // tersimpan pada cache key URL global lalu terbaca user B.
       {
         urlPattern: /^https:\/\/vlievtojpmrbsmzlqswl\.supabase\.co\/.*/,
         handler: 'NetworkOnly',
@@ -95,9 +97,23 @@ const withPWA = require('@ducanh2912/next-pwa').default({
           expiration: { maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 },
         },
       },
-      // ─── HTML pages (document navigation) — NetworkFirst dengan
-      // network timeout 3s. Kalau offline, serve cached HTML terakhir.
-      // Kalau tidak ada cache, fallback ke /offline (via fallbacks.document).
+      // ─── Poin A FASE 3: shell halaman operasional utama CacheFirst.
+      // Data dinamisnya tetap refresh dari network saat online dan fallback
+      // ke client cache per-user saat offline.
+      {
+        urlPattern: ({ request, url }) =>
+          request.destination === 'document' &&
+          /^\/(dashboard|riwayat|chat)(?:\/|$)/.test(url.pathname),
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'offline-core-pages',
+          expiration: { maxEntries: 12, maxAgeSeconds: 30 * 24 * 60 * 60 },
+          cacheableResponse: { statuses: [0, 200] },
+        },
+      },
+      // ─── HTML pages lain — NetworkFirst dengan network timeout 3s.
+      // Kalau offline, serve cached HTML terakhir. Kalau tidak ada cache,
+      // fallback ke /offline (via fallbacks.document).
       {
         urlPattern: ({ request }) => request.destination === 'document',
         handler: 'NetworkFirst',

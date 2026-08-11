@@ -24,7 +24,7 @@ const HOME: Partial<Record<Role,string>> = { driver:'/driver-workspace' }
 const PUBLIC = new Set(['/','/reset-password'])
 
 export const ROLE_ROUTES: Readonly<Record<Role, readonly string[]>> = {
-  staff: ['/dashboard','/scan','/absensi','/riwayat','/status','/antrian-driver','/drivers','/kpi','/chat','/settings','/notifications'],
+  staff: ['/dashboard','/scan','/absensi','/riwayat','/status','/antrian-driver','/drivers','/kpi','/documents','/chat','/settings','/notifications'],
   koordinator: ['/dashboard','/riwayat','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   admin: ['*'],
   management: ['/dashboard','/riwayat','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],

@@ -8,6 +8,7 @@ export interface RoomPrefs { notif: boolean; pinned: boolean }
 
 export const DEFAULT_ROOM_PREFS: RoomPrefs = { notif: true, pinned: false }
 export const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
+export const PIN_ROLES = ['admin', 'management', 'koordinator', 'direksi']
 export const GRUP_CATEGORIES = ['umum', 'operasional', 'driver_support', 'proyek']
 export const NON_DEFAULT_CATEGORIES = ['pribadi', 'proyek']
 

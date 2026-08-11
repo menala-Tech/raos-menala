@@ -34,8 +34,8 @@ export default function SaldoRequestCard({raw,onUpdated}:Props){
   const [branchTimeZone,setBranchTimeZone]=useState<string|null>(null)
   const [liveError,setLiveError]=useState('')
   const onUpdatedRef=useRef(onUpdated)
-  onUpdatedRef.current=onUpdated
 
+  useEffect(()=>{onUpdatedRef.current=onUpdated},[onUpdated])
   useEffect(()=>{setLiveData(data);setLiveError('')},[data])
 
   const refresh=useCallback(async()=>{

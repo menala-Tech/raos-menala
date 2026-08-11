@@ -38,6 +38,8 @@ export default function WorkspaceInfoSheet({
   const style = getRoomStyle(room.category)
   const catLabel = CATEGORY_LABELS[room.category] ?? room.category
   const canLeave = NON_DEFAULT_CATEGORIES.includes(room.category)
+  const roomName = String(room.name ?? '').trim() || 'Workspace'
+  const roomInitial = roomName.charAt(0)
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col justify-end" onClick={onClose}>
@@ -54,9 +56,9 @@ export default function WorkspaceInfoSheet({
             </div>
             <div className="flex flex-col items-center mb-6">
               <div className={`w-20 h-20 rounded-full flex items-center justify-center font-black text-3xl shadow-md mb-3 ${style.bg} ${style.text}`}>
-                {room.name.charAt(0)}
+                {roomInitial}
               </div>
-              <p className="font-black text-gray-900 text-lg text-center">{room.name}</p>
+              <p className="font-black text-gray-900 text-lg text-center">{roomName}</p>
               <span className={`mt-1.5 px-3 py-0.5 rounded-full text-xs font-semibold ${style.lightBg}`}>{catLabel}</span>
             </div>
             {room.description && (
@@ -132,10 +134,10 @@ export default function WorkspaceInfoSheet({
             </div>
             <div className="flex items-center gap-3 bg-gray-50 rounded-2xl px-4 py-3 mb-5">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-sm flex-shrink-0 ${style.bg} ${style.text}`}>
-                {room.name.charAt(0)}
+                {roomInitial}
               </div>
               <div>
-                <p className="font-bold text-sm text-gray-800">{room.name}</p>
+                <p className="font-bold text-sm text-gray-800">{roomName}</p>
                 <p className="text-[10px] text-gray-400 capitalize">{catLabel}</p>
               </div>
             </div>

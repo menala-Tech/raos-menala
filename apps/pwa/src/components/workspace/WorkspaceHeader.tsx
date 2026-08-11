@@ -16,6 +16,7 @@ interface Props {
 export default function WorkspaceHeader({ room, prefs, onBack, onOpenInfo, onOpenSettings }: Props) {
   const style = getRoomStyle(room.category)
   const catLabel = CATEGORY_LABELS[room.category] ?? room.category
+  const roomName = String(room.name ?? '').trim() || 'Workspace'
 
   return (
     <div className="bg-secondary text-white px-4 pt-10 pb-3 flex items-center gap-3 flex-shrink-0">
@@ -30,7 +31,7 @@ export default function WorkspaceHeader({ room, prefs, onBack, onOpenInfo, onOpe
         {style.label}
       </button>
       <button onClick={onOpenInfo} className="flex-1 min-w-0 text-left">
-        <p className="font-bold text-sm truncate">{room.name}</p>
+        <p className="font-bold text-sm truncate">{roomName}</p>
         <p className="text-white/40 text-xs capitalize">{catLabel}</p>
       </button>
       <button

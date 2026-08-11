@@ -3,7 +3,7 @@
 import { BellOff, Pin } from 'lucide-react'
 import clsx from 'clsx'
 import type { ChatRoomWithMeta } from '@/types'
-import { formatTime, getRoomPrefs, getRoomStyle } from './types'
+import { formatRoomPreview, formatTime, getRoomPrefs, getRoomStyle } from './types'
 
 interface Props {
   room: ChatRoomWithMeta
@@ -13,15 +13,14 @@ interface Props {
 export default function WorkspaceListItem({ room, onOpen }: Props) {
   const style = getRoomStyle(room.category)
   const prefs = getRoomPrefs(room.id)
-  const preview = room.last_message_content
-    ? (room.last_message_sender ? `${room.last_message_sender}: ${room.last_message_content}` : room.last_message_content)
-    : (room.description ?? 'Belum ada pesan')
+  const roomName = String(room.name ?? '').trim() || 'Workspace'
+  const preview = formatRoomPreview(room.last_message_content, room.last_message_sender, room.description)
 
   return (
     <button onClick={onOpen}
       className="card w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform">
       <div className={`w-11 h-11 rounded-full flex items-center justify-center font-black text-base flex-shrink-0 shadow-sm ${style.bg} ${style.text}`}>
-        {room.name.charAt(0)}
+        {roomName.charAt(0)}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
@@ -29,7 +28,7 @@ export default function WorkspaceListItem({ room, onOpen }: Props) {
             {prefs.pinned && <Pin size={10} className="text-primary flex-shrink-0" />}
             {!prefs.notif && <BellOff size={10} className="text-gray-300 flex-shrink-0" />}
             <p className={clsx('font-bold text-sm truncate', room.unread_count > 0 ? 'text-gray-900' : 'text-gray-800')}>
-              {room.name}
+              {roomName}
             </p>
           </div>
           <span className={clsx('text-[10px] flex-shrink-0', room.unread_count > 0 ? 'text-primary font-bold' : 'text-gray-400')}>

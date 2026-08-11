@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
@@ -544,6 +544,13 @@ function SectionLokasi({ user, prefs, save }: {
   const [branches, setBranches] = useState<Branch[]>([])
   const [points, setPoints] = useState<PickupPoint[]>([])
   const [activeBranch, setActiveBranch] = useState<string | null>(null)
+  const isStaffBranchLocked = user?.role === 'staff' && !!user?.branch_id
+  const lockedBranch = useMemo(() => {
+    if (!user?.branch_id) return null
+    return branches.find(branch => branch.id === user.branch_id)
+      ?? branches.find(branch => branch.code === user.branches?.code)
+      ?? null
+  }, [branches, user])
 
   useEffect(() => {
     async function load() {
@@ -553,45 +560,64 @@ function SectionLokasi({ user, prefs, save }: {
       ])
       setBranches(br ?? [])
       setPoints(pp ?? [])
-      // Default: branch user, atau branch pertama
-      setActiveBranch(user?.branch_id ?? br?.[0]?.id ?? null)
+      const nextLocked = (br ?? []).find(branch => branch.id === user?.branch_id)
+        ?? (br ?? []).find(branch => branch.code === user?.branches?.code)
+        ?? null
+      setActiveBranch(nextLocked?.id ?? user?.branch_id ?? br?.[0]?.id ?? null)
     }
     load()
   }, [user])
 
-  const branchPoints = points.filter(p => p.branch_id === activeBranch)
+  useEffect(() => {
+    if (isStaffBranchLocked && lockedBranch && activeBranch !== lockedBranch.id) {
+      setActiveBranch(lockedBranch.id)
+    }
+  }, [activeBranch, isStaffBranchLocked, lockedBranch])
+
+  const scopedBranches = isStaffBranchLocked && lockedBranch ? [lockedBranch] : branches
+  const activeBranchData = branches.find(branch => branch.id === activeBranch) ?? lockedBranch ?? null
+  const branchPoints = points.filter(point => point.branch_id === activeBranch)
 
   return (
     <div className="space-y-3">
       <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="text-sm font-bold text-gray-800">Bandara Soekarno-Hatta</p>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-gray-800 truncate">{activeBranchData?.name ?? 'Lokasi Operasional'}</p>
             <p className="text-xs text-gray-400">Lokasi aktif operasional</p>
           </div>
-          <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full">Aktif</span>
+          <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0">Aktif</span>
         </div>
 
         {/* Terminal tabs */}
         <p className="text-xs text-gray-500 font-medium mb-2">Terminal</p>
-        <div className="flex gap-2 mb-4">
-          {branches.map(b => (
-            <button
-              key={b.id}
-              onClick={() => setActiveBranch(b.id)}
-              className={clsx(
-                'flex-1 py-2 rounded-xl text-sm font-bold transition-colors',
-                activeBranch === b.id ? 'bg-primary text-secondary' : 'bg-gray-100 text-gray-500'
-              )}
-            >
-              {b.code}
-            </button>
-          ))}
+        <div className="mb-4 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex w-max min-w-full gap-2">
+            {scopedBranches.map(b => (
+              <button
+                key={b.id}
+                onClick={() => setActiveBranch(b.id)}
+                disabled={isStaffBranchLocked && b.id !== lockedBranch?.id}
+                className={clsx(
+                  'flex-none min-w-[72px] px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors',
+                  activeBranch === b.id ? 'bg-primary text-secondary' : 'bg-gray-100 text-gray-500',
+                  isStaffBranchLocked && b.id !== lockedBranch?.id && 'opacity-40 cursor-not-allowed'
+                )}
+              >
+                {b.code}
+              </button>
+            ))}
+          </div>
         </div>
+        {isStaffBranchLocked && lockedBranch && (
+          <p className="mb-4 text-[11px] text-gray-400">
+            Terminal staff terkunci ke cabang profil: <span className="font-semibold text-gray-600">{lockedBranch.code}</span>.
+          </p>
+        )}
 
         {/* Pickup points radio */}
         <p className="text-xs text-gray-500 font-medium mb-2">
-          Pickup Point — {branches.find(b => b.id === activeBranch)?.name ?? ''}
+          Pickup Point â€” {branches.find(b => b.id === activeBranch)?.name ?? ''}
         </p>
         <div className="space-y-2">
           {branchPoints.length === 0 && (
@@ -602,23 +628,10 @@ function SectionLokasi({ user, prefs, save }: {
             return (
               <button
                 key={p.id}
-                onClick={async () => {
+                onClick={() => {
+                  // Pickup point is a local UI preference only. Branch identity is canonical
+                  // master data and must never be self-mutated from Settings.
                   save({ ...prefs, pickupPointId: p.id })
-                  // Sinkronkan branch_id user_profiles ke branch pickup point
-                  // supaya header dashboard + scan + absensi otomatis tampil
-                  // Terminal yang benar (tidak stuck di T1 lama).
-                  // Policy user_profiles_update_own memungkinkan user update
-                  // baris sendiri, trigger prevent_self_privilege_escalation
-                  // tidak blokir branch_id (hanya role/is_active).
-                  if (user && user.branch_id !== p.branch_id) {
-                    await supabase.from('user_profiles')
-                      .update({ branch_id: p.branch_id })
-                      .eq('id', user.id)
-                    // Reload halaman supaya user prop di parent refresh
-                    // (tidak elegan, tapi paling reliable — parent tidak
-                    // subscribe realtime user_profiles).
-                    window.location.reload()
-                  }
                 }}
                 className={clsx(
                   'w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors text-left',
@@ -631,11 +644,11 @@ function SectionLokasi({ user, prefs, save }: {
                 )}>
                   {selected && <div className="w-2 h-2 rounded-full bg-primary" />}
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-800">{p.name}</p>
                   <p className="text-[10px] text-gray-400">Radius validasi: {p.radius_meters}m</p>
                 </div>
-                <span className="bg-green-100 text-green-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                <span className="bg-green-100 text-green-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
                   Aktif
                 </span>
               </button>
@@ -645,8 +658,8 @@ function SectionLokasi({ user, prefs, save }: {
       </div>
 
       <p className="text-[10px] text-gray-400 px-1">
-        Pickup point pilihan dipakai sebagai preferensi tampilan. Validasi absensi &amp; scan tetap
-        otomatis mendeteksi pickup point terdekat via GPS geo-fence.
+        Pickup point pilihan dipakai sebagai preferensi tampilan lokal. Validasi absensi &amp; scan tetap
+        otomatis mendeteksi pickup point terdekat via GPS geo-fence dan tidak mengubah terminal/branch akun.
       </p>
     </div>
   )

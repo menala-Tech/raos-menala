@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatMessageReaction, ChatPoll, ChatPollVote, ChatRoom, ChatRoomWithMeta, UserProfile } from '@/types'
+import { parseActionCard } from '@/lib/actionCardParser'
 
 export type FilterTab = 'semua' | 'grup' | 'lokasi' | 'pribadi'
 export type RoomSheet = 'none' | 'info' | 'settings'
@@ -7,7 +8,6 @@ export interface RoomPrefs { notif: boolean; pinned: boolean }
 
 export const DEFAULT_ROOM_PREFS: RoomPrefs = { notif: true, pinned: false }
 export const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
-export const PIN_ROLES = ['admin', 'management', 'koordinator', 'direksi']
 export const GRUP_CATEGORIES = ['umum', 'operasional', 'driver_support', 'proyek']
 export const NON_DEFAULT_CATEGORIES = ['pribadi', 'proyek']
 
@@ -89,6 +89,103 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function stripSystemMeta(content: string): string {
+  return content.replace(/<!--SYSMETA:[\s\S]*?-->/g, '').trim()
+}
+
+function looksLikeLocationPayload(content: string): boolean {
+  return /"lat"\s*:/.test(content) && /"lng"\s*:/.test(content)
+}
+
+function looksLikeStructuredPayload(content: string): boolean {
+  return (
+    content.startsWith('{') ||
+    content.startsWith('[') ||
+    content.startsWith('<!--')
+  )
+}
+
+function tryParseJsonObject(content: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(content)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function withSender(sender: string | null | undefined, label: string): string {
+  return sender ? `${sender}: ${label}` : label
+}
+
+function formatStructuredPreview(content: string, sender: string | null | undefined): string | null {
+  const actionCard = parseActionCard(content)
+  if (actionCard?.kind === 'queue') {
+    const status = typeof actionCard.status === 'string' ? actionCard.status : 'pending'
+    return withSender(sender, `Antrian driver (${status})`)
+  }
+  if (actionCard?.kind === 'driver') {
+    const status = typeof actionCard.status === 'string' ? actionCard.status : 'pending'
+    return withSender(sender, `Data driver (${status})`)
+  }
+
+  const parsed = tryParseJsonObject(content)
+  if (!parsed) return null
+
+  if ('lat' in parsed && 'lng' in parsed) {
+    return withSender(sender, 'Lokasi Saat Ini')
+  }
+
+  if ('request_no' in parsed && 'nominal' in parsed) {
+    const requestNo = typeof parsed.request_no === 'string' ? parsed.request_no : 'Request saldo'
+    const nominal = typeof parsed.nominal === 'number'
+      ? ` Rp${parsed.nominal.toLocaleString('id-ID')}`
+      : ''
+    return withSender(sender, `${requestNo}${nominal}`.trim())
+  }
+
+  if ('event' in parsed && 'driver_name' in parsed) {
+    const event = typeof parsed.event === 'string' ? parsed.event : 'update'
+    const driverName = typeof parsed.driver_name === 'string' ? parsed.driver_name : 'driver'
+    return withSender(sender, `${event} • ${driverName}`)
+  }
+
+  if ('status' in parsed && 'nominal' in parsed) {
+    const status = typeof parsed.status === 'string' ? parsed.status : 'pending'
+    return withSender(sender, `Pengajuan saldo (${status})`)
+  }
+
+  return withSender(sender, 'Pesan sistem')
+}
+
+export function formatRoomPreview(
+  content: string | null | undefined,
+  sender: string | null | undefined,
+  description: string | null | undefined,
+): string {
+  const raw = String(content ?? '').trim()
+  if (!raw) return String(description ?? '').trim() || 'Belum ada pesan'
+
+  const withoutMeta = stripSystemMeta(raw)
+  if (!withoutMeta) return 'Pesan sistem'
+
+  if (looksLikeLocationPayload(withoutMeta)) {
+    return withSender(sender, 'Lokasi Saat Ini')
+  }
+
+  if (withoutMeta.includes('raos-selfie://')) {
+    return withSender(sender, 'Foto selfie')
+  }
+
+  if (looksLikeStructuredPayload(withoutMeta)) {
+    return formatStructuredPreview(withoutMeta, sender) ?? withSender(sender, 'Pesan sistem')
+  }
+
+  return withSender(sender, withoutMeta)
 }
 
 export interface ReadSummaryEntry { read_count: number; total_recipients: number }

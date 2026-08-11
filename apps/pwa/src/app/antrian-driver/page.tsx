@@ -6,6 +6,10 @@ import Link from 'next/link'
 import clsx from 'clsx'
 import { supabase } from '@/lib/supabase'
 import AppShell from '@/components/layout/AppShell'
+import { can } from '@/lib/accessPolicy'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import BarcodeScanner from '@/components/BarcodeScanner'
@@ -26,7 +30,7 @@ interface QueueItem {
   called_at: string | null
   branch_id: string
   driver: { id: string; driver_id: string; name: string; vehicle_plate?: string | null } | null
-  branch: { id: string; name: string } | null
+  branch: { id: string; name: string; timezone?: string | null } | null
 }
 
 interface Branch { id: string; name: string; lat: number | null; lng: number | null; default_radius_meters: number | null }
@@ -34,6 +38,7 @@ interface Branch { id: string; name: string; lat: number | null; lng: number | n
 export default function AntrianDriverPage() {
   const router = useRouter()
   const [me, setMe] = useState<{ id: string; role: string; branch_id: string | null } | null>(null)
+  const canOperateQueue = can(me?.role,'queue:operate')
   const [items, setItems] = useState<QueueItem[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -56,26 +61,25 @@ export default function AntrianDriverPage() {
       .select('id, role, branch_id').eq('id', session.user.id).single()
     if (!profile) { router.push('/dashboard'); return }
     setMe({ id: profile.id, role: profile.role, branch_id: profile.branch_id })
+    const cached=cacheReadSync<QueueItem[]>(['queue',profile.id,profile.branch_id],10*60*1000)
+    if(cached){setItems(cached);setLoading(false)}
 
     const { data } = await supabase.from('raos_driver_queue')
       .select('id, position, status, joined_at, called_at, branch_id,' +
         'driver:raos_drivers(id, driver_id, name, vehicle_plate),' +
-        'branch:branches(id, name)')
+        'branch:branches(id, name, timezone)')
       .in('status', ['waiting', 'called'])
       .order('branch_id')
       .order('position')
       .limit(200)
-    setItems((data ?? []) as unknown as QueueItem[])
+    const rows=(data ?? []) as unknown as QueueItem[]
+    setItems(rows)
+    if(profile?.id) cacheWriteSync(['queue',profile.id,profile.branch_id],rows)
     setLoading(false)
   }
 
   useEffect(() => {
     load()
-    // Realtime subscribe
-    const ch = supabase.channel('driver-queue-monitor')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'raos_driver_queue' },
-        () => load())
-      .subscribe()
     // Fetch daftar cabang untuk selector scan
     supabase.from('branches')
       .select('id, name, lat, lng, default_radius_meters')
@@ -84,9 +88,16 @@ export default function AntrianDriverPage() {
       .in('branch_type', ['airport', 'airport_hub', 'operational'])
       .order('name')
       .then(({ data }) => setBranches((data ?? []) as Branch[]))
-    return () => { supabase.removeChannel(ch) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useRealtimeRefresh(
+    `driver-queue-${me?.id ?? 'anon'}`,
+    [{table:'raos_driver_queue'}],
+    ()=>void load(),
+    250,
+    !!me?.id,
+  )
 
   // Auto-open GPS request saat pilih cabang untuk scan
   useEffect(() => {
@@ -109,7 +120,7 @@ export default function AntrianDriverPage() {
   }, [scanBranchId])
 
   async function handleBarcodeDetected(code: string) {
-    if (!scanBranchId || antriBusy) return
+    if (!canOperateQueue || !scanBranchId || antriBusy) return
     setAntriBusy(true); setAntriResult(null); setScannerActive(false)
     const { data, error } = await supabase.rpc('raos_join_queue_by_barcode', {
       p_barcode: code,
@@ -156,24 +167,27 @@ export default function AntrianDriverPage() {
   }
 
   async function handleCall(branchId: string, position: number) {
+    if(!canOperateQueue)return
     setBusyId(`${branchId}:${position}`)
     const { error } = await supabase.rpc('raos_call_driver', { p_branch_id: branchId, p_position: position })
-    if (error) alert('Gagal panggil: ' + error.message)
+    if (error) { console.warn('[queue] call failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal memanggil driver.')) }
     else await load()
     setBusyId(null)
   }
   async function handleComplete(queueId: string) {
+    if(!canOperateQueue)return
     setBusyId(queueId)
     const { error } = await supabase.rpc('raos_complete_queue', { p_queue_id: queueId })
-    if (error) alert('Gagal selesai: ' + error.message)
+    if (error) { console.warn('[queue] complete failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal menyelesaikan antrean.')) }
     else await load()
     setBusyId(null)
   }
   async function handleLeave(queueId: string) {
+    if(!canOperateQueue)return
     if (!confirm('Keluarkan driver ini dari antrean?')) return
     setBusyId(queueId)
     const { error } = await supabase.rpc('raos_leave_queue', { p_queue_id: queueId })
-    if (error) alert('Gagal keluar: ' + error.message)
+    if (error) { console.warn('[queue] exit failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal mengeluarkan driver dari antrean.')) }
     else await load()
     setBusyId(null)
   }
@@ -200,11 +214,11 @@ export default function AntrianDriverPage() {
           </div>
         </div>
         {/* Tombol Antri via Barcode (anti-cheat) — sesi 21 */}
-        <button
+        {canOperateQueue && <button
           onClick={() => { setScanBranchId(me?.branch_id ?? null); setAntriResult(null) }}
           className="mt-3 w-full flex items-center justify-center gap-2 bg-primary text-secondary font-bold text-sm py-2.5 rounded-xl active:scale-95">
           <ScanLine size={16} /> Antri Driver via Barcode
-        </button>
+        </button>}
       </div>
 
       <div className="px-4 py-4 space-y-4 pb-24">
@@ -248,14 +262,14 @@ export default function AntrianDriverPage() {
                     </p>
                     <p className="text-[10px] text-gray-400">
                       {isCalled ? (
-                        <>Dipanggil {item.called_at ? new Date(item.called_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''}</>
+                        <>Dipanggil {item.called_at ? new Date(item.called_at).toLocaleTimeString('id-ID', { timeZone: item.branch?.timezone ?? 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' }) : ''}</>
                       ) : (
-                        <>Antre sejak {new Date(item.joined_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</>
+                        <>Antre sejak {new Date(item.joined_at).toLocaleTimeString('id-ID', { timeZone: item.branch?.timezone ?? 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' })}</>
                       )}
                     </p>
                   </div>
                   <div className="flex flex-col gap-1">
-                    {!isCalled && (
+                    {canOperateQueue && !isCalled && (
                       <button
                         disabled={busyId === `${item.branch_id}:${item.position}`}
                         onClick={() => handleCall(item.branch_id, item.position)}
@@ -263,7 +277,7 @@ export default function AntrianDriverPage() {
                         <Phone size={10} /> PANGGIL
                       </button>
                     )}
-                    {isCalled && (
+                    {canOperateQueue && isCalled && (
                       <button
                         disabled={busyId === item.id}
                         onClick={() => handleComplete(item.id)}
@@ -271,12 +285,12 @@ export default function AntrianDriverPage() {
                         <CheckCircle2 size={10} /> SELESAI
                       </button>
                     )}
-                    <button
+{canOperateQueue &&                     <button
                       disabled={busyId === item.id}
                       onClick={() => handleLeave(item.id)}
                       className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-red-50 text-red-600 disabled:opacity-50">
                       Keluar
-                    </button>
+                    </button>}
                   </div>
                 </div>
               )
@@ -323,7 +337,7 @@ export default function AntrianDriverPage() {
                   disabled={scannerActive || antriBusy}
                   className="w-full text-sm bg-gray-100 rounded-lg px-3 py-2 focus:outline-none">
                   <option value="">— Pilih cabang —</option>
-                  {branches.map(b => (
+                  {branches.filter(b => ['admin','direksi','direktur'].includes(me?.role ?? '') || b.id===me?.branch_id).map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>

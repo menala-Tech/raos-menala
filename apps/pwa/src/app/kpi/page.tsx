@@ -8,6 +8,7 @@ import AppShell from '@/components/layout/AppShell'
 import { ArrowLeft, Target, TrendingUp, CalendarCheck, Banknote } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
+import { useCanonicalKpi } from '@/lib/useCanonicalKpi'
 
 const BULAN = [
   'Januari','Februari','Maret','April','Mei','Juni',
@@ -42,16 +43,8 @@ export default function KpiPage() {
     { enabled: !!sessionUserId, ttlMs: 30 * 60 * 1000 }
   )
 
-  const { data: kpi } = useCachedQuery<any>(
-    ['kpi-target', sessionUserId, tahun, bulan],
-    async () => {
-      const { data } = await supabase
-        .from('kpi_targets').select('*')
-        .eq('staff_id', sessionUserId!).eq('month', bulan).eq('year', tahun).single()
-      return data
-    },
-    { enabled: !!sessionUserId, ttlMs: 30 * 60 * 1000 }
-  )
+
+  const canonicalKpi=useCanonicalKpi(sessionUserId,user?.branch_id ?? null,(user as any)?.branches?.timezone ?? null)
 
   const { data: scanStatsData, loading } = useCachedQuery(
     ['kpi-scan-stats', sessionUserId, tahun, bulan],
@@ -70,7 +63,7 @@ export default function KpiPage() {
   )
   const scanStats = scanStatsData ?? { total: 0, valid: 0, gmv: 0 }
 
-  const targetScan = kpi?.target_scan || 0
+  const targetScan = canonicalKpi.data?.mode==='order' ? canonicalKpi.data.target : 0
   const pctScan = targetScan > 0 ? Math.min((scanStats.valid / targetScan) * 100, 100) : 0
 
   const metrics = [
@@ -83,23 +76,23 @@ export default function KpiPage() {
     },
     {
       icon: Banknote,
-      label: 'GMV Bulan Ini',
-      value: `Rp ${scanStats.gmv.toLocaleString('id-ID')}`,
-      pct: kpi?.target_gmv > 0 ? Math.min((scanStats.gmv / kpi.target_gmv) * 100, 100) : 0,
+      label: canonicalKpi.data?.mode==='saldo' ? 'Realisasi Saldo' : 'GMV Bulan Ini',
+      value: canonicalKpi.data?.mode==='saldo' ? `Rp ${Number(canonicalKpi.data.realized).toLocaleString('id-ID')}` : `Rp ${scanStats.gmv.toLocaleString('id-ID')}`,
+      pct: canonicalKpi.data?.mode==='saldo' ? canonicalKpi.data.achievementPct : 0,
       color: 'bg-green-500',
     },
     {
       icon: CalendarCheck,
       label: 'Kehadiran',
-      value: `${kpi?.actual_attendance_pct ?? 0}%`,
-      pct: parseFloat(kpi?.actual_attendance_pct ?? 0),
+      value: 'Lihat HRIS',
+      pct: 0,
       color: 'bg-orange-500',
     },
   ]
 
   return (
     <AppShell>
-      <div className="bg-secondary text-white px-4 pt-10 pb-6">
+      <div className="bg-secondary text-white px-4 pt-10 pb-6 sticky top-0 z-30">
         <div className="flex items-center gap-3 mb-4">
           <Link href="/dashboard"><ArrowLeft size={22} /></Link>
           <div>
@@ -116,14 +109,14 @@ export default function KpiPage() {
               <circle
                 cx="50" cy="50" r="42" fill="none"
                 stroke="#F5A623" strokeWidth="10" strokeLinecap="round"
-                strokeDasharray={`${(parseFloat(kpi?.actual_kpi_pct ?? 0) / 100) * 264} 264`}
+                strokeDasharray={`${(canonicalKpi.data?.achievementPct ?? 0 / 100) * 264} 264`}
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-2xl font-black text-primary">
-                {kpi?.actual_kpi_pct ?? 0}%
+                {(canonicalKpi.data?.achievementPct ?? 0).toFixed(0)}%
               </span>
-              <span className="text-[9px] text-white/50">KPI TOTAL</span>
+              <span className="text-[9px] text-white/50">PENCAPAIAN TARGET</span>
             </div>
           </div>
         </div>
@@ -134,7 +127,7 @@ export default function KpiPage() {
           <div className="text-center py-6 text-gray-400 text-sm">Memuat KPI...</div>
         )}
 
-        {!loading && !kpi && (
+        {!loading && !canonicalKpi.data?.target && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-center">
             <TrendingUp size={28} className="text-yellow-500 mx-auto mb-2" />
             <p className="text-sm font-semibold text-yellow-800">Target belum diset</p>
@@ -164,17 +157,7 @@ export default function KpiPage() {
             </div>
           </div>
         ))}
-
-        {/* Info bobot KPI */}
-        <div className="card bg-gray-50">
-          <p className="text-xs font-semibold text-gray-500 mb-2">BOBOT PENILAIAN KPI</p>
-          <div className="space-y-1 text-xs text-gray-600">
-            <div className="flex justify-between"><span>Order (Scan Valid)</span><span className="font-semibold">40%</span></div>
-            <div className="flex justify-between"><span>GMV</span><span className="font-semibold">20%</span></div>
-            <div className="flex justify-between"><span>Kehadiran</span><span className="font-semibold">15%</span></div>
-            <div className="flex justify-between"><span>Lainnya</span><span className="font-semibold">25%</span></div>
-          </div>
-        </div>
+        <div className="card bg-gray-50 text-xs text-gray-500">Target dan realisasi mengikuti Finance/HRIS canonical engine. Bobot penilaian tidak dihitung ulang di PWA.</div>
       </div>
     </AppShell>
   )

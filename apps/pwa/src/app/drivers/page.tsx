@@ -3,6 +3,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { can } from '@/lib/accessPolicy'
+import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 import AppShell from '@/components/layout/AppShell'
 import { ArrowLeft, Search, Car, Phone, Plus, X, Loader2, Pencil, Radar, QrCode, PhoneCall, CheckCircle2, UserPlus } from 'lucide-react'
 import Link from 'next/link'
@@ -13,7 +17,6 @@ const PAGE_SIZE = 20
 type QueueEntry = { id: string; position: number; status: 'waiting' | 'called' }
 type QueueMap = Record<string, QueueEntry>
 
-const CAN_MANAGE_QUEUE = ['staff', 'koordinator', 'management', 'admin', 'direksi']
 
 export default function DriversPage() {
   const router = useRouter()
@@ -30,8 +33,10 @@ export default function DriversPage() {
   const [queueBusy, setQueueBusy] = useState<string | null>(null)
   const [queueErr, setQueueErr] = useState<string>('')
 
-  const loadDrivers = useCallback(async (pageNum: number, searchTerm: string) => {
-    setLoading(true)
+  const loadDrivers = useCallback(async (pageNum: number, searchTerm: string, uid?: string) => {
+    const ck=['drivers',uid,pageNum,searchTerm] as const
+    const cached=cacheReadSync<{drivers:Driver[];total:number}>(ck,15*60*1000)
+    if(cached){setDrivers(cached.drivers);setTotalCount(cached.total);setLoading(false)} else setLoading(true)
     let query = supabase
       .from('raos_drivers')
       .select('id, driver_id, name, phone, vehicle_type, vehicle_plate, branch_id, barcode, is_active, source, branches(name)', { count: 'exact' })
@@ -44,8 +49,10 @@ export default function DriversPage() {
     }
 
     const { data, count } = await query
-    setDrivers((data as any) ?? [])
+    const rows=(data as any) ?? []
+    setDrivers(rows)
     setTotalCount(count ?? 0)
+    cacheWriteSync(ck,{drivers:rows,total:count??0})
     setLoading(false)
   }, [])
 
@@ -63,7 +70,7 @@ export default function DriversPage() {
       const { data: branchData } = await supabase.from('branches').select('*').order('name')
       setBranches(branchData ?? [])
 
-      loadDrivers(0, '')
+      loadDrivers(0, '', session.user.id)
     }
     init()
   }, [router, loadDrivers])
@@ -71,7 +78,7 @@ export default function DriversPage() {
   useEffect(() => {
     const timeout = setTimeout(() => {
       setPage(0)
-      loadDrivers(0, search)
+      loadDrivers(0, search, user?.id)
     }, 300)
     return () => clearTimeout(timeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,12 +108,13 @@ export default function DriversPage() {
 
   function goToPage(p: number) {
     setPage(p)
-    loadDrivers(p, search)
+    loadDrivers(p, search, user?.id)
   }
 
-  const isAdmin = user && ['admin', 'management', 'direksi'].includes(user.role)
-  const canManageQueue = user && CAN_MANAGE_QUEUE.includes(user.role)
+  const isAdmin = !!user && can(user.role,'driver:mutate')
+  const canManageQueue = !!user && can(user.role,'queue:operate')
   const isDriverRole = user?.role === 'driver'
+  useRealtimeRefresh(`drivers-${user?.id ?? 'anon'}`,[{table:'raos_drivers'},{table:'raos_driver_queue'}],()=>{void loadDrivers(page,search,user?.id);void loadQueueStates()},350,!!user?.id)
 
   async function handleRequestQueue(driver: Driver) {
     if (!driver.branch_id) { setQueueErr('Driver belum punya cabang — lengkapi data dulu.'); return }
@@ -117,7 +125,7 @@ export default function DriversPage() {
       p_room_id: null,
     })
     setQueueBusy(null)
-    if (error) { setQueueErr(error.message); return }
+    if (error) { console.warn('[drivers] queue mutation failed', runtimeTechnicalMessage(error)); setQueueErr(runtimeMessage(error,'Operasi antrean gagal.')); return }
     void loadQueueStates()
   }
 
@@ -131,7 +139,7 @@ export default function DriversPage() {
       p_position: entry.position,
     })
     setQueueBusy(null)
-    if (error) { setQueueErr(error.message); return }
+    if (error) { console.warn('[drivers] queue mutation failed', runtimeTechnicalMessage(error)); setQueueErr(runtimeMessage(error,'Operasi antrean gagal.')); return }
     void loadQueueStates()
   }
 
@@ -141,14 +149,14 @@ export default function DriversPage() {
     setQueueBusy(driver.id); setQueueErr('')
     const { error } = await supabase.rpc('raos_complete_queue', { p_queue_id: entry.id })
     setQueueBusy(null)
-    if (error) { setQueueErr(error.message); return }
+    if (error) { console.warn('[drivers] queue mutation failed', runtimeTechnicalMessage(error)); setQueueErr(runtimeMessage(error,'Operasi antrean gagal.')); return }
     void loadQueueStates()
   }
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
 
   return (
     <AppShell>
-      <div className="bg-secondary text-white px-4 pt-10 pb-4">
+      <div className="bg-secondary text-white px-4 pt-10 pb-4 sticky top-0 z-30">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <Link href="/dashboard"><ArrowLeft size={22} /></Link>
@@ -338,7 +346,7 @@ export default function DriversPage() {
         <AddDriverModal
           branches={branches}
           onClose={() => setShowAddForm(false)}
-          onAdded={() => { setShowAddForm(false); loadDrivers(0, search) }}
+          onAdded={() => { setShowAddForm(false); loadDrivers(0, search, user?.id) }}
         />
       )}
 

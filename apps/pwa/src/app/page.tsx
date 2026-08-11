@@ -8,6 +8,7 @@ import MenalaLogo, { MenalaMark } from '@/components/MenalaLogo'
 import { Eye, EyeOff, Lock, Mail, ShieldCheck, Send, ArrowLeft, Loader2 } from 'lucide-react'
 import { defaultLandingForRole } from '@/lib/roleGuard'
 import { logActivity } from '@/lib/activity'
+import { loginWithRaosCredential } from '@/lib/raosAuth'
 
 type Mode = 'password' | 'magic-link' | 'forgot-password'
 
@@ -36,21 +37,15 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-    // Driver login pakai ID Driver (numeric-only, dari SSOT sheet) sebagai
-    // username. Kalau input full numeric ≥6 digit, map ke dummy email
-    // <id>@driver.rifim.local — matches auth user yang di-provision GAS
-    // sync driver airport/external.
     const trimmed = email.trim()
-    const isDriverId = /^\d{6,}$/.test(trimmed)
-    const loginEmail = isDriverId ? `${trimmed}@driver.rifim.local` : trimmed
-    const loginPassword = isDriverId && !password ? trimmed : password
-    const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword })
-    if (error || !data.user) { setError('Email/ID Driver atau PIN salah.'); setLoading(false); return }
+    const { data, error } = await loginWithRaosCredential(trimmed, password)
+    if (error || !data.user) { setError('Email/ID RAOS/ID Driver atau PIN salah.'); setLoading(false); return }
     // Route ke landing sesuai role (staff → /dashboard, driver → /driver-workspace, dst)
     const { data: profile } = await supabase.from('user_profiles')
       .select('role').eq('id', data.user.id).single()
     // Audit login sukses — fire-and-forget, tidak block redirect.
     void logActivity('login', `role=${profile?.role ?? 'unknown'}`)
+    if (remember) localStorage.setItem('raos_last_login_id', trimmed); else localStorage.removeItem('raos_last_login_id')
     router.push(defaultLandingForRole(profile?.role))
   }
 
@@ -81,20 +76,8 @@ export default function LoginPage() {
 
   async function handleForgotPassword(e: React.FormEvent) {
     e.preventDefault()
-    setLoading(true)
     setError('')
-    setInfo('')
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    })
-    if (error) {
-      setError(error.message.includes('invalid')
-        ? 'Server email belum dikonfigurasi. Hubungi Admin sistem.'
-        : 'Gagal mengirim link reset. Periksa email dan coba lagi.')
-    } else {
-      setInfo(`Link atur ulang PIN telah dikirim ke ${email}.`)
-    }
-    setLoading(false)
+    setInfo('Reset PIN RAOS dilakukan Admin melalui CRM/User RAOS agar tetap sinkron dengan MASTER DATA STAFF.')
   }
 
   function switchMode(next: Mode) {
@@ -118,7 +101,7 @@ export default function LoginPage() {
       <div className="relative h-52 w-full overflow-hidden flex-shrink-0">
         <Image
           src="/images/hero-airport.png"
-          alt="Bandara Soekarno-Hatta"
+          alt="MENALA Airport Operation System"
           fill priority sizes="100vw"
           className="object-cover"
         />
@@ -185,7 +168,7 @@ export default function LoginPage() {
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center gap-2 text-gray-600 cursor-pointer">
                   <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="rounded" />
-                  Ingat saya
+                  Ingat ID saya
                 </label>
                 <button type="button" onClick={() => switchMode('forgot-password')}
                   className="text-primary font-semibold text-xs">
@@ -248,7 +231,7 @@ export default function LoginPage() {
             <p className="text-sm font-bold text-gray-800 mb-1">Lupa PIN?</p>
             <p className="text-xs text-gray-500">
               Masukkan email akun Anda. Kami akan kirim link untuk mengatur ulang PIN.
-              Catatan: kalau PIN Anda diatur di HRIS, sebaiknya minta admin update di sheet supaya sinkron.
+              PIN RAOS dikelola dari CRM/User RAOS dan MASTER DATA STAFF. Reset tidak mengubah PIN legacy aplikasi lain.
             </p>
             <div className="relative">
               <Mail className="absolute left-3 top-3.5 text-gray-400" size={18} />
@@ -270,7 +253,7 @@ export default function LoginPage() {
             <ShieldCheck size={13} />
             <span className="text-[11px]">Sistem aman &amp; terenkripsi</span>
           </div>
-          <p className="text-center text-[10px] text-gray-300">RAOS v1.0.0 • © 2024 MENALA</p>
+          <p className="text-center text-[10px] text-gray-300">RAOS • MENALA Airport Operation System</p>
         </div>
       </div>
     </div>

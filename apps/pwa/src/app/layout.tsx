@@ -6,7 +6,7 @@ const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'MENALA Airport Operation System',
-  description: 'Sistem Operasional Bandara Soekarno-Hatta',
+  description: 'MENALA Airport Operation System — operasional multi-cabang',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,

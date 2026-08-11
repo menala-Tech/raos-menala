@@ -2,8 +2,9 @@
 
 import { Copy, Pin, Trash2, X } from 'lucide-react'
 import clsx from 'clsx'
+import { can } from '@/lib/accessPolicy'
 import type { ChatMessageReaction, UserProfile } from '@/types'
-import { PIN_ROLES, QUICK_EMOJIS, type ActionMenu } from './types'
+import { QUICK_EMOJIS, type ActionMenu } from './types'
 
 interface Props {
   actionMenu: ActionMenu
@@ -19,8 +20,9 @@ interface Props {
 export default function WorkspaceActionMenu({
   actionMenu, user, reactions, onClose, onToggleReaction, onPin, onCopy, onDelete,
 }: Props) {
-  const canPin = PIN_ROLES.includes(user?.role ?? '')
-  const canDelete = actionMenu.isMe || (user && PIN_ROLES.includes(user.role))
+  const canModerate = can(user?.role, 'chat:moderate')
+  const canPin = canModerate
+  const canDelete = actionMenu.isMe || !!user && can(user.role, 'chat:moderate')
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col justify-end" onClick={onClose}>

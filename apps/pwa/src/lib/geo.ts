@@ -44,13 +44,14 @@ export function shouldBlockByGeofence(
   geo: GeofenceResult | null,
   locationStatus: 'checking' | 'valid' | 'invalid' | 'unavailable' | 'done',
   isExempt?: boolean | null,
+  toleranceMeters: number = GEOFENCE_TOLERANCE_METERS,
 ): boolean {
   if (isExempt) return false
   if (role !== 'staff') return false
   if (locationStatus === 'checking') return true
   if (locationStatus === 'unavailable') return true
   if (!geo || geo.overshootMeters === null) return true
-  return geo.overshootMeters > GEOFENCE_TOLERANCE_METERS
+  return geo.overshootMeters > toleranceMeters
 }
 
 /**

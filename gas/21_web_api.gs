@@ -1,149 +1,52 @@
 // ============================================================
-// 21_web_api.gs — RAOS Web App API untuk Rifim OS Portal
+// 21_web_api.gs — RAOS Web API for RIFIM OS System Control Center V3
+// LOCAL WORKING COPY. NO DEPLOY.
 // ============================================================
-//
-// Endpoint POST publik untuk trigger semua fungsi maintenance/sync RAOS
-// dari Portal Rifim OS ("Admin Console"). Admin cukup buka Portal, klik
-// tombol, RAOS jalan di background.
-//
-// AUTH: Portal kirim Supabase Auth JWT (access_token) di body.
-//       RAOS verify via /auth/v1/user + cek role di user_profiles.
-//       Hanya admin/direksi/management yang boleh trigger action.
-//
-// CORS: pakai Content-Type text/plain di request Portal untuk hindari
-//       CORS preflight (GAS Web App tidak set CORS header untuk OPTIONS).
-//
-// SETELAH EDIT FILE INI: WAJIB redeploy Web App:
-//   Terapkan → Kelola deployment → Edit (pensil) → Versi = Versi baru → Terapkan
-//   URL /exec tidak berubah, tapi kode baru baru ke-serve setelah redeploy.
-
-var _WEB_API_ALLOWED_ACTIONS = {
-  'sync_staff':                { fn: 'syncStaffFromSSOT',              label: 'Sync Staff dari SSOT' },
-  'sync_driver_airport':       { fn: 'syncDriverAirportFromSSOT',      label: 'Sync Driver Airport' },
-  'sync_driver_external':      { fn: 'syncDriverExternalFromSSOT',     label: 'Sync Driver External' },
-  'sync_raos_credentials':     { fn: 'syncRaosCredentials',            label: 'Sync RAOS Credentials (kolom I/J)' },
-  'run_backup':                { fn: 'backupHarian',                   label: 'Backup Spreadsheet Harian' },
-  'sync_selfie_drive':         { fn: 'syncSelfiePhotosToGDrive',       label: 'Sync Foto Selfie ke Drive' },
-  'run_kpi':                   { fn: 'updateAllKpiRAOS',               label: 'Update KPI Bulan Ini' },
-  'force_refresh_staff_auth':  { fn: 'forceRefreshStaffAuth',          label: 'Force Refresh Staff Auth Password' },
-  'force_refresh_driver_auth': { fn: 'forceRefreshDriverAirportAuth',  label: 'Force Refresh Driver Airport Auth Password' },
+var _WEB_API_ACTIONS = {
+  sync_staff:                { fn:'syncStaffFromSSOT',             label:'Sync Staff dari SSOT', roles:['admin','direksi'] },
+  sync_driver_airport:       { fn:'syncDriverAirportFromSSOT',     label:'Sync Driver Airport', roles:['admin','direksi'] },
+  sync_driver_external:      { fn:'syncDriverExternalFromSSOT',    label:'Sync Driver External', roles:['admin','direksi'] },
+  sync_raos_credentials:     { fn:'syncRaosCredentials',           label:'Sync PIN RAOS', roles:['admin','direksi'] },
+  run_backup:                { fn:'backupHarian',                  label:'Backup Spreadsheet Harian', roles:['admin','direksi'] },
+  sync_selfie_drive:         { fn:'syncSelfiePhotosToGDrive',      label:'Sync Foto Selfie ke Drive', roles:['admin','direksi'] },
+  run_kpi:                   { fn:'systemRunCanonicalKpi_',        label:'Update KPI/Payroll Bulan Ini', roles:['admin','direksi'] },
+  force_refresh_staff_auth:  { fn:'forceRefreshStaffAuth',         label:'RECOVERY Staff Auth', roles:['admin','direksi'] },
+  force_refresh_driver_auth: { fn:'forceRefreshDriverAirportAuth', label:'RECOVERY Driver Airport Auth', roles:['admin','direksi'] }
 };
+var _WEB_API_PAGE_ROLES=['admin','direksi','management'];
+function doGet(){return _webJson({ok:true,service:'RAOS Web API',version:'system-v3',time:new Date().toISOString()})}
+function doPost(e){try{return _doPostImpl_(e)}catch(fatal){return _webJson({ok:false,error:'fatal_uncaught',detail:(fatal&&fatal.message)||String(fatal)})}}
+function _doPostImpl_(e){var body={};try{body=e&&e.postData&&e.postData.contents?JSON.parse(e.postData.contents):{}}catch(err){return _webJson({ok:false,error:'invalid_json'})}
+  var action=String(body.action||'').trim(),token=String(body.token||'').trim();if(action==='ping')return _webJson({ok:true,action:'ping',time:new Date().toISOString()});if(!token)return _webJson({ok:false,error:'missing_token'});
+  var caller=_webVerifyCaller_(token);if(!caller.ok)return _webJson(caller);
+  if(action==='system_log_recent')return _webSystemLogRecent_(caller,body);
+  if(action==='system_health')return _webSystemHealth_(caller);
+  if(action==='action_preview')return _webActionPreview_(caller,body);
+  var spec=_WEB_API_ACTIONS[action];if(!spec)return _webJson({ok:false,error:'unknown_action',action:action});
+  if(spec.roles.indexOf(caller.role)<0){_webAudit_(caller,action,'warning','role_denied');return _webJson({ok:false,error:'role_denied',role:caller.role,action:action});}
+  var t0=Date.now();try{var fn=globalThis[spec.fn]||this[spec.fn];if(typeof fn!=='function')throw new Error('function_not_found: '+spec.fn);var result=fn();var elapsed=Date.now()-t0;var state=_webResultStatus_(result);_webAudit_(caller,action,state,'elapsed_ms='+elapsed+' result='+_webCompact_(result));return _webJson({ok:true,action:action,label:spec.label,elapsed_ms:elapsed,result:result,by:caller.email,role:caller.role,status:state});}
+  catch(err){var elapsedErr=Date.now()-t0,msg=err.message||String(err);_webAudit_(caller,action,'error','elapsed_ms='+elapsedErr+' '+msg);return _webJson({ok:false,action:action,error:msg,elapsed_ms:elapsedErr,by:caller.email});}}
 
-function doGet(e) {
-  return _webJson({
-    ok: true,
-    service: 'RAOS Web API',
-    time: new Date().toISOString(),
-    actions: Object.keys(_WEB_API_ALLOWED_ACTIONS),
-    note: 'Kirim POST dengan {action, token} untuk trigger',
-  });
+function systemRunCanonicalKpi_(){
+  var now=new Date();
+  var month=Utilities.formatDate(now,'Asia/Jakarta','yyyy-MM-01');
+  var result=callSupabase('rpc/raos_compute_payroll_month','POST',{p_month:month});
+  var processed=Array.isArray(result)?result[0]:result;
+  return {engine:'raos_compute_payroll_month',effective_month:month,processed:Number(processed||0),note:'Existing Target/KPI/Payroll Engine; no kpi_targets V1 writer'};
 }
 
-function doPost(e) {
-  // OUTER try/catch — pastikan SEMUA path return JSON. Kalau ada throw yg
-  // lolos, GAS default handler serve HTML page (bikin client parse gagal).
-  try {
-    return _doPostImpl_(e);
-  } catch (fatal) {
-    return _webJson({
-      ok: false, error: 'fatal_uncaught',
-      detail: (fatal && fatal.message) || String(fatal),
-      stack: (fatal && fatal.stack) ? String(fatal.stack).substring(0, 500) : null,
-    });
-  }
-}
-
-function _doPostImpl_(e) {
-  var body = {};
-  try {
-    body = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
-  } catch (parseErr) {
-    return _webJson({ ok: false, error: 'invalid_json', detail: String(parseErr) });
-  }
-
-  var action = String(body.action || '').trim();
-  var token = String(body.token || '').trim();
-
-  if (action === 'ping') {
-    return _webJson({ ok: true, action: 'ping', time: new Date().toISOString() });
-  }
-
-  if (!token) return _webJson({ ok: false, error: 'missing_token' });
-  var caller;
-  try {
-    caller = _webVerifyCaller_(token);
-  } catch (verifyErr) {
-    return _webJson({ ok: false, error: 'verify_throw', detail: verifyErr.message || String(verifyErr) });
-  }
-  if (!caller.ok) return _webJson(caller);
-
-  if (action === 'system_log_recent') {
-    var limit = Math.min(parseInt(body.limit || 50, 10) || 50, 200);
-    var since = body.since || null;
-    var qs = 'select=type,process,status,detail,created_at&order=created_at.desc&limit=' + limit;
-    if (since) qs += '&created_at=gte.' + encodeURIComponent(since);
-    try {
-      var rows = callSupabase('system_logs?' + qs);
-      return _webJson({ ok: true, action: action, rows: rows || [], by: caller.email, role: caller.role });
-    } catch (err) {
-      return _webJson({ ok: false, action: action, error: err.message || String(err) });
-    }
-  }
-
-  var spec = _WEB_API_ALLOWED_ACTIONS[action];
-  if (!spec) return _webJson({ ok: false, error: 'unknown_action', action: action });
-
-  var t0 = Date.now();
-  try {
-    var fn = globalThis[spec.fn] || this[spec.fn];
-    if (typeof fn !== 'function') {
-      return _webJson({ ok: false, action: action, error: 'function_not_found', fn: spec.fn });
-    }
-    var result = fn();
-    var elapsed = Date.now() - t0;
-    logSistem('api', 'web:' + action, 'success',
-      'Triggered by ' + caller.email + ' (' + caller.role + ') in ' + elapsed + 'ms');
-    return _webJson({
-      ok: true, action: action, label: spec.label, elapsed_ms: elapsed,
-      result: result, by: caller.email, role: caller.role,
-    });
-  } catch (err) {
-    var msg = err.message || String(err);
-    logSistem('api', 'web:' + action, 'error', 'By ' + caller.email + ': ' + msg);
-    return _webJson({ ok: false, action: action, error: msg, by: caller.email });
-  }
-}
-
-function _webVerifyCaller_(token) {
-  // Verify Supabase Auth JWT
-  var res = UrlFetchApp.fetch(CONFIG.SUPABASE_URL + '/auth/v1/user', {
-    method: 'GET',
-    headers: {
-      apikey: CONFIG.SUPABASE_KEY,
-      Authorization: 'Bearer ' + token,
-    },
-    muteHttpExceptions: true,
-  });
-  if (res.getResponseCode() !== 200) {
-    return { ok: false, error: 'invalid_token', http: res.getResponseCode() };
-  }
-  var user = JSON.parse(res.getContentText());
-  if (!user || !user.id) return { ok: false, error: 'user_not_found' };
-
-  // Check role via user_profiles
-  var profs = callSupabase('user_profiles?id=eq.' + user.id + '&select=role,is_active,full_name');
-  if (!profs || !profs[0]) return { ok: false, error: 'profile_not_found' };
-  var p = profs[0];
-  if (!p.is_active) return { ok: false, error: 'inactive' };
-  var ROLE_ADMIN = ['admin', 'direksi', 'management'];
-  if (ROLE_ADMIN.indexOf(p.role) < 0) {
-    return { ok: false, error: 'role_denied', role: p.role };
-  }
-  return { ok: true, user_id: user.id, email: user.email, role: p.role, full_name: p.full_name };
-}
-
-function _webJson(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+function _webResultStatus_(r){if(!r||typeof r!=='object')return 'success';if(Number(r.errors||0)>0||Number(r.failed||0)>0)return 'warning';if(Number(r.warnings||0)>0||Array.isArray(r.warnings)&&r.warnings.length)return 'warning';if(r.success===false)return 'warning';return 'success'}
+function _webAudit_(caller,action,status,detail){try{logSistem('api','web:'+action,status,'actor='+caller.email+' role='+caller.role+' '+detail)}catch(_){}}
+function _webCompact_(v){try{return JSON.stringify(v).substring(0,900)}catch(_){return String(v).substring(0,900)}}
+function _webSystemLogRecent_(caller,body){try{var limit=Math.min(parseInt(body.limit||50,10)||50,200);var rows=callSupabase('system_logs?select=type,process,status,detail,created_at&order=created_at.desc&limit='+limit)||[];return _webJson({ok:true,action:'system_log_recent',rows:rows,by:caller.email,role:caller.role})}catch(err){return _webJson({ok:false,error:err.message||String(err)})}}
+function _webActionPreview_(caller,body){var target=String(body.target_action||'').trim();if(!_WEB_API_ACTIONS[target])return _webJson({ok:false,error:'unknown_preview_action',target_action:target});try{var preview={target_action:target,label:_WEB_API_ACTIONS[target].label,read_only:true};if(target==='force_refresh_staff_auth'){var profiles=callSupabase('user_profiles?source=eq.ssot_master_staff&is_active=eq.true&select=id,staff_id&limit=2000')||[];var valid=0,invalid=0;try{var sh=getMasterStaffSheet_(),values=sh.getDataRange().getValues(),cols=getStaffSheetColumns_(values[0]||[]);values.slice(1).forEach(function(r){var sid=String(r[cols.staffId]||'').trim();if(!sid)return;if(normalizePin_(r[cols.pin]).valid)valid++;else invalid++;});}catch(e){preview.sheet_warning=e.message||String(e)}preview.profile_targets=profiles.length;preview.valid_legacy_pin_rows=valid;preview.invalid_legacy_pin_rows=invalid;preview.summary='Target profile aktif='+profiles.length+', legacy PIN valid='+valid+', invalid='+invalid+'. PIN RAOS tidak diubah.';}
+  else if(target==='force_refresh_driver_auth'){var drivers=callSupabase('user_profiles?role=eq.driver&source=eq.ssot_driver_airport&is_active=eq.true&select=id,staff_id&limit=5000')||[];preview.profile_targets=drivers.length;preview.summary='Target Driver Airport aktif='+drivers.length+'. Password internal akan diset ulang ke driver_id.';}
+  else if(target==='run_kpi'){var staff=callSupabase('user_profiles?is_active=eq.true&role=in.(staff,koordinator)&select=id&limit=2000')||[];preview.profile_targets=staff.length;preview.summary='KPI/Payroll existing engine akan menghitung '+staff.length+' staff/koordinator aktif bulan berjalan.';}
+  else{preview.summary='Aksi '+_WEB_API_ACTIONS[target].label+' akan dijalankan setelah konfirmasi.';}return _webJson({ok:true,action:'action_preview',preview:preview,by:caller.email,role:caller.role});}catch(e){return _webJson({ok:false,error:'preview_failed',detail:e.message||String(e),target_action:target})}}
+function _webReadSystemConfigSheet_(){var out={};try{var cfg=typeof getSistemConfig==='function'?getSistemConfig():null;if(cfg){Object.keys(cfg).forEach(function(k){out[String(k).trim()]=cfg[k]});return out}}catch(_){ }try{var ss=typeof kpiGetSpreadsheet_==='function'?kpiGetSpreadsheet_():SpreadsheetApp.getActiveSpreadsheet();if(!ss)return out;var sh=ss.getSheetByName('SISTEM CONFIG');if(!sh)return out;sh.getDataRange().getValues().forEach(function(r){var k=String(r[0]||'').trim();if(k&&k!=='KEY')out[k]=r[1]});}catch(_){ }return out}
+function _webSystemHealth_(caller){var h={version:'system-v3',blockers:[],warnings:[],checks:{},canonical_drive_root:'19taBn0YXxjXTb-SxqFXGhwOPShZ4VlIt'};try{var sources=callSupabase('user_profiles?select=source&limit=5000')||[],counts={};sources.forEach(function(x){counts[x.source||'null']=(counts[x.source||'null']||0)+1});h.checks.profile_sources=counts;if(!counts.ssot_driver_external)h.blockers.push('Driver External belum memiliki user_profiles source=ssot_driver_external di live DB');}catch(e){h.warnings.push('profile_sources: '+e.message)}
+  try{var creds=callSupabase('raos_credentials?select=user_id,raos_staff_code,raos_pin,updated_at&limit=2000')||[],missingPin=0,plaintextPin=0,bcryptPin=0,badHash=0,seenCode={},dupCode=0;creds.forEach(function(c){var rp=String(c.raos_pin||''),code=String(c.raos_staff_code||'').trim().toUpperCase();if(!rp){missingPin++;}else if(/^\$2[abxy]\$\d{2}\$[.\/A-Za-z0-9]{53}$/.test(rp)){bcryptPin++;}else if(/^\d{4,12}$/.test(rp)){plaintextPin++;}else{badHash++;}if(code){if(seenCode[code])dupCode++;seenCode[code]=true;}});h.checks.credentials={total:creds.length,bcrypt_pin:bcryptPin,plaintext_pin_pending_hash:plaintextPin,missing_raos_pin:missingPin,invalid_hash_format:badHash,duplicate_raos_id:dupCode};if(missingPin)h.blockers.push(missingPin+' credential tanpa RAOS PIN');if(badHash)h.blockers.push(badHash+' credential RAOS PIN format tidak dikenali');if(dupCode)h.blockers.push(dupCode+' RAOS ID duplikat');if(plaintextPin)h.warnings.push(plaintextPin+' RAOS PIN masih plaintext; akan di-hash oleh migration bcrypt canonical');}catch(e){h.warnings.push('credentials: '+e.message)}
+  try{var cfg=callSupabase('system_config?select=key,value&limit=1000')||[],keys={},sheetKeys=_webReadSystemConfigSheet_(),missing=[],mismatch=[];cfg.forEach(function(x){keys[x.key]=x.value});Object.keys(sheetKeys).forEach(function(k){if(k.charAt(0)==='_')return;if(keys[k]==null)missing.push(k);else if(String(keys[k])!==String(sheetKeys[k]))mismatch.push({key:k,sheet:String(sheetKeys[k]),supabase:String(keys[k])})});h.checks.system_config={sheet_count:Object.keys(sheetKeys).length,supabase_count:cfg.length,missing_in_supabase:missing,value_mismatch:mismatch,canonical_attendance_key:'ATTENDANCE_TOLERANCE_MIN',legacy_aliases:['ATTENDANCE_TOLERANCE_MENIT','attendance_tolerance']};if(missing.length)h.blockers.push('System Config mirror belum lengkap: '+missing.length+' key Sheet belum ada di Supabase');if(mismatch.length)h.blockers.push('System Config mismatch: '+mismatch.length+' key berbeda Sheet vs Supabase');if(sheetKeys.ATTENDANCE_TOLERANCE_MIN!=null&&sheetKeys.ATTENDANCE_TOLERANCE_MENIT!=null&&String(sheetKeys.ATTENDANCE_TOLERANCE_MIN)!==String(sheetKeys.ATTENDANCE_TOLERANCE_MENIT))h.blockers.push('ATTENDANCE_TOLERANCE_MIN adalah canonical Sheet; alias ATTENDANCE_TOLERANCE_MENIT masih berbeda dan harus dipertahankan hanya untuk backward compatibility sampai consumer dimigrasi');if(keys.attendance_tolerance!=null&&sheetKeys.ATTENDANCE_TOLERANCE_MIN!=null&&String(keys.attendance_tolerance)!==String(sheetKeys.ATTENDANCE_TOLERANCE_MIN))h.warnings.push('Legacy attendance_tolerance berbeda dari canonical ATTENDANCE_TOLERANCE_MIN');}catch(e){h.warnings.push('system_config: '+e.message)}
+  h.checks.kpi={system_action_engine:'raos_compute_payroll_month',legacy_updateAllKpiRAOS_used_by_system:false,migration_reconcile_required:'raos_082_system_v3_payroll_reconcile_NOT_APPLIED.sql'};h.checks.access_policy={page_roles:_WEB_API_PAGE_ROLES,write_roles:['admin','direksi'],management:'view_only'};h.status=h.blockers.length?'warning':(h.warnings.length?'partial':'success');return _webJson({ok:true,action:'system_health',label:'Audit Health Sistem',health:h,by:caller.email,role:caller.role})}
+function _webVerifyCaller_(token){try{var res=UrlFetchApp.fetch(CONFIG.SUPABASE_URL+'/auth/v1/user',{method:'GET',headers:{apikey:CONFIG.SUPABASE_KEY,Authorization:'Bearer '+token},muteHttpExceptions:true});if(res.getResponseCode()!==200)return {ok:false,error:'invalid_token',http:res.getResponseCode()};var user=JSON.parse(res.getContentText());if(!user||!user.id)return {ok:false,error:'user_not_found'};var profs=callSupabase('user_profiles?id=eq.'+encodeURIComponent(user.id)+'&select=role,is_active,full_name')||[];if(!profs[0])return {ok:false,error:'profile_not_found'};var p=profs[0];if(!p.is_active)return {ok:false,error:'inactive'};if(_WEB_API_PAGE_ROLES.indexOf(p.role)<0)return {ok:false,error:'role_denied',role:p.role};return {ok:true,user_id:user.id,email:user.email||user.id,role:p.role,full_name:p.full_name};}catch(e){return {ok:false,error:'verify_throw',detail:e.message||String(e)}}}
+function _webJson(obj){return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON)}

@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Megaphone, Send } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { can } from '@/lib/accessPolicy'
+import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 
 interface Props {
   senderId: string
@@ -10,7 +12,7 @@ interface Props {
 }
 
 /**
- * Announcement broadcast tool untuk direksi/admin/management.
+ * Announcement broadcast tool untuk Admin/Direksi/Direktur.
  *
  * Post pesan ke room global "Pengumuman" (branch_id IS NULL). Trigger DB
  * `raos_notify_new_chat_message` otomatis dispatch push kategori
@@ -21,7 +23,6 @@ interface Props {
  * broadcast cepat tanpa harus buka /chat.
  */
 
-const ALLOWED_ROLES = ['admin', 'management', 'direksi']
 
 export default function AnnouncementBroadcast({ senderId, senderRole }: Props) {
   const [roomId, setRoomId] = useState<string | null>(null)
@@ -39,13 +40,13 @@ export default function AnnouncementBroadcast({ senderId, senderRole }: Props) {
       .limit(1)
       .maybeSingle()
       .then(({ data, error }) => {
-        if (error) { setRoomError(error.message); return }
+        if (error) { console.warn('[AnnouncementBroadcast] room lookup failed', runtimeTechnicalMessage(error)); setRoomError(runtimeMessage(error,'Room Pengumuman tidak dapat dimuat.')); return }
         if (!data) { setRoomError('Room "Pengumuman" tidak ditemukan.'); return }
         setRoomId(data.id)
       })
   }, [])
 
-  if (!ALLOWED_ROLES.includes(senderRole)) return null
+  if (!can(senderRole,'announcement:broadcast')) return null
 
   async function handleSend() {
     if (!roomId) return
@@ -59,7 +60,7 @@ export default function AnnouncementBroadcast({ senderId, senderRole }: Props) {
       content,
     })
     setSending(false)
-    if (error) { alert('Gagal broadcast: ' + error.message); return }
+    if (error) { console.warn('[AnnouncementBroadcast] send failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal mengirim pengumuman.')); return }
     setText('')
     setLastSentAt(new Date())
   }

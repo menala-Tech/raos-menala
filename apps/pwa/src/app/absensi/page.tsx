@@ -7,17 +7,21 @@ import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import {
-  ArrowLeft, Camera, MapPin, CheckCircle2, Clock, UserCheck,
-  Fingerprint, Navigation, AlertTriangle
+  ArrowLeft, Camera, CheckCircle2, Clock, UserCheck,
+  Fingerprint, Navigation
 } from 'lucide-react'
 import Link from 'next/link'
-import SelfieCapture from '@/components/SelfieCapture'
-import { checkGeofence, shouldBlockByGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
+import FullBodyRearCamera from '@/components/FullBodyRearCamera'
+import { checkGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
 import { logActivity } from '@/lib/activity'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import { detectCurrentShift, formatShiftTime, isLate, type Shift } from '@/lib/shift'
 import type { UserProfile, Attendance } from '@/types'
+import { branchDateKey } from '@/lib/branchTime'
+import { useSystemConfigNumber } from '@/lib/useSystemConfig'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import { deriveOperationalGate } from '@/lib/operational-geofence-gate'
 
 export default function AbsensiPage() {
   const router = useRouter()
@@ -26,13 +30,14 @@ export default function AbsensiPage() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [locationValid, setLocationValid] = useState(false)
   const [geofence, setGeofence] = useState<GeofenceResult | null>(null)
-  const [locationStatus, setLocationStatus] = useState<'checking' | 'done' | 'unavailable'>('checking')
+  const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid' | 'unavailable'>('checking')
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState<'form' | 'camera' | 'success'>('form')
   const [type, setType] = useState<'in' | 'out'>('in')
   const [selfieBlob, setSelfieBlob] = useState<Blob | null>(null)
   const [shift, setShift] = useState<Shift | null>(null)
   const [recentAttendance, setRecentAttendance] = useState<Attendance[]>([])
+  const { value: geofenceTolerance } = useSystemConfigNumber('GEOFENCE_TOLERANCE_METER', GEOFENCE_TOLERANCE_METERS)
 
   useEffect(() => {
     // Init dulu untuk dapat user.branch_id (cabang yang di-assign admin di
@@ -56,15 +61,15 @@ export default function AbsensiPage() {
           const result = await checkGeofence(fix.lat, fix.lng, userBranchId)
           setGeofence(result)
           setLocationValid(result.isValid)
-          setLocationStatus('done')
+          setLocationStatus(result.isValid ? 'valid' : 'invalid')
         },
         onUnavailable: () => setLocationStatus('unavailable'),
       })
 
       // Shift otomatis (spec Absensi.md: Pagi/Siang/Malam by jam sekarang)
-      detectCurrentShift().then(setShift)
+      detectCurrentShift((profile as any)?.branches?.timezone).then(setShift)
 
-      const dateStr = new Date().toISOString().split('T')[0]
+      const dateStr = branchDateKey((profile as any)?.branches?.timezone)
       const { data: att } = await supabase
         .from('raos_attendance').select('*').eq('staff_id', session.user.id).eq('date', dateStr).single()
       setToday(att)
@@ -82,9 +87,24 @@ export default function AbsensiPage() {
     return () => { abortGps?.() }
   }, [router])
 
+  async function refreshTodayAttendance(){
+    if(!user)return
+    const dateStr=branchDateKey((user as any)?.branches?.timezone)
+    const {data}=await supabase.from('raos_attendance').select('*').eq('staff_id',user.id).eq('date',dateStr).maybeSingle()
+    setToday(data as Attendance | null)
+  }
+  useRealtimeRefresh(`attendance-${user?.id ?? 'anon'}`,[{table:'raos_attendance',filter:user?.id?`staff_id=eq.${user.id}`:undefined}],refreshTodayAttendance,250,!!user?.id)
+  const operationalGate = deriveOperationalGate({
+    role: user?.role,
+    geofence,
+    locationStatus,
+    toleranceMeters: geofenceTolerance,
+    isGeofenceExempt: (user as any)?.is_geofence_exempt,
+  })
+
   async function handleAbsensi(absenType: 'in' | 'out') {
     if (!user) return
-    if (shouldBlockByGeofence(user.role, geofence, locationStatus, (user as any).is_geofence_exempt)) {
+    if (!operationalGate.attendance) {
       const overshoot = geofence?.overshootMeters
       const pointName = geofence?.nearestPointName
       // Kalau overshoot null berarti checkGeofence tidak ketemu pickup point
@@ -96,8 +116,8 @@ export default function AbsensiPage() {
           ? 'Menunggu lokasi terdeteksi. Coba beberapa detik lagi.'
           : overshoot === null || overshoot === undefined
             ? 'Data pickup point cabang belum di-setup. Hubungi admin untuk konfigurasi lokasi.'
-            : `Anda ${overshoot}m di luar radius ${pointName ?? 'lokasi cabang'}. Batas toleransi ${GEOFENCE_TOLERANCE_METERS}m — absensi dibatalkan.`
-      alert(reason)
+            : `Anda ${overshoot}m di luar radius ${pointName ?? 'lokasi cabang'}. Batas toleransi ${geofenceTolerance}m — absensi dibatalkan.`
+      alert(operationalGate.reason ?? 'Absensi belum bisa diproses dari lokasi saat ini.')
       return
     }
     setType(absenType)
@@ -115,7 +135,7 @@ export default function AbsensiPage() {
   async function submitAbsensi() {
     if (!user || !selfieBlob) return
     setLoading(true)
-    const dateStr = new Date().toISOString().split('T')[0]
+    const dateStr = branchDateKey((user as any)?.branches?.timezone)
     const now = new Date().toISOString()
     // Selfie upload — kalau gagal karena network, selfie blob ikut dienqueue
     // (syncer akan upload saat online + inject path ke row sebelum insert).
@@ -127,7 +147,7 @@ export default function AbsensiPage() {
     const pendingPath = `${user.id}/${type}-${Date.now()}.jpg`
 
     if (type === 'in') {
-      const status = shift && isLate(shift, new Date()) ? 'terlambat' : 'hadir'
+      const status = shift && isLate(shift, new Date(), (user as any)?.branches?.timezone) ? 'terlambat' : 'hadir'
       const payload = {
         staff_id: user.id, branch_id: user.branch_id, date: dateStr,
         shift_id: shift?.id ?? null,
@@ -207,8 +227,8 @@ export default function AbsensiPage() {
         >
           <Navigation size={13} className="flex-shrink-0" />
           {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
-          {locationStatus === 'unavailable' && 'GPS tidak terdeteksi — absensi tetap bisa dilakukan'}
-          {locationStatus === 'done' && geofence && (
+          {locationStatus === 'unavailable' && 'GPS tidak terdeteksi — Staff diblok sampai lokasi aktif'}
+          {locationStatus !== 'checking' && locationStatus !== 'unavailable' && geofence && (
             geofence.isValid
               ? `✓ Lokasi valid — ${geofence.nearestPointName ?? 'lokasi cabang'} (${geofence.distanceMeters ?? 0}m)`
               : geofence.nearestPointName === null || geofence.distanceMeters === null
@@ -247,16 +267,16 @@ export default function AbsensiPage() {
                   <p className="text-3xl font-black text-secondary mt-1">{timeStr} WIB</p>
                   <p className="text-xs text-gray-400 mt-1">{dateStr}</p>
                 </div>
-                {locationStatus === 'done' && geofence && (
+                {locationStatus !== 'checking' && locationStatus !== 'unavailable' && geofence && (
                   <div className={`text-center text-xs font-bold py-1.5 rounded-lg
                     ${geofence.isValid ? 'bg-green-100 text-green-700'
-                      : (geofence.overshootMeters ?? 0) > GEOFENCE_TOLERANCE_METERS && user?.role === 'staff'
+                      : (geofence.overshootMeters ?? 0) > geofenceTolerance && user?.role === 'staff'
                         ? 'bg-red-100 text-red-700'
                         : 'bg-yellow-100 text-yellow-700'}`}>
                     {geofence.isValid
                       ? `✓ DALAM AREA — ${geofence.nearestPointName}`
-                      : (geofence.overshootMeters ?? 0) > GEOFENCE_TOLERANCE_METERS && user?.role === 'staff'
-                        ? `✕ DILUAR RADIUS — ${geofence.nearestPointName} (+${geofence.overshootMeters}m, batas ${GEOFENCE_TOLERANCE_METERS}m)`
+                      : (geofence.overshootMeters ?? 0) > geofenceTolerance && user?.role === 'staff'
+                        ? `✕ DILUAR RADIUS — ${geofence.nearestPointName} (+${geofence.overshootMeters}m, batas ${geofenceTolerance}m)`
                         : `⚠ ${geofence.nearestPointName} — ${geofence.distanceMeters}m dari titik`}
                   </div>
                 )}
@@ -268,7 +288,7 @@ export default function AbsensiPage() {
                   ABSENSI MASUK
                 </button>
                 <p className="text-[10px] text-gray-400 text-center">
-                  Anda berada di area yang valid. Pastikan lokasi sesuai sebelum absen.
+                  {operationalGate.reason ?? 'Anda berada di area yang valid. Pastikan lokasi sesuai sebelum absen.'}
                 </p>
               </div>
             )}
@@ -320,7 +340,7 @@ export default function AbsensiPage() {
                   ABSENSI PULANG
                 </button>
                 <p className="text-[10px] text-gray-400 text-center">
-                  Anda berada di area yang valid. Pastikan lokasi sesuai sebelum absen.
+                  {operationalGate.reason ?? 'Anda berada di area yang valid. Pastikan lokasi sesuai sebelum absen.'}
                 </p>
               </div>
             )}
@@ -340,13 +360,13 @@ export default function AbsensiPage() {
           <div className="card space-y-4">
             <div className="text-center">
               <Camera size={24} className="text-primary mx-auto mb-2" />
-              <p className="font-bold text-gray-800 text-sm">Foto Selfie</p>
+              <p className="font-bold text-gray-800 text-sm">Foto Full Body</p>
               <p className="text-xs text-gray-500 mt-1">
-                Ambil foto selfie untuk verifikasi absensi {type === 'in' ? 'masuk' : 'pulang'}
+                Ambil foto full body untuk verifikasi absensi {type === 'in' ? 'masuk' : 'pulang'}
               </p>
-              <p className="text-[10px] text-gray-400 mt-0.5">Pastikan wajah terlihat jelas</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">Pastikan seluruh badan terlihat jelas di dalam frame</p>
             </div>
-            <SelfieCapture onCapture={blob => setSelfieBlob(blob)} />
+            <FullBodyRearCamera onCapture={blob => setSelfieBlob(blob)} />
             {selfieBlob && (
               <button
                 className="btn-primary flex items-center justify-center gap-2"

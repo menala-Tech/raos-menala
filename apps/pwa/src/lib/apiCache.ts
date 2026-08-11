@@ -47,7 +47,9 @@ function _pickTTL(key: string): number {
   return TTL_BY_PREFIX[prefix] ?? DEFAULT_TTL_MS
 }
 
-function _serializeKey(key: string | (string | number | boolean | null | undefined)[]): string {
+type CacheKey = string | readonly (string | number | boolean | null | undefined)[]
+
+function _serializeKey(key: CacheKey): string {
   if (typeof key === 'string') return key
   return key.map(k => k == null ? '_' : String(k)).join('|')
 }
@@ -62,7 +64,7 @@ type CachedEnvelope<T> = {
  * (instant render kalau cache hit, kemudian fetch fresh di background).
  * Return null kalau tidak ada / expired.
  */
-export function cacheReadSync<T>(key: string | (string | number | boolean | null | undefined)[], ttlMs?: number): T | null {
+export function cacheReadSync<T>(key: CacheKey, ttlMs?: number): T | null {
   return cacheRead<T>(_serializeKey(key), ttlMs)
 }
 
@@ -70,7 +72,7 @@ export function cacheReadSync<T>(key: string | (string | number | boolean | null
  * Low-level cache write — pakai saat mutasi manual (setelah fetch fresh
  * di useEffect atau setelah delete/update row).
  */
-export function cacheWriteSync<T>(key: string | (string | number | boolean | null | undefined)[], data: T): void {
+export function cacheWriteSync<T>(key: CacheKey, data: T): void {
   cacheWrite<T>(_serializeKey(key), data)
 }
 
@@ -101,7 +103,7 @@ function cacheWrite<T>(key: string, data: T): void {
 /**
  * Invalidate 1 key (force re-fetch di next useCachedQuery mount).
  */
-export function cacheInvalidate(key: string | (string | number | boolean | null | undefined)[]): void {
+export function cacheInvalidate(key: CacheKey): void {
   if (typeof window === 'undefined') return
   try {
     localStorage.removeItem(CACHE_PREFIX + _serializeKey(key))
@@ -134,7 +136,7 @@ export function cacheClearAll(): number {
  * Cocok untuk service worker / one-shot fetch di event handler.
  */
 export async function getCached<T>(
-  key: string | (string | number | boolean | null | undefined)[],
+  key: CacheKey,
   fetcher: () => Promise<T>,
   opts: { ttlMs?: number; forceRefresh?: boolean } = {}
 ): Promise<T> {
@@ -183,7 +185,7 @@ export type CachedQueryResult<T> = {
  * berubah otomatis kalau dependency berubah — mis. `['kpi', staffId, month]`.
  */
 export function useCachedQuery<T>(
-  key: string | (string | number | boolean | null | undefined)[],
+  key: CacheKey,
   fetcher: () => Promise<T>,
   opts: UseCachedQueryOpts = {}
 ): CachedQueryResult<T> {

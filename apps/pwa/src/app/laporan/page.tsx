@@ -5,9 +5,12 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
+import BrandLoadingShell from '@/components/BrandLoadingShell'
 import { ArrowLeft, Download, FileSpreadsheet, Printer, TrendingUp, Banknote, UserCheck, ScanLine } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
+import { can } from '@/lib/accessPolicy'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 
 type RangeKey = 'harian' | 'mingguan' | 'bulanan'
 
@@ -35,8 +38,8 @@ export default function LaporanPage() {
   const [loading, setLoading] = useState(true)
   const [authorized, setAuthorized] = useState(false)
 
-  const loadReport = useCallback(async (days: number, opts: { forceRefresh?: boolean } = {}) => {
-    const cacheKey = ['laporan', 'aggregate', days]
+  const loadReport = useCallback(async (days: number, opts: { forceRefresh?: boolean } = {}, profile?: UserProfile | null) => {
+    const cacheKey = ['laporan','aggregate',profile?.id,profile?.role,profile?.branch_id,days]
 
     // Phase 1: instant render kalau cache ada
     if (!opts.forceRefresh) {
@@ -106,13 +109,13 @@ export default function LaporanPage() {
         .select('*, branches(*)')
         .eq('id', session.user.id)
         .single()
-      if (!profile || !['koordinator', 'admin', 'management', 'direksi'].includes(profile.role)) {
+      if (!profile || !can(profile.role, 'report:read')) {
         router.push('/dashboard')
         return
       }
       setUser(profile)
       setAuthorized(true)
-      loadReport(RANGES.find(r => r.key === range)!.days)
+      loadReport(RANGES.find(r => r.key === range)!.days,{},profile)
     }
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -120,8 +123,10 @@ export default function LaporanPage() {
 
   function changeRange(key: RangeKey) {
     setRange(key)
-    loadReport(RANGES.find(r => r.key === key)!.days)
+    loadReport(RANGES.find(r => r.key === key)!.days,{},user)
   }
+
+  useRealtimeRefresh(`laporan-${user?.id ?? 'anon'}`,[{table:'scan_orders'},{table:'raos_attendance'}],()=>authorized?loadReport(RANGES.find(r=>r.key===range)!.days,{},user):undefined,500,authorized&&!!user?.id)
 
   const totals = rows.reduce(
     (acc, r) => ({
@@ -154,7 +159,7 @@ export default function LaporanPage() {
     window.print()
   }
 
-  if (!authorized) return null
+  if (!authorized) return <BrandLoadingShell label="Memverifikasi akses laporan..." />
 
   return (
     <AppShell>

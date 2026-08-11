@@ -5,12 +5,16 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Users } from 'lucide-react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { enrichChatMessages, loadChatDirectory } from '@/lib/chatProfileDirectory'
+import { can } from '@/lib/accessPolicy'
+import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 // Note: sesi 22 — parseIsiSaldoCommand & parseDriverQueueCommand tidak
 // lagi digunakan di composer sesuai spec RIFIM OS "tanpa teks command".
 // Interactive Action Cards (IsiSaldoBottomSheet, AntrianDriverBottomSheet)
 // menggantikan alur ini. Helper submit* tetap dipakai oleh bottom sheets.
 import { scanContent, formatModerationWarning } from '@/lib/moderation'
+import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 import { logActivity } from '@/lib/activity'
 import type { DriverPayload, QueuePayload } from '@/lib/actionCardParser'
 import IsiSaldoBottomSheet from '@/components/IsiSaldoBottomSheet'
@@ -65,7 +69,7 @@ import {
 // ─── Entry ────────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  return <Suspense fallback={null}><ChatPageInner /></Suspense>
+  return <Suspense fallback={<div className="min-h-screen bg-secondary flex items-center justify-center"><MenalaLogo size={72} variant="splash" tone="onNavy" /></div>}><ChatPageInner /></Suspense>
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -116,7 +120,7 @@ function ChatPageInner() {
   const [activeRoomBranch, setActiveRoomBranch] = useState<{
     id: string; slug: string | null; name: string | null; saldo_nominal_options: number[]
   } | null>(null)
-  const showSaldoRequestButton = isSaldoRoomContext(activeRoom, activeRoomBranch)
+  const showSaldoRequestButton = can(user?.role,'saldo:submit') && isSaldoRoomContext(activeRoom, activeRoomBranch)
   // Feedback 1 Agu 2026: tombol "+ Antrian Driver" di composer chat hanya
   // dimunculkan untuk role driver (self-request). Staff/koord/mgmt/admin
   // pakai /drivers page (tombol per driver) untuk Panggil/Selesai/Request.
@@ -209,24 +213,14 @@ function ChatPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
-  useEffect(() => { if (activeRoom === null && user) loadRooms() }, [activeRoom, user, loadRooms])
-
-  useEffect(() => {
-    if (!user) return
-    const channel = supabase
-      .channel('chat-rooms')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_rooms' }, () => { void loadRooms() })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_rooms' }, () => { void loadRooms() })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_rooms' }, () => { void loadRooms() })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, () => { void loadRooms() })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_messages' }, () => { void loadRooms() })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_room_members' }, () => { void loadRooms() })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_room_members' }, () => { void loadRooms() })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_room_members' }, () => { void loadRooms() })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [user, loadRooms])
+  useEffect(() => { if (activeRoom === null && user && rooms.length === 0) void loadRooms() }, [activeRoom, user, rooms.length, loadRooms])
+  useRealtimeRefresh(
+    `chat-room-list-${user?.id ?? 'anon'}`,
+    [{table:'chat_rooms'},{table:'chat_messages'},{table:'chat_room_members'}],
+    ()=>void loadRooms(),
+    250,
+    !!user?.id,
+  )
 
   const loadMessages = useCallback(async (roomId: string) => {
     let clearedBefore: string | null = null
@@ -240,11 +234,11 @@ function ChatPageInner() {
     }
     let q = supabase
       .from('chat_messages')
-      .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)')
+      .select('*')
       .eq('room_id', roomId)
     if (clearedBefore) q = q.gt('created_at', clearedBefore)
     const { data } = await q.order('created_at').limit(50)
-    const rows = data ?? []
+    const rows = await enrichChatMessages(roomId,(data ?? []) as ChatMessage[])
     // Race guard: kalau user sudah pindah ke room lain sebelum fetch return,
     // jangan setMessages pakai data room lama (bikin bubble stale).
     if (activeRoomIdRef.current !== roomId) return
@@ -273,10 +267,12 @@ function ChatPageInner() {
   async function loadPinnedMessage(roomId: string) {
     const { data } = await supabase
       .from('chat_messages')
-      .select('*, user_profiles!chat_messages_sender_id_fkey(full_name)')
+      .select('*')
       .eq('room_id', roomId).eq('is_pinned', true)
       .order('pinned_at', { ascending: false }).limit(1).maybeSingle()
-    setPinnedMsg(data ?? null)
+    if(!data){setPinnedMsg(null);return}
+    const [enrichedPinned]=await enrichChatMessages(roomId,[data as ChatMessage])
+    setPinnedMsg(enrichedPinned as ChatMessage)
   }
 
   async function loadPolls(roomId: string) {
@@ -390,26 +386,12 @@ function ChatPageInner() {
         .then(({ data }) => setRoomDrivers((data ?? []) as any[]))
       setQueueSummary(null)
     }
-    // Mention pool STAFF — ambil dari user_profiles scoped ke branch room
-    // + admin/mgmt/direksi (lintas cabang). Bukan dari chat_room_members
-    // (feedback 30 Juli malam: nama staff tidak muncul di @ dropdown).
-    // Untuk room global (branch_id null): semua staff aktif.
-    ;(async () => {
-      let q = supabase
-        .from('user_profiles')
-        .select('id, full_name, role, staff_id, branch_id')
-        .eq('is_active', true)
-        .order('full_name')
-      if (roomBranchId) {
-        // staff cabang OR role privileged (lintas cabang tetap bisa di-tag)
-        q = q.or(`branch_id.eq.${roomBranchId},role.in.(admin,management,direksi)`)
-      }
-      const { data } = await q.limit(200)
-      const asMembers: WorkspaceMember[] = (data ?? []).map((u: any) => ({
-        user_id: u.id,
-        user_profiles: { full_name: u.full_name, role: u.role, staff_id: u.staff_id },
-      }))
-      setRoomMembers(asMembers)
+    // Mention pool comes from the membership-scoped safe directory RPC.
+    ;(async()=>{
+      try{
+        const data=await loadChatDirectory(activeRoom.id)
+        setRoomMembers(data.map(p=>({user_id:p.user_id,joined_at:p.joined_at,user_profiles:{full_name:p.full_name,role:p.role,staff_id:p.staff_id}})) as WorkspaceMember[])
+      }catch(error){console.warn('[chat] safe directory load failed',error)}
     })()
     loadMessages(activeRoom.id)
     loadReactions(activeRoom.id)
@@ -428,9 +410,9 @@ function ChatPageInner() {
           // & role sender langsung tampil di realtime append.
           const { data: enriched } = await supabase
             .from('chat_messages')
-            .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)')
+            .select('*')
             .eq('id', raw.id).maybeSingle()
-          const msg = (enriched ?? raw) as ChatMessage
+          const [msg] = await enrichChatMessages(activeRoom.id,[(enriched ?? raw) as ChatMessage])
           setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
           supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
@@ -535,6 +517,10 @@ function ChatPageInner() {
 
   async function sendMessage(fileUrl?: string) {
     if (!activeRoom || !user) return
+    if ((activeRoom as any).branch_id == null && String((activeRoom as any).name ?? '').trim().toLowerCase() === 'pengumuman' && !can(user.role,'announcement:broadcast')) {
+      alert('Room Pengumuman hanya dapat ditulis oleh Admin/Direksi.')
+      return
+    }
     const content = text.trim()
     if (!content && !fileUrl) return
 
@@ -573,7 +559,7 @@ function ChatPageInner() {
     if (mentionsArr.length > 0) payload.mentions = mentionsArr
 
     const { data, error } = await supabase.from('chat_messages').insert(payload)
-      .select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+      .select('*').single()
     setSending(false)
     if (error && isNetworkError(error)) {
       await enqueue('chat_message', payload)
@@ -585,7 +571,7 @@ function ChatPageInner() {
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
       return
     }
-    if (error) { alert('Gagal kirim: ' + error.message); setText(content); return }
+    if (error) { console.warn('[chat] send failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal mengirim pesan.')); setText(content); return }
     if (data) {
       setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])
       setMentionsPending([])
@@ -593,45 +579,11 @@ function ChatPageInner() {
     }
   }
 
-  function setActionBusyFor(messageId: string, busy: boolean) {
-    setActionBusy(prev => ({ ...prev, [messageId]: busy }))
+  function showCanonicalActionNotice(kind: 'driver' | 'queue') {
+    const label = kind === 'driver' ? 'Driver' : 'Antrean'
+    alert(`${label} action card di Chat hanya tampilan. Jalankan aksi melalui modul canonical ${label}/Queue.`)
   }
 
-  async function updateActionCardMessage(messageId: string, content: string) {
-    const current = messages.find(m => m.id === messageId)
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .update({ content })
-      .eq('id', messageId)
-      .select('*')
-      .single()
-
-    if (error) {
-      alert('Gagal memperbarui action card: ' + error.message)
-      return null
-    }
-
-    setMessages(prev => prev.map(m => m.id === messageId ? { ...current, ...(data as ChatMessage), content } : m))
-    return data as ChatMessage
-  }
-
-  async function handleDriverAction(messageId: string, status: 'approved' | 'rejected' | 'active', payload: DriverPayload) {
-    setActionBusyFor(messageId, true)
-    try {
-      await updateActionCardMessage(messageId, JSON.stringify({ ...payload, status }))
-    } finally {
-      setActionBusyFor(messageId, false)
-    }
-  }
-
-  async function handleQueueAction(messageId: string, status: 'approved' | 'rejected' | 'done', payload: QueuePayload) {
-    setActionBusyFor(messageId, true)
-    try {
-      await updateActionCardMessage(messageId, JSON.stringify({ ...payload, status }))
-    } finally {
-      setActionBusyFor(messageId, false)
-    }
-  }
 
   // ── Attachment ────────────────────────────────────────────────────────────
 
@@ -696,7 +648,7 @@ function ChatPageInner() {
     const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: msgType,
       content: pendingFile.name, media_url: publicUrl,
-    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+    }).select('*').single()
     if (!msgErr && msg) {
       await supabase.from('chat_message_attachments').insert({
         message_id: msg.id, room_id: activeRoom.id, uploader_id: user.id,
@@ -724,9 +676,9 @@ function ChatPageInner() {
         const content = JSON.stringify({ lat, lng, accuracy: Math.round(accuracy) })
         const { data, error } = await supabase.from('chat_messages').insert({
           room_id: activeRoom.id, sender_id: user.id, type: 'location', content,
-        }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+        }).select('*').single()
         setSendingLocation(false)
-        if (error) { alert('Gagal kirim lokasi: ' + error.message); return }
+        if (error) { console.warn('[chat] location send failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal mengirim lokasi.')); return }
         if (data) {
           setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as ChatMessage])
           setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
@@ -754,7 +706,7 @@ function ChatPageInner() {
     const options: ChatPollOption[] = opts.map(t => ({ id: crypto.randomUUID(), text: t }))
     const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'poll', content: q,
-    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+    }).select('*').single()
     if (msgErr || !msg) { alert('Gagal buat polling'); setPollSending(false); return }
     const { data: poll, error: pollErr } = await supabase.from('chat_polls').insert({
       room_id: activeRoom.id, message_id: msg.id, creator_id: user.id,
@@ -839,10 +791,8 @@ function ChatPageInner() {
   async function openInfoSheet() {
     if (!activeRoom) return
     setRoomSheet('info'); setMembersLoading(true)
-    const { data } = await supabase.from('chat_room_members')
-      .select('user_id, joined_at, user_profiles(full_name, role, staff_id)')
-      .eq('room_id', activeRoom.id)
-    setRoomMembers((data ?? []) as unknown as WorkspaceMember[]); setMembersLoading(false)
+    const data=await loadChatDirectory(activeRoom.id)
+    setRoomMembers(data.map(p=>({user_id:p.user_id,joined_at:p.joined_at,user_profiles:{full_name:p.full_name,role:p.role,staff_id:p.staff_id}})) as WorkspaceMember[]); setMembersLoading(false)
   }
 
   async function openPribadiWithMember(otherUserId: string) {
@@ -957,7 +907,7 @@ function ChatPageInner() {
     const { data: msg, error: msgErr } = await supabase.from('chat_messages').insert({
       room_id: activeRoom.id, sender_id: user.id, type: 'audio',
       content: `Voice ${seconds}s`, media_url: publicUrl,
-    }).select('*, user_profiles!chat_messages_sender_id_fkey(full_name, role)').single()
+    }).select('*').single()
 
     if (msgErr) {
       console.error('[voice] insert message gagal:', msgErr)
@@ -983,27 +933,19 @@ function ChatPageInner() {
   async function openContactSheet() {
     setContactSheet(true)
     setContactLoading(true)
-    // Staff/koord/driver_manager cuma lihat kontak cabang sendiri.
-    // Admin/management/direksi lihat semua cabang.
-    const seesAllBranches = user && ['admin','management','direksi'].includes(user.role)
     const branchId: string | null = user?.branch_id ?? null
-
-    let staffQ = supabase
-      .from('user_profiles')
-      .select('id, full_name, role, staff_id, branch_id, branches(name)')
-      .eq('is_active', true)
-      .order('full_name')
-    if (!seesAllBranches && branchId) staffQ = staffQ.eq('branch_id', branchId)
-
+    const {data:profileRows,error:profileErr}=await supabase.rpc('raos_contact_directory')
+    if(profileErr)console.warn('[chat] contact directory failed',profileErr)
     let driverQ = supabase
       .from('raos_drivers')
       .select('id, driver_id, name, phone, vehicle_plate, branch_id, branches(name)')
       .eq('is_active', true)
       .order('name')
+    const seesAllBranches = user && ['admin','management','direksi','direktur'].includes(user.role)
     if (!seesAllBranches && branchId) driverQ = driverQ.eq('branch_id', branchId)
-
-    const [{ data: staffData }, { data: driverData }] = await Promise.all([staffQ, driverQ])
-    setContactList((staffData ?? []).filter(u => u.id !== user?.id) as unknown as WorkspaceContact[])
+    const {data:driverData}=await driverQ
+    const staffData=(profileRows??[]).map((p:any)=>({id:p.user_id,full_name:p.full_name,role:p.role,staff_id:p.staff_id,branch_id:p.branch_id,avatar_url:p.avatar_url,branches:p.branch_name?{name:p.branch_name}:null}))
+    setContactList(staffData.filter((u:any) => u.id !== user?.id) as unknown as WorkspaceContact[])
     setContactDrivers((driverData ?? []) as unknown as WorkspaceDriverContact[])
     setContactLoading(false)
   }
@@ -1045,24 +987,24 @@ function ChatPageInner() {
     if (!confirm(`Tinggalkan workspace "${activeRoom.name}"? Anda tidak akan menerima pesan baru sampai diundang ulang.`)) return
     const { error } = await supabase.from('chat_room_members')
       .delete().eq('room_id', activeRoom.id).eq('user_id', user.id)
-    if (error) { alert('Gagal keluar workspace: ' + error.message); return }
+    if (error) { console.warn('[chat] leave room failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal keluar workspace.')); return }
     setRoomSheet('none')
     setActiveRoom(null)
   }
 
   async function updateRetention(days: number | null) {
-    if (!activeRoom || !user) return
+    if (!activeRoom || !user || !can(user.role,'chat:moderate')) return
     const { error } = await supabase.rpc('set_chat_room_retention', {
       p_room_id: activeRoom.id, p_days: days,
     })
-    if (error) { alert('Gagal ubah retensi: ' + error.message); return }
+    if (error) { console.warn('[chat] retention update failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal mengubah retensi.')); return }
     setActiveRoom({ ...activeRoom, auto_delete_days: days ?? undefined })
   }
 
   async function deleteMessage(messageId: string) {
     if (!confirm('Hapus pesan ini? Aksi tidak bisa di-undo.')) return
     const { error } = await supabase.rpc('delete_chat_message', { p_message_id: messageId })
-    if (error) { alert('Gagal hapus pesan: ' + error.message); return }
+    if (error) { console.warn('[chat] delete message failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal menghapus pesan.')); return }
     setMessages(prev => prev.filter(m => m.id !== messageId))
     setActionMenu(null)
   }
@@ -1071,7 +1013,7 @@ function ChatPageInner() {
     if (!activeRoom || !user) return
     if (!confirm(`Sembunyikan semua pesan di workspace "${activeRoom.name}" hanya untuk Anda?\n\nPesan tetap ada untuk anggota lain. Pesan baru setelah ini akan tetap muncul.`)) return
     const { error } = await supabase.rpc('clear_chat_room_for_me', { p_room_id: activeRoom.id })
-    if (error) { alert('Gagal hapus: ' + error.message); return }
+    if (error) { console.warn('[chat] delete failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal menghapus pesan.')); return }
     setMessages([])
     setRoomSheet('none')
   }
@@ -1105,24 +1047,27 @@ function ChatPageInner() {
   // ── Pin ───────────────────────────────────────────────────────────────────
 
   async function pinMessage(messageId: string) {
-    if (!user) return
-    const { error } = await supabase.from('chat_messages')
-      .update({ is_pinned: true, pinned_at: new Date().toISOString(), pinned_by: user.id })
-      .eq('id', messageId)
-    if (!error) {
-      const msg = messages.find(m => m.id === messageId)
-      if (msg) setPinnedMsg({ ...msg, is_pinned: true })
-      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_pinned: true } : m))
-    }
+    if (!user || !can(user.role,'chat:moderate')) return
+    const { data, error } = await supabase.rpc('raos_set_chat_message_pin', {
+      p_message_id: messageId, p_pinned: true,
+    })
+    if (error) { alert('Gagal sematkan pesan.'); return }
+    const row=(data ?? {}) as any
+    const msg=messages.find(m=>m.id===messageId)
+    const next={...(msg ?? row),...row,is_pinned:true} as ChatMessage
+    setPinnedMsg(next)
+    setMessages(prev=>prev.map(m=>m.id===messageId?{...m,...row,is_pinned:true}:m))
     setActionMenu(null)
   }
 
   async function unpinMessage() {
-    if (!pinnedMsg) return
-    await supabase.from('chat_messages')
-      .update({ is_pinned: false, pinned_at: null, pinned_by: null })
-      .eq('id', pinnedMsg.id)
-    setMessages(prev => prev.map(m => m.id === pinnedMsg.id ? { ...m, is_pinned: false } : m))
+    if (!pinnedMsg || !user || !can(user.role,'chat:moderate')) return
+    const { data, error } = await supabase.rpc('raos_set_chat_message_pin', {
+      p_message_id: pinnedMsg.id, p_pinned: false,
+    })
+    if (error) { alert('Gagal melepas sematan pesan.'); return }
+    const row=(data ?? {}) as any
+    setMessages(prev=>prev.map(m=>m.id===pinnedMsg.id?{...m,...row,is_pinned:false}:m))
     setPinnedMsg(null)
   }
 
@@ -1194,7 +1139,9 @@ function ChatPageInner() {
     // ruang chat tidak habis oleh tabel antrian. Pantau antrian pindah ke
     // /drivers atau /antrian-driver.
     const showQueueSummary = false
-    const composerDisabled = uploading || sendingLocation || pollSending || uploadingAudio
+    const isAnnouncementRoom = (activeRoom as any).branch_id == null && String((activeRoom as any).name ?? '').trim().toLowerCase() === 'pengumuman'
+    const canWriteAnnouncement = !isAnnouncementRoom || can(user?.role,'announcement:broadcast')
+    const composerDisabled = uploading || sendingLocation || pollSending || uploadingAudio || !canWriteAnnouncement
 
     return (
       <SwipeBackWrapper onBack={() => setActiveRoom(null)}>
@@ -1292,7 +1239,7 @@ function ChatPageInner() {
           {pinnedMsg && (
             <WorkspacePinnedBanner
               pinned={pinnedMsg}
-              canUnpin={['admin', 'management', 'koordinator', 'direksi'].includes(user?.role ?? '')}
+              canUnpin={can(user?.role,'chat:moderate')}
               onScrollTo={() => msgRefs.current[pinnedMsg.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
               onUnpin={unpinMessage}
             />
@@ -1326,12 +1273,12 @@ function ChatPageInner() {
               onOpenActionMenu={setActionMenu}
               onStartLongPress={startLongPress}
               onCancelLongPress={cancelLongPress}
-              onDriverApprove={(id, p) => handleDriverAction(id, 'approved', p)}
-              onDriverReject={(id, p) => handleDriverAction(id, 'rejected', p)}
-              onDriverActivate={(id, p) => handleDriverAction(id, 'active', p)}
-              onQueueApprove={(id, p) => handleQueueAction(id, 'approved', p)}
-              onQueueReject={(id, p) => handleQueueAction(id, 'rejected', p)}
-              onQueueComplete={(id, p) => handleQueueAction(id, 'done', p)}
+              onDriverApprove={() => showCanonicalActionNotice('driver')}
+              onDriverReject={() => showCanonicalActionNotice('driver')}
+              onDriverActivate={() => showCanonicalActionNotice('driver')}
+              onQueueApprove={() => showCanonicalActionNotice('queue')}
+              onQueueReject={() => showCanonicalActionNotice('queue')}
+              onQueueComplete={() => showCanonicalActionNotice('queue')}
               onTagSender={tagSender}
             />
           )}

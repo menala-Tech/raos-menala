@@ -3,6 +3,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { updateMyNotificationPrefs } from '@/lib/profilePreferences'
+import { cacheClearAll } from '@/lib/apiCache'
+import { clearOfflineReadCache, clearOfflineReadScope} from '@/lib/offlineReadCache'
 import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
@@ -143,9 +146,8 @@ export default function SettingsPage() {
       const key = LABEL_TO_KEY[label]
       if (key) dbPrefs[key] = on
     }
-    await supabase.from('user_profiles')
-      .update({ notification_prefs: dbPrefs })
-      .eq('id', user.id)
+    const result=await updateMyNotificationPrefs(dbPrefs)
+    if(!result.ok) console.warn('[settings] notification prefs not persisted:',result.error)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
@@ -171,6 +173,10 @@ export default function SettingsPage() {
 
   async function handleLogout() {
     setLoggingOut(true)
+    cacheClearAll()
+    await clearOfflineReadScope(user?.id)
+    await clearOfflineReadCache()
+    localStorage.removeItem('raos_install_variant')
     await supabase.auth.signOut()
     router.push('/')
   }
@@ -397,20 +403,7 @@ function OptionPicker<T extends string>({ label, options, value, onChange }: {
 
 /* ================= SECTION: AKUN ================= */
 function SectionAkun({ user, onLogout }: { user: UserProfile | null; onLogout: () => void }) {
-  const [phone, setPhone] = useState(user?.phone ?? '')
-  const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState('')
   const isSSoT = user?.source === 'ssot_master_staff'
-
-  async function saveProfile() {
-    if (!user || isSSoT) return
-    setSaving(true)
-    const { error } = await supabase
-      .from('user_profiles').update({ phone }).eq('id', user.id)
-    setMsg(error ? 'Gagal menyimpan.' : 'Profil tersimpan ✓')
-    setSaving(false)
-    setTimeout(() => setMsg(''), 2000)
-  }
 
   return (
     <div className="space-y-3">
@@ -418,21 +411,7 @@ function SectionAkun({ user, onLogout }: { user: UserProfile | null; onLogout: (
         <Field label="Nama Lengkap" value={user?.full_name ?? '—'} readOnly />
         <Field label="Email" value={(user as any)?.email ?? '—'} readOnly />
         <Field label="ID Staff" value={user?.staff_id ?? '—'} readOnly />
-        <div>
-          <p className="text-xs text-gray-500 font-medium mb-1">No. WhatsApp</p>
-          <input
-            type="tel" value={phone} onChange={e => setPhone(e.target.value)}
-            placeholder="08xx-xxxx-xxxx"
-            disabled={isSSoT}
-            className={clsx('input', isSSoT && 'bg-gray-50 text-gray-500 cursor-not-allowed')}
-          />
-        </div>
-        {msg && <p className="text-xs text-green-600 font-semibold text-center">{msg}</p>}
-        {!isSSoT && (
-          <button className="btn-primary" onClick={saveProfile} disabled={saving}>
-            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
-          </button>
-        )}
+        <Field label="No. WhatsApp" value={user?.phone ?? '—'} readOnly />
       </div>
 
       {isSSoT ? (
@@ -444,7 +423,7 @@ function SectionAkun({ user, onLogout }: { user: UserProfile | null; onLogout: (
         </p>
       ) : (
         <p className="text-[10px] text-gray-400 px-1">
-          Untuk mengubah nama atau email, hubungi Admin melalui Chat Room.
+          Data identitas akun dikelola oleh Admin. Hubungi Admin melalui Chat Room untuk perubahan data.
         </p>
       )}
 
@@ -617,7 +596,7 @@ function SectionLokasi({ user, prefs, save }: {
 
         {/* Pickup points radio */}
         <p className="text-xs text-gray-500 font-medium mb-2">
-          Pickup Point â€” {branches.find(b => b.id === activeBranch)?.name ?? ''}
+          Pickup Point — {branches.find(b => b.id === activeBranch)?.name ?? ''}
         </p>
         <div className="space-y-2">
           {branchPoints.length === 0 && (

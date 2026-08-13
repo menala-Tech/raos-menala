@@ -10,16 +10,16 @@ import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
 import {
-  User, Smartphone, MapPin, Bell, Shield,
+  User, Smartphone, Calendar, Bell, Shield,
   Database, Info, HelpCircle, LogOut, ChevronRight, ChevronLeft,
   MessageCircle, Moon, Wifi, VolumeX, Lock, Eye, EyeOff,
-  Trash2, RefreshCcw, CheckCircle2, Loader2
+  Trash2, RefreshCcw, CheckCircle2, Loader2, Sun, Sunset, AlertCircle
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
-import type { UserProfile, Branch, PickupPoint } from '@/types'
+import type { UserProfile, Branch, Shift, ShiftScheduleBoardRow } from '@/types'
 
-type Section = null | 'akun' | 'aplikasi' | 'lokasi' | 'notifikasi' | 'keamanan' | 'data'
+type Section = null | 'akun' | 'aplikasi' | 'jadwal' | 'notifikasi' | 'keamanan' | 'data'
 
 const ROLE_COLORS: Record<string, string> = {
   staff:       'bg-green-100 text-green-700',
@@ -47,7 +47,6 @@ interface AppPrefs {
   reminderPagi: ShiftReminder
   reminderSiang: ShiftReminder
   reminderMalam: ShiftReminder
-  pickupPointId: string | null
 }
 
 const DEFAULT_PREFS: AppPrefs = {
@@ -70,7 +69,6 @@ const DEFAULT_PREFS: AppPrefs = {
   reminderPagi:  { masuk: '06:30', pulang: '15:00' },
   reminderSiang: { masuk: '14:30', pulang: '23:00' },
   reminderMalam: { masuk: '22:30', pulang: '07:00' },
-  pickupPointId: null,
 }
 
 function loadPrefs(): AppPrefs {
@@ -185,7 +183,7 @@ export default function SettingsPage() {
   if (section) {
     const TITLES: Record<string, string> = {
       akun: 'Pengaturan Akun', aplikasi: 'Pengaturan Aplikasi',
-      lokasi: 'Lokasi & Pickup Point', notifikasi: 'Notifikasi',
+      jadwal: 'Jadwal Kerja', notifikasi: 'Notifikasi',
       keamanan: 'Keamanan', data: 'Data & Sync',
     }
     return (
@@ -213,7 +211,7 @@ export default function SettingsPage() {
           <div className="px-4 py-4">
             {section === 'akun'       && <SectionAkun user={user} onLogout={handleLogout} />}
             {section === 'aplikasi'   && <SectionAplikasi prefs={prefs} save={savePrefs} />}
-            {section === 'lokasi'     && <SectionLokasi user={user} prefs={prefs} save={savePrefs} />}
+            {section === 'jadwal'     && <SectionJadwalKerja user={user} />}
             {section === 'notifikasi' && <SectionNotifikasi prefs={prefs} save={savePrefs} />}
             {section === 'keamanan'   && <SectionKeamanan />}
             {section === 'data'       && <SectionData />}
@@ -227,7 +225,7 @@ export default function SettingsPage() {
   const MENUS = [
     { key: 'akun',       icon: User,       label: 'Pengaturan Akun',       desc: 'Profil, email, password, foto' },
     { key: 'aplikasi',   icon: Smartphone, label: 'Pengaturan Aplikasi',   desc: 'Tema, bahasa, ukuran teks, suara' },
-    { key: 'lokasi',     icon: MapPin,     label: 'Lokasi & Pickup Point', desc: 'Terminal, pickup point aktif' },
+    { key: 'jadwal',     icon: Calendar,   label: 'Jadwal Kerja',          desc: 'Shift Pagi/Siang/Malam per cabang' },
     { key: 'notifikasi', icon: Bell,       label: 'Notifikasi',            desc: 'Jenis notifikasi & waktu pengingat' },
     { key: 'keamanan',   icon: Shield,     label: 'Keamanan',              desc: 'Password, sesi, perangkat' },
     { key: 'data',       icon: Database,   label: 'Data & Sync',           desc: 'Backup, cache, sinkronisasi' },
@@ -517,128 +515,247 @@ function SectionAplikasi({ prefs, save }: { prefs: AppPrefs; save: (p: AppPrefs)
 }
 
 /* ================= SECTION: LOKASI & PICKUP POINT ================= */
-function SectionLokasi({ user, prefs, save }: {
-  user: UserProfile | null; prefs: AppPrefs; save: (p: AppPrefs) => void
-}) {
+const SHIFT_META: Record<string, { icon: typeof Sun; color: string }> = {
+  Pagi:  { icon: Sun,    color: 'bg-green-100 text-green-700' },
+  Siang: { icon: Sunset, color: 'bg-orange-100 text-orange-700' },
+  Malam: { icon: Moon,   color: 'bg-indigo-100 text-indigo-700' },
+}
+
+function toDateStr(d: Date): string {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+function addDaysToDateStr(dateStr: string, delta: number): string {
+  const d = new Date(`${dateStr}T00:00:00`)
+  d.setDate(d.getDate() + delta)
+  return toDateStr(d)
+}
+function formatDateLabel(dateStr: string): string {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
+function SectionJadwalKerja({ user }: { user: UserProfile | null }) {
+  // Roster jadwal shift per cabang per tanggal — ganti "Lokasi & Pickup Point"
+  // yang selama ini kosong buat 8/9 cabang (pickup_point_id absensi/scan toh
+  // auto-detect via GPS geofence, bukan dari sini). Cuma admin & koordinator
+  // yang bisa ubah (RLS + trigger rate-limit di server jadi sumber kebenaran;
+  // gate role di sini cuma buat UX supaya staff nggak coba-coba tap).
+  const canBrowseBranches = user?.role === 'admin' || user?.role === 'direksi' || user?.role === 'management'
+  const canEdit = user?.role === 'admin' || user?.role === 'koordinator'
+
   const [branches, setBranches] = useState<Branch[]>([])
-  const [points, setPoints] = useState<PickupPoint[]>([])
-  const [activeBranch, setActiveBranch] = useState<string | null>(null)
-  const isStaffBranchLocked = user?.role === 'staff' && !!user?.branch_id
+  const [shifts, setShifts] = useState<Shift[]>([])
+  const [activeBranch, setActiveBranch] = useState<string | null>(user?.branch_id ?? null)
+  const [selectedDate, setSelectedDate] = useState(() => toDateStr(new Date()))
+  const [board, setBoard] = useState<ShiftScheduleBoardRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editingStaffId, setEditingStaffId] = useState<string | null>(null)
+  const [savingStaffId, setSavingStaffId] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState('')
+
   const lockedBranch = useMemo(() => {
-    if (!user?.branch_id) return null
-    return branches.find(branch => branch.id === user.branch_id)
-      ?? branches.find(branch => branch.code === user.branches?.code)
-      ?? null
-  }, [branches, user])
+    if (canBrowseBranches) return null
+    return user?.branches ?? branches.find(b => b.id === user?.branch_id) ?? null
+  }, [canBrowseBranches, user, branches])
 
   useEffect(() => {
-    async function load() {
-      const [{ data: br }, { data: pp }] = await Promise.all([
-        supabase.from('branches').select('*').eq('is_active', true).order('code'),
-        supabase.from('pickup_points').select('*').eq('is_active', true).order('code'),
+    async function loadStatic() {
+      const [{ data: sh }, brRes] = await Promise.all([
+        supabase.from('shifts').select('*').eq('is_active', true).order('start_time'),
+        canBrowseBranches ? supabase.from('branches').select('*').eq('is_active', true).order('code') : Promise.resolve({ data: null }),
       ])
-      setBranches(br ?? [])
-      setPoints(pp ?? [])
-      const nextLocked = (br ?? []).find(branch => branch.id === user?.branch_id)
-        ?? (br ?? []).find(branch => branch.code === user?.branches?.code)
-        ?? null
-      setActiveBranch(nextLocked?.id ?? user?.branch_id ?? br?.[0]?.id ?? null)
+      setShifts(sh ?? [])
+      if (canBrowseBranches) setBranches(brRes.data ?? [])
     }
-    load()
-  }, [user])
+    loadStatic()
+  }, [canBrowseBranches])
 
   useEffect(() => {
-    if (isStaffBranchLocked && lockedBranch && activeBranch !== lockedBranch.id) {
+    if (!canBrowseBranches && lockedBranch && activeBranch !== lockedBranch.id) {
       setActiveBranch(lockedBranch.id)
     }
-  }, [activeBranch, isStaffBranchLocked, lockedBranch])
+  }, [activeBranch, canBrowseBranches, lockedBranch])
 
-  const scopedBranches = isStaffBranchLocked && lockedBranch ? [lockedBranch] : branches
-  const activeBranchData = branches.find(branch => branch.id === activeBranch) ?? lockedBranch ?? null
-  const branchPoints = points.filter(point => point.branch_id === activeBranch)
+  const loadBoard = useCallback(async () => {
+    if (!activeBranch) { setBoard([]); setLoading(false); return }
+    setLoading(true)
+    setErrorMsg('')
+    const { data, error } = await supabase.rpc('raos_shift_schedule_board', {
+      p_branch_id: activeBranch, p_tanggal: selectedDate,
+    })
+    if (error) { setErrorMsg('Gagal memuat jadwal.'); setBoard([]) } else { setBoard(data ?? []) }
+    setLoading(false)
+  }, [activeBranch, selectedDate])
+
+  useEffect(() => { loadBoard() }, [loadBoard])
+
+  async function assignShift(staffId: string, scheduleId: string | null, shiftId: string) {
+    setSavingStaffId(staffId)
+    setErrorMsg('')
+    const { error } = scheduleId
+      ? await supabase.from('raos_shift_schedules').update({ shift_id: shiftId }).eq('id', scheduleId)
+      : await supabase.from('raos_shift_schedules').insert({
+          staff_id: staffId, branch_id: activeBranch, tanggal: selectedDate, shift_id: shiftId,
+        })
+    if (error) {
+      setErrorMsg(error.message.includes('rate_limited')
+        ? 'Jadwal staff ini sudah diubah dalam 7 hari terakhir. Coba lagi minggu depan.'
+        : 'Gagal menyimpan jadwal.')
+    } else {
+      setEditingStaffId(null)
+      await loadBoard()
+    }
+    setSavingStaffId(null)
+  }
+
+  async function removeShift(staffId: string, scheduleId: string) {
+    setSavingStaffId(staffId)
+    setErrorMsg('')
+    const { error } = await supabase.from('raos_shift_schedules').delete().eq('id', scheduleId)
+    if (error) {
+      setErrorMsg(error.message.includes('rate_limited')
+        ? 'Jadwal staff ini sudah diubah dalam 7 hari terakhir. Coba lagi minggu depan.'
+        : 'Gagal menghapus jadwal.')
+    } else {
+      setEditingStaffId(null)
+      await loadBoard()
+    }
+    setSavingStaffId(null)
+  }
+
+  const activeBranchData = canBrowseBranches ? branches.find(b => b.id === activeBranch) ?? null : lockedBranch
+  const isToday = selectedDate === toDateStr(new Date())
 
   return (
     <div className="space-y-3">
       <div className="card">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="min-w-0">
-            <p className="text-sm font-bold text-gray-800 truncate">{activeBranchData?.name ?? 'Lokasi Operasional'}</p>
-            <p className="text-xs text-gray-400">Lokasi aktif operasional</p>
+            <p className="text-sm font-bold text-gray-800 truncate">{activeBranchData?.name ?? 'Jadwal Kerja'}</p>
+            <p className="text-xs text-gray-400">Roster shift staff cabang</p>
           </div>
-          <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0">Aktif</span>
+          {!canEdit && (
+            <span className="bg-gray-100 text-gray-500 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0">Lihat saja</span>
+          )}
         </div>
 
-        {/* Terminal tabs */}
-        <p className="text-xs text-gray-500 font-medium mb-2">Terminal</p>
-        <div className="mb-4 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex w-max min-w-full gap-2">
-            {scopedBranches.map(b => (
-              <button
-                key={b.id}
-                onClick={() => setActiveBranch(b.id)}
-                disabled={isStaffBranchLocked && b.id !== lockedBranch?.id}
-                className={clsx(
-                  'flex-none min-w-[72px] px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors',
-                  activeBranch === b.id ? 'bg-primary text-secondary' : 'bg-gray-100 text-gray-500',
-                  isStaffBranchLocked && b.id !== lockedBranch?.id && 'opacity-40 cursor-not-allowed'
-                )}
-              >
-                {b.code}
-              </button>
-            ))}
-          </div>
-        </div>
-        {isStaffBranchLocked && lockedBranch && (
-          <p className="mb-4 text-[11px] text-gray-400">
-            Terminal staff terkunci ke cabang profil: <span className="font-semibold text-gray-600">{lockedBranch.code}</span>.
-          </p>
+        {canBrowseBranches && (
+          <>
+            <p className="text-xs text-gray-500 font-medium mb-2">Cabang</p>
+            <div className="mb-4 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex w-max min-w-full gap-2">
+                {branches.map(b => (
+                  <button
+                    key={b.id}
+                    onClick={() => setActiveBranch(b.id)}
+                    className={clsx(
+                      'flex-none min-w-[72px] px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors',
+                      activeBranch === b.id ? 'bg-primary text-secondary' : 'bg-gray-100 text-gray-500'
+                    )}
+                  >
+                    {b.code}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
         )}
 
-        {/* Pickup points radio */}
-        <p className="text-xs text-gray-500 font-medium mb-2">
-          Pickup Point — {branches.find(b => b.id === activeBranch)?.name ?? ''}
-        </p>
-        <div className="space-y-2">
-          {branchPoints.length === 0 && (
-            <p className="text-xs text-gray-400 py-3 text-center">Tidak ada pickup point aktif di terminal ini</p>
-          )}
-          {branchPoints.map(p => {
-            const selected = prefs.pickupPointId === p.id
-            return (
-              <button
-                key={p.id}
-                onClick={() => {
-                  // Pickup point is a local UI preference only. Branch identity is canonical
-                  // master data and must never be self-mutated from Settings.
-                  save({ ...prefs, pickupPointId: p.id })
-                }}
-                className={clsx(
-                  'w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors text-left',
-                  selected ? 'border-primary bg-primary/5' : 'border-gray-100 bg-white'
-                )}
-              >
-                <div className={clsx(
-                  'w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0',
-                  selected ? 'border-primary' : 'border-gray-300'
-                )}>
-                  {selected && <div className="w-2 h-2 rounded-full bg-primary" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-800">{p.name}</p>
-                  <p className="text-[10px] text-gray-400">Radius validasi: {p.radius_meters}m</p>
-                </div>
-                <span className="bg-green-100 text-green-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
-                  Aktif
-                </span>
+        {/* Navigasi tanggal */}
+        <div className="flex items-center justify-between gap-2 mb-4 bg-gray-50 rounded-xl px-2 py-2">
+          <button onClick={() => setSelectedDate(d => addDaysToDateStr(d, -1))} className="p-1.5 text-gray-500">
+            <ChevronLeft size={18} />
+          </button>
+          <div className="text-center">
+            <p className="text-sm font-bold text-gray-800 capitalize">{formatDateLabel(selectedDate)}</p>
+            {!isToday && (
+              <button onClick={() => setSelectedDate(toDateStr(new Date()))} className="text-[10px] text-primary font-semibold">
+                Kembali ke hari ini
               </button>
+            )}
+          </div>
+          <button onClick={() => setSelectedDate(d => addDaysToDateStr(d, 1))} className="p-1.5 text-gray-500">
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div className="mb-3 bg-red-50 border border-red-100 rounded-xl px-3 py-2 flex items-start gap-2 text-red-600 text-xs">
+            <AlertCircle size={14} className="flex-shrink-0 mt-0.5" /> {errorMsg}
+          </div>
+        )}
+
+        {/* Roster */}
+        <div className="space-y-2">
+          {loading && <p className="text-xs text-gray-400 py-3 text-center">Memuat jadwal…</p>}
+          {!loading && board.length === 0 && (
+            <p className="text-xs text-gray-400 py-3 text-center">Belum ada staff aktif di cabang ini</p>
+          )}
+          {!loading && board.map(row => {
+            const meta = row.shift_name ? SHIFT_META[row.shift_name] : null
+            const isEditing = editingStaffId === row.staff_id
+            const isSaving = savingStaffId === row.staff_id
+            return (
+              <div key={row.staff_id} className="rounded-xl border-2 border-gray-100 overflow-hidden">
+                <button
+                  onClick={() => canEdit && setEditingStaffId(isEditing ? null : row.staff_id)}
+                  disabled={!canEdit}
+                  className="w-full flex items-center gap-3 p-3 text-left bg-white disabled:cursor-default"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{row.full_name}</p>
+                  </div>
+                  {meta ? (
+                    <span className={clsx('flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0', meta.color)}>
+                      <meta.icon size={11} /> {row.shift_name}
+                    </span>
+                  ) : (
+                    <span className="bg-gray-100 text-gray-400 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0">
+                      Belum dijadwalkan
+                    </span>
+                  )}
+                </button>
+                {isEditing && canEdit && (
+                  <div className="px-3 pb-3 pt-1 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                    {shifts.map(s => {
+                      const m = SHIFT_META[s.name]
+                      const selected = row.shift_id === s.id
+                      return (
+                        <button
+                          key={s.id}
+                          disabled={isSaving}
+                          onClick={() => assignShift(row.staff_id, row.schedule_id, s.id)}
+                          className={clsx(
+                            'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-colors',
+                            selected ? (m?.color ?? 'bg-primary text-secondary') : 'bg-white border border-gray-200 text-gray-500'
+                          )}
+                        >
+                          {m && <m.icon size={12} />} {s.name}
+                        </button>
+                      )
+                    })}
+                    {row.schedule_id && (
+                      <button
+                        disabled={isSaving}
+                        onClick={() => removeShift(row.staff_id, row.schedule_id!)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-50 text-red-500 border border-red-100"
+                      >
+                        <Trash2 size={12} /> Hapus
+                      </button>
+                    )}
+                    {isSaving && <Loader2 size={14} className="animate-spin text-gray-400" />}
+                  </div>
+                )}
+              </div>
             )
           })}
         </div>
       </div>
 
       <p className="text-[10px] text-gray-400 px-1">
-        Pickup point pilihan dipakai sebagai preferensi tampilan lokal. Validasi absensi &amp; scan tetap
-        otomatis mendeteksi pickup point terdekat via GPS geo-fence dan tidak mengubah terminal/branch akun.
+        {canEdit
+          ? 'Jadwal masing-masing staff cuma bisa diubah 1x dalam 7 hari terakhir. Mengisi jadwal tanggal baru (belum pernah diisi) tidak kena batas ini.'
+          : 'Jadwal kerja cabang kamu — cuma Admin & Koordinator yang bisa mengubah.'}
       </p>
     </div>
   )

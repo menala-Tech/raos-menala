@@ -18,6 +18,25 @@ export interface PickupPoint {
   is_active: boolean
 }
 
+export interface Shift {
+  id: string
+  name: string
+  start_time: string
+  end_time: string
+  tolerance_minutes: number
+  is_active: boolean
+}
+
+/** Return type dari RPC raos_shift_schedule_board(p_branch_id, p_tanggal) */
+export interface ShiftScheduleBoardRow {
+  staff_id: string
+  full_name: string
+  schedule_id: string | null
+  shift_id: string | null
+  shift_name: string | null
+  last_changed_at: string | null
+}
+
 export interface UserProfile {
   id: string
   staff_id: string

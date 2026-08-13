@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-08-06 (sesi Document Engine + HRIS Absensi Overhaul — 12 PR RIFIM OS + Phase 2/5 RAOS gas landed)*
+*Diupdate: 2026-08-13 (sesi cek eror — P8 RAOS PIN bridge documented + Jadwal Kerja shift roster ganti Lokasi & Pickup Point)*
 
 ## COLLABORATION LOG
 
@@ -9,6 +9,28 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-13 CC] e20e41c feat(settings): Settings > "Lokasi & Pickup
+  Point" diganti "Jadwal Kerja" — section lama percuma buat 8/9 cabang
+  (cuma T1/T2/T3 Soeta punya pickup_points; pickup_point_id absensi/scan
+  toh auto-detect GPS geofence, bukan dari situ). Migration raos_088 +
+  raos_088b: tabel raos_shift_schedules (staff x tanggal -> shift
+  Pagi/Siang/Malam, unique per staff+tanggal), raos_shift_schedule_edit_log
+  + trigger trg_raos_shift_schedule_guard (rate-limit 1x perubahan/staff/
+  7hari rolling, insert tanggal baru bebas limit), RPC
+  raos_shift_schedule_board(branch_id, tanggal) SECURITY DEFINER (bypass
+  user_profiles own-row-only RLS buat roster 1 cabang, tetap cek
+  is_branch_in_scope). RLS: baca = is_branch_in_scope (semua staff
+  cabang bisa lihat roster), tulis = admin & koordinator only. Diverifikasi
+  langsung via SQL (insert/update/rate-limit-block) tanpa residual data.
+  PR #90.
+- [2026-08-13 CC] 4d1053a docs(skill): raos-ssot-sync — dokumentasikan
+  bridge PIN RAOS P8 yang belum pernah ditulis (kolom "RAOS PIN"/"RAOS ID
+  Staff" terpisah dari kolom H, raos_credentials bcrypt, RPC
+  raos_verify_login_secret via Edge Function raos-login-exchange,
+  syncRaosCredentials() manual-only tanpa cron). Ditemukan saat diagnosa
+  login gagal yudiultra02@gmail.com (M040) — sync belum jalan sejak
+  2026-08-10, PIN sheet belum ke-propagate. Debt: admin perlu jalankan
+  sync manual + pertimbangkan cron trigger.
 - [2026-08-07 CC] feat(saldo): skip approval flow — chat submit langsung
   processable Finance, hapus tombol Approve/Reject koord (poin 2+6). Migration
   raos_076 relax mark_paid guard status IN ('pending','approved'). SaldoRequestCard

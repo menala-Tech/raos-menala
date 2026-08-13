@@ -1,6 +1,6 @@
 ---
 name: raos-ssot-sync
-description: SSoT (Single Source of Truth) sync RAOS satu arah — Google Sheets → Supabase — untuk staff (sheet MASTER DATA STAFF filter ID CABANG='ID Rifim Airport Soeta' → user_profiles via gas/13_staff_sync.gs trigger 10 menit, PIN kolom H → password Supabase Auth) dan driver airport (sheet Database Driver Airport tab 'ID Rifim Airport Soeta' → raos_drivers via gas/12_driver_airport_sync.gs trigger 6 jam). Kolom source membedakan asal (ssot_master_staff / ssot_driver_airport / manual), trigger prevent_ssot_staff_column_edit blok manual edit kolom SSoT dari client (service_role GAS bypass), staff/driver yang hilang dari sheet SSoT di-nonaktifkan (is_active=false) bukan di-delete supaya histori scan_orders/attendance aman. Gunakan skill ini setiap kali menyentuh sync sheet-Supabase, mapping jabatan ke role, PIN login, atau setup trigger sync.
+description: SSoT (Single Source of Truth) sync RAOS satu arah — Google Sheets → Supabase — untuk staff (sheet MASTER DATA STAFF filter ID CABANG='ID Rifim Airport Soeta' → user_profiles via gas/13_staff_sync.gs trigger 10 menit, PIN kolom H → password Supabase Auth, dipakai app lain non-RAOS) dan driver airport (sheet Database Driver Airport tab 'ID Rifim Airport Soeta' → raos_drivers via gas/12_driver_airport_sync.gs trigger 6 jam). Sejak P8 (2026-08-10), login RAOS PWA + Rifim-OS Portal pakai PIN KHUSUS terpisah — kolom "RAOS PIN"/"RAOS ID Staff" di sheet yang sama, sync manual-only via gas/19_raos_credentials_sync.gs syncRaosCredentials() → tabel raos_credentials (bcrypt hash via trigger), diverifikasi RPC raos_verify_login_secret dari Edge Function raos-login-exchange. Kolom source membedakan asal (ssot_master_staff / ssot_driver_airport / manual), trigger prevent_ssot_staff_column_edit blok manual edit kolom SSoT dari client (service_role GAS bypass), staff/driver yang hilang dari sheet SSoT di-nonaktifkan (is_active=false) bukan di-delete supaya histori scan_orders/attendance aman. Gunakan skill ini setiap kali menyentuh sync sheet-Supabase, mapping jabatan ke role, PIN login gagal/salah, atau setup trigger sync.
 ---
 
 # SSoT Sync — RAOS
@@ -45,6 +45,32 @@ Staff login pakai **email + PIN**. Form login label "PIN", `inputMode="numeric"`
 - PIN kosong / <6 digit / bukan angka: sync **skip password** + log warning. Staff harus pakai "Lupa PIN" di halaman login untuk set sendiri
 
 **RPC helper:** `get_auth_user_id_by_email(email)` (migration `raos_022b`) — service_role only, untuk GAS lookup `auth.users`.
+
+⚠️ **PIN kolom H ini BUKAN lagi yang dipakai untuk login RAOS PWA/Rifim-OS Portal sejak P8** (lihat section berikut) — kolom H sekarang murni untuk Supabase Auth password + PWA lain (`rifim-isi-saldo`, `radms-driver`). Kalau staff RAOS lapor "PIN salah" padahal baru diganti, cek dulu ke kolom **RAOS PIN**, bukan kolom H.
+
+## PIN RAOS Khusus (Kolom "RAOS PIN") — sejak P8, 2026-08-10
+
+Login RAOS PWA (email/RAOS-ID + PIN di halaman `/`) **tidak pakai** `supabase.auth.signInWithPassword` langsung untuk staff — kecuali input berupa ID Driver 6+ digit angka (`loginWithRaosCredential` di `lib/raosAuth.ts`, regex `/^\d{6,}$/` → itu jalur driver, tetap pakai `auth.users` password kolom H). Untuk staff (email/ID biasa), flow-nya:
+
+1. Client kirim `login_id` + `raos_pin` ke Edge Function **`raos-login-exchange`**
+2. Edge Function panggil RPC **`raos_verify_login_secret(p_login_id, p_raos_pin)`** (SECURITY DEFINER) — cek `raos_credentials.raos_pin` (bcrypt) via `extensions.crypt()`, rate-limit **5x gagal / 15 menit** (dicatat di `activity_logs` action `raos_login_failed`/`raos_login_success`)
+3. Kalau match + akun aktif → generate magic-link token (`admin.auth.admin.generateLink`), return `token_hash`
+4. Client `supabase.auth.verifyOtp({token_hash, type:'email'})` → sesi jadi
+
+**Sumber PIN RAOS (SSoT):**
+- Sheet **"MASTER DATA STAFF"** (sama dengan staff sync), kolom **"RAOS PIN"** (4-12 digit angka) + **"RAOS ID Staff"/"RAOS ID"** (kode login alternatif, mis. `M040`) — kolom baru, **terpisah dari kolom H**
+- Sync: `gas/19_raos_credentials_sync.gs` fungsi `syncRaosCredentials()` → upsert ke tabel `public.raos_credentials` (`user_id`, `raos_staff_code`, `raos_pin`)
+- Trigger `trg_raos_credentials_hash_pin` (`raos_hash_pin_before_write()`) auto-hash bcrypt saat insert/update — GAS selalu kirim **plaintext**, DB yang hash. PIN plaintext wajib **≥6 digit** di level trigger (`^[0-9]{6,}$`) — lebih ketat dari validasi GAS (4-12 digit), jadi PIN 4-5 digit akan **gagal upsert** (exception `raos_pin_invalid_shape`) meski lolos validasi sheet
+
+⚠️ **Sync ini TIDAK ADA cron trigger otomatis** — beda dari staff sync (10 menit). Cuma bisa dipicu manual: menu GAS "🛠️ RAOS System → Sync PIN RAOS" atau web API action `sync_raos_credentials` (role admin/direksi, lihat `gas/21_web_api.gs`). **Kalau staff ganti/isi RAOS PIN di sheet, PIN tidak akan aktif sampai ada yang jalankan sync manual ini.**
+
+**Debug "PIN salah" staff RAOS:**
+1. Cek `activity_logs` action `raos_login_failed`/`raos_login_success` by `user_id` untuk histori percobaan
+2. Cek `raos_credentials.updated_at` untuk user itu — kalau sudah lama (bukan hari ini) berarti sync manual belum pernah/lagi dijalankan sejak PIN diganti di sheet
+3. Verifikasi PIN yang di-klaim staff vs stored hash: `select extensions.crypt('<pin_dicoba>', raos_pin) = raos_pin from raos_credentials where user_id=...`
+4. Kalau `raos_credentials` tidak ada row sama sekali → staff belum pernah disync (kolom RAOS PIN di sheet kosong saat sync terakhir, atau auth user belum ada — GAS skip dengan warning "auth user belum ada — jalankan Sync Staff dulu")
+
+**Legacy (superseded, JANGAN dipakai):** RPC `raos_verify_and_bridge` + kolom `raos_credentials.ssot_pin` (dari SQL awal `sql/raos_068_raos_credentials_bridge.sql`) — desain lama yang mirror plaintext PIN kolom H buat sign-in transparent. Sudah digantikan `raos_verify_login_secret` + bcrypt saat P8 (EXECUTE legacy RPC di-revoke, "Legacy raos_verify_and_bridge runtime EXECUTE: 0" di reconciliation `sql/p8_production_reconciliation_20260810.sql`). `ssot_pin` kolom masih ada di tabel untuk rollback window tapi tidak dipakai flow aktif.
 
 ## Driver Airport Sync — `gas/12_driver_airport_sync.gs`
 
@@ -98,3 +124,5 @@ Menu 🚗 Driver "Isi Data Mock Driver" & "Import Driver ke Supabase" HIDDEN dar
 1. Isi PIN Hendro di sheet MASTER DATA STAFF kolom H (≥6 digit angka)
 2. Set `branch_id` (T1/T2/T3) Hendro via `/admin` PWA
 3. Tambah kolom Jabatan DIREKSI di HRIS supaya mapping role direksi bisa
+4. **Jalankan "Sync PIN RAOS" manual** — `syncRaosCredentials()` belum jalan sejak 2026-08-10, staff yang PIN RAOS-nya diganti di sheet setelah tanggal itu (mis. `yudiultra02@gmail.com` / kode `M040`, login gagal terus sejak 2026-08-13) belum ke-propagate ke `raos_credentials`
+5. Pertimbangkan tambah cron trigger otomatis untuk `syncRaosCredentials()` (saat ini manual-only, beda dari staff sync yang 10 menit) — supaya ganti PIN RAOS di sheet tidak butuh admin trigger manual tiap kali

@@ -1,0 +1,85 @@
+name: audit-p0-cleanup-temp
+on:
+  push:
+    branches: [audit-full-sync-20260817]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit-full-sync-20260817
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch RAOS ownership violations
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('apps/pwa/src/app/drivers/page.tsx')
+          s = p.read_text()
+          s = s.replace("import { ArrowLeft, Search, Car, Phone, Plus, X, Loader2, Pencil, Radar, QrCode, PhoneCall, CheckCircle2, UserPlus } from 'lucide-react'", "import { ArrowLeft, Search, Car, Phone, X, Loader2, Radar, QrCode, PhoneCall, CheckCircle2, UserPlus } from 'lucide-react'")
+          s = s.replace("import type { UserProfile, Driver, Branch } from '@/types'", "import type { UserProfile, Driver } from '@/types'")
+          s = re.sub(r"\n  const \[branches, setBranches\] = useState<Branch\[]>\(\[\]\)", "", s)
+          s = re.sub(r"\n  const \[showAddForm, setShowAddForm\] = useState\(false\)", "", s)
+          s = re.sub(r"\n  const \[editingDriver, setEditingDriver\] = useState<Driver \| null>\(null\)", "", s)
+          s = re.sub(r"\n\s*const \{ data: branchData \} = await supabase\.from\('branches'\)\.select\('\*'\)\.order\('name'\)\n\s*setBranches\(branchData \?\? \[\]\)\n", "\n", s)
+          s = s.replace("  const isAdmin = !!user && can(user.role,'driver:mutate')", "  const canManageBarcodes = !!user && can(user.role,'driver:barcode:manage')")
+          # Header: keep barcode link, remove manual add button.
+          s = s.replace("          {isAdmin && (", "          {canManageBarcodes && (", 1)
+          s = re.sub(r"\n\s*<button\n\s*onClick=\{\(\) => setShowAddForm\(true\)\}.*?</button>", "", s, flags=re.S)
+          s = s.replace("{isAdmin ? 'Tambah driver lewat tombol + di atas' : 'Hubungi Admin untuk mendaftarkan driver'}", "'Master Driver dikelola dari Database Driver SSOT' ")
+          s = re.sub(r"\n\s*\{isAdmin && \(\n\s*<button\n\s*onClick=\{\(\) => setEditingDriver\(driver\)\}.*?</button>\n\s*\)\}", "", s, flags=re.S)
+          s = re.sub(r"\n\s*\{showAddForm && \(.*?\n\s*\)\}\n\n\s*\{editingDriver && \(.*?\n\s*\)\}", "", s, flags=re.S)
+          marker = "\nfunction AddDriverModal("
+          if marker in s:
+              s = s.split(marker, 1)[0].rstrip() + "\n"
+          if ".from('raos_drivers').insert" in s or ".from('raos_drivers').update" in s:
+              raise SystemExit('driver direct writer still present')
+          if 'setShowAddForm' in s or 'setEditingDriver' in s or 'AddDriverModal' in s or 'EditDriverModal' in s:
+              raise SystemExit('driver CRUD UI residue still present')
+          p.write_text(s)
+
+          p = Path('apps/pwa/src/app/admin/page.tsx')
+          s = p.read_text()
+          s = s.replace("  ArrowLeft, CheckCircle2, XCircle, ShieldCheck,\n  Users, ScanLine, Loader2, QrCode, Pencil, X, Power, Lock,", "  ArrowLeft, CheckCircle2, XCircle, ShieldCheck,\n  Users, ScanLine, Loader2, QrCode, X, Lock,")
+          s = re.sub(r"\ntype StaffRole = .*?\n", "\n", s)
+          s = re.sub(r"\n  const \[editingStaff, setEditingStaff\] = useState<any \| null>\(null\)", "", s)
+          s = re.sub(r"\n  async function toggleStaffActive\(staff: any\) \{.*?\n  \}\n", "\n", s, flags=re.S)
+          s = s.replace("              Untuk tambah/hapus/ganti nama/role/HP/PIN staff → edit di sheet lalu tunggu sinkronisasi berikutnya.\n              Di sini admin hanya boleh set <b>Terminal (T1/T2/T3)</b> & nonaktifkan sementara.", "              Untuk tambah/hapus/ganti nama/role/HP/PIN/cabang/status aktif staff → edit di sheet lalu tunggu sinkronisasi berikutnya.\n              Daftar Staff di PWA ini bersifat <b>read-only</b> terhadap master identity.")
+          s = re.sub(r"\n\s*\{isAdmin && \(\n\s*<div className=\"flex items-center gap-1 flex-shrink-0\">.*?\n\s*</div>\n\s*\)\}", "", s, flags=re.S)
+          s = re.sub(r"\n\s*\{editingStaff && \(.*?\n\s*\)\}\n", "\n", s, flags=re.S)
+          marker = "\nfunction EditStaffModal("
+          if marker in s:
+              s = s.split(marker, 1)[0].rstrip() + "\n"
+          if ".from('user_profiles').update" in s:
+              raise SystemExit('direct user_profiles update still present in admin page')
+          if 'toggleStaffActive' in s or 'setEditingStaff' in s or 'EditStaffModal' in s:
+              raise SystemExit('staff mutation UI residue still present')
+          p.write_text(s)
+          PY
+      - name: Verify no forbidden writers
+        run: |
+          ! grep -R "from('raos_drivers').insert\|from('raos_drivers').update" -n apps/pwa/src/app/drivers/page.tsx
+          ! grep -R "from('user_profiles').update" -n apps/pwa/src/app/admin/page.tsx
+      - name: Install and validate
+        working-directory: apps/pwa
+        run: |
+          npm ci
+          npm run lint -- --max-warnings=20
+          npx tsc --noEmit
+          npm run build
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/pwa/src/app/drivers/page.tsx apps/pwa/src/app/admin/page.tsx
+          git diff --cached --check
+          git commit -m "fix(pwa): enforce SSOT read-only driver and staff masters"
+          git push origin HEAD:audit-full-sync-20260817

@@ -10,7 +10,7 @@ import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, CheckCircle2, XCircle, ShieldCheck,
-  Users, ScanLine, Loader2, QrCode, Pencil, X, Power, Lock,
+  Users, ScanLine, Loader2, QrCode, X, Lock,
   MessageCirclePlus, Search, Check, Bell,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -22,7 +22,6 @@ import AnnouncementBroadcast from '@/components/AnnouncementBroadcast'
 import NotificationStatsPanel from '@/components/NotificationStatsPanel'
 
 type Tab = 'validasi' | 'staff'
-type StaffRole = 'direksi' | 'admin' | 'management' | 'koordinator' | 'staff'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -33,7 +32,6 @@ export default function AdminPage() {
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
-  const [editingStaff, setEditingStaff] = useState<any | null>(null)
   const [showCreateRoom, setShowCreateRoom] = useState(false)
 
   const loadData = useCallback(async (uid: string) => {
@@ -112,17 +110,6 @@ export default function AdminPage() {
     setProcessing(null)
   }
 
-  async function toggleStaffActive(staff: any) {
-    setProcessing(staff.id)
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({ is_active: !staff.is_active })
-      .eq('id', staff.id)
-    if (!error) {
-      setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, is_active: !s.is_active } : s))
-    }
-    setProcessing(null)
-  }
 
   useRealtimeRefresh(`admin-${user?.id ?? 'anon'}`,[{table:'scan_orders'},{table:'user_profiles'},{table:'branches'}],()=>user?.id?loadData(user.id):undefined,300,!!user?.id)
 
@@ -336,8 +323,8 @@ export default function AdminPage() {
             <Lock size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
             <span>
               Daftar staff Soeta disinkron otomatis dari sheet <b>MASTER DATA STAFF</b> (SSoT).
-              Untuk tambah/hapus/ganti nama/role/HP/PIN staff → edit di sheet lalu tunggu sinkronisasi berikutnya.
-              Di sini admin hanya boleh set <b>Terminal (T1/T2/T3)</b> & nonaktifkan sementara.
+              Untuk tambah/hapus/ganti nama/role/HP/PIN/cabang/status aktif staff → edit di sheet lalu tunggu sinkronisasi berikutnya.
+              Daftar Staff di PWA ini bersifat <b>read-only</b> terhadap master identity.
             </span>
           </div>
         )}
@@ -367,39 +354,9 @@ export default function AdminPage() {
             )}>
               {s.is_active ? 'AKTIF' : 'NONAKTIF'}
             </span>
-            {isAdmin && (
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={() => setEditingStaff(s)}
-                  className="p-1.5 text-gray-400 hover:text-primary"
-                  aria-label="Edit staff"
-                >
-                  <Pencil size={14} />
-                </button>
-                {s.id !== user?.id && (
-                  <button
-                    onClick={() => toggleStaffActive(s)}
-                    disabled={processing === s.id}
-                    className={clsx('p-1.5', s.is_active ? 'text-gray-400 hover:text-red-500' : 'text-gray-400 hover:text-green-600')}
-                    aria-label={s.is_active ? 'Nonaktifkan staff' : 'Aktifkan staff'}
-                  >
-                    {processing === s.id ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         ))}
       </div>
-
-      {editingStaff && (
-        <EditStaffModal
-          staff={editingStaff}
-          branches={branches}
-          onClose={() => setEditingStaff(null)}
-          onSaved={() => { setEditingStaff(null); user && loadData(user.id) }}
-        />
-      )}
 
       {showCreateRoom && user && (
         <CreateProyekRoomModal
@@ -585,119 +542,6 @@ function CreateProyekRoomModal({
           <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
             {saving ? <Loader2 size={16} className="animate-spin" /> : <MessageCirclePlus size={16} />}
             {saving ? 'Membuat...' : 'Buat Room Proyek'}
-          </button>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-function EditStaffModal({
-  staff, branches, onClose, onSaved,
-}: { staff: any; branches: Branch[]; onClose: () => void; onSaved: () => void }) {
-  const isSSoT = staff.source === 'ssot_master_staff'
-
-  const [form, setForm] = useState({
-    full_name: staff.full_name ?? '',
-    role: staff.role as StaffRole,
-    branch_id: staff.branch_id ?? '',
-    phone: staff.phone ?? '',
-  })
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true)
-    setError('')
-
-    // Untuk baris SSoT: cuma branch_id yang dikirim (kolom SSoT tidak boleh diubah dari sini).
-    // Untuk baris manual (mis. akun admin awal): semua field ikut.
-    const patch = isSSoT
-      ? { branch_id: form.branch_id || null }
-      : {
-          full_name: form.full_name,
-          role: form.role,
-          branch_id: form.branch_id || null,
-          phone: form.phone || null,
-        }
-
-    const { error } = await supabase.from('user_profiles').update(patch).eq('id', staff.id)
-    setSaving(false)
-    if (error) {
-      setError('Gagal menyimpan perubahan.')
-      return
-    }
-    onSaved()
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
-      <div
-        className="bg-white rounded-t-3xl w-full max-w-md mx-auto px-6 pt-6 max-h-[85vh] overflow-y-auto"
-        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="font-bold text-gray-800">Edit Staff</h2>
-          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
-        </div>
-        <p className="text-xs text-gray-400 mb-4">{staff.staff_id}</p>
-
-        {isSSoT && (
-          <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200
-                          rounded-lg px-3 py-2 mb-4 flex items-start gap-2">
-            <Lock size={13} className="flex-shrink-0 mt-0.5" />
-            <span>
-              Baris ini disinkron dari SSoT. Nama, role, dan No. HP hanya bisa diubah di
-              sheet MASTER DATA STAFF. Di sini Anda hanya boleh menetapkan Terminal
-              (T1/T2/T3) tempat staff bertugas.
-            </span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <input
-            required placeholder="Nama Lengkap *" value={form.full_name}
-            onChange={e => setForm({ ...form, full_name: e.target.value })}
-            disabled={isSSoT}
-            className={clsx('input', isSSoT && 'bg-gray-50 text-gray-500 cursor-not-allowed')}
-          />
-          <select
-            value={form.role}
-            onChange={e => setForm({ ...form, role: e.target.value as StaffRole })}
-            disabled={isSSoT}
-            className={clsx('input', isSSoT && 'bg-gray-50 text-gray-500 cursor-not-allowed')}
-          >
-            <option value="staff">Staff</option>
-            <option value="koordinator">Koordinator</option>
-            <option value="admin">Admin</option>
-            <option value="management">Management</option>
-            <option value="direksi">Direksi</option>
-          </select>
-          <div>
-            <label className="text-xs text-gray-500 ml-1 mb-1 block">Terminal (bisa diubah admin)</label>
-            <select
-              value={form.branch_id}
-              onChange={e => setForm({ ...form, branch_id: e.target.value })}
-              className="input"
-            >
-              <option value="">Belum ditetapkan</option>
-              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </div>
-          <input
-            placeholder="No. HP" value={form.phone}
-            onChange={e => setForm({ ...form, phone: e.target.value })}
-            disabled={isSSoT}
-            className={clsx('input', isSSoT && 'bg-gray-50 text-gray-500 cursor-not-allowed')}
-          />
-
-          {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
-
-          <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={16} />}
-            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
           </button>
         </form>
       </div>

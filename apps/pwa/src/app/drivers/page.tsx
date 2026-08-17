@@ -8,9 +8,9 @@ import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 import AppShell from '@/components/layout/AppShell'
-import { ArrowLeft, Search, Car, Phone, Plus, X, Loader2, Pencil, Radar, QrCode, PhoneCall, CheckCircle2, UserPlus } from 'lucide-react'
+import { ArrowLeft, Search, Car, Phone, X, Loader2, Radar, QrCode, PhoneCall, CheckCircle2, UserPlus } from 'lucide-react'
 import Link from 'next/link'
-import type { UserProfile, Driver, Branch } from '@/types'
+import type { UserProfile, Driver } from '@/types'
 
 const PAGE_SIZE = 20
 
@@ -22,13 +22,10 @@ export default function DriversPage() {
   const router = useRouter()
   const [user, setUser] = useState<UserProfile | null>(null)
   const [drivers, setDrivers] = useState<Driver[]>([])
-  const [branches, setBranches] = useState<Branch[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [editingDriver, setEditingDriver] = useState<Driver | null>(null)
   const [queueMap, setQueueMap] = useState<QueueMap>({})
   const [queueBusy, setQueueBusy] = useState<string | null>(null)
   const [queueErr, setQueueErr] = useState<string>('')
@@ -66,9 +63,6 @@ export default function DriversPage() {
         .eq('id', session.user.id)
         .single()
       setUser(profile)
-
-      const { data: branchData } = await supabase.from('branches').select('*').order('name')
-      setBranches(branchData ?? [])
 
       loadDrivers(0, '', session.user.id)
     }
@@ -111,7 +105,7 @@ export default function DriversPage() {
     loadDrivers(p, search, user?.id)
   }
 
-  const isAdmin = !!user && can(user.role,'driver:mutate')
+  const canManageBarcodes = !!user && can(user.role,'driver:barcode:manage')
   const canManageQueue = !!user && can(user.role,'queue:operate')
   const isDriverRole = user?.role === 'driver'
   useRealtimeRefresh(`drivers-${user?.id ?? 'anon'}`,[{table:'raos_drivers'},{table:'raos_driver_queue'}],()=>{void loadDrivers(page,search,user?.id);void loadQueueStates()},350,!!user?.id)
@@ -165,7 +159,7 @@ export default function DriversPage() {
               <p className="text-white/50 text-xs">{totalCount} driver aktif terdaftar</p>
             </div>
           </div>
-          {isAdmin && (
+          {canManageBarcodes && (
             <div className="flex items-center gap-2">
               <Link
                 href="/admin/barcodes"
@@ -174,13 +168,6 @@ export default function DriversPage() {
               >
                 <QrCode size={18} />
               </Link>
-              <button
-                onClick={() => setShowAddForm(true)}
-                title="Tambah driver manual"
-                className="bg-primary text-white p-2 rounded-xl"
-              >
-                <Plus size={18} />
-              </button>
             </div>
           )}
         </div>
@@ -207,7 +194,7 @@ export default function DriversPage() {
             <Car size={40} className="text-gray-300 mx-auto mb-3" />
             <p className="text-gray-400 text-sm font-medium">Belum ada driver terdaftar</p>
             <p className="text-gray-300 text-xs mt-1">
-              {isAdmin ? 'Tambah driver lewat tombol + di atas' : 'Hubungi Admin untuk mendaftarkan driver'}
+              Master Driver dikelola dari Database Driver SSOT
             </p>
           </div>
         )}
@@ -266,15 +253,6 @@ export default function DriversPage() {
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 flex-shrink-0">
                     {driver.vehicle_type}
                   </span>
-                )}
-                {isAdmin && (
-                  <button
-                    onClick={() => setEditingDriver(driver)}
-                    className="p-1.5 text-gray-400 hover:text-primary flex-shrink-0"
-                    aria-label="Lengkapi data driver"
-                  >
-                    <Pencil size={14} />
-                  </button>
                 )}
               </div>
 
@@ -341,216 +319,6 @@ export default function DriversPage() {
           </div>
         )}
       </div>
-
-      {showAddForm && (
-        <AddDriverModal
-          branches={branches}
-          onClose={() => setShowAddForm(false)}
-          onAdded={() => { setShowAddForm(false); loadDrivers(0, search, user?.id) }}
-        />
-      )}
-
-      {editingDriver && (
-        <EditDriverModal
-          driver={editingDriver}
-          branches={branches}
-          onClose={() => setEditingDriver(null)}
-          onSaved={() => { setEditingDriver(null); loadDrivers(page, search) }}
-        />
-      )}
     </AppShell>
-  )
-}
-
-function AddDriverModal({
-  branches, onClose, onAdded,
-}: { branches: Branch[]; onClose: () => void; onAdded: () => void }) {
-  const [form, setForm] = useState({
-    driver_id: '', name: '', phone: '', vehicle_type: '', vehicle_plate: '', barcode: '', branch_id: '',
-  })
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true)
-    setError('')
-    const { error } = await supabase.from('raos_drivers').insert({
-      driver_id: form.driver_id,
-      name: form.name,
-      phone: form.phone || null,
-      vehicle_type: form.vehicle_type || null,
-      vehicle_plate: form.vehicle_plate || null,
-      barcode: form.barcode || null,
-      branch_id: form.branch_id || null,
-    })
-    setSaving(false)
-    if (error) {
-      setError(error.message.includes('duplicate') ? 'ID Driver atau barcode sudah terdaftar.' : 'Gagal menyimpan driver.')
-      return
-    }
-    onAdded()
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
-      <div
-        className="bg-white rounded-t-3xl w-full max-w-md mx-auto px-6 pt-6 max-h-[85vh] overflow-y-auto"
-        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-bold text-gray-800">Tambah Driver</h2>
-          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <input
-            required placeholder="ID Driver *" value={form.driver_id}
-            onChange={e => setForm({ ...form, driver_id: e.target.value })}
-            className="input"
-          />
-          <input
-            required placeholder="Nama Driver *" value={form.name}
-            onChange={e => setForm({ ...form, name: e.target.value })}
-            className="input"
-          />
-          <input
-            placeholder="No. HP" value={form.phone}
-            onChange={e => setForm({ ...form, phone: e.target.value })}
-            className="input"
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              placeholder="Jenis Kendaraan" value={form.vehicle_type}
-              onChange={e => setForm({ ...form, vehicle_type: e.target.value })}
-              className="input"
-            />
-            <input
-              placeholder="Plat Nomor" value={form.vehicle_plate}
-              onChange={e => setForm({ ...form, vehicle_plate: e.target.value })}
-              className="input"
-            />
-          </div>
-          <input
-            placeholder="Barcode (opsional, boleh sama dengan ID Driver)" value={form.barcode}
-            onChange={e => setForm({ ...form, barcode: e.target.value })}
-            className="input"
-          />
-          <select
-            value={form.branch_id}
-            onChange={e => setForm({ ...form, branch_id: e.target.value })}
-            className="input"
-          >
-            <option value="">Pilih Cabang (opsional)</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-
-          {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
-
-          <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-            {saving ? 'Menyimpan...' : 'Simpan Driver'}
-          </button>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-function EditDriverModal({
-  driver, branches, onClose, onSaved,
-}: { driver: Driver; branches: Branch[]; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({
-    phone: driver.phone ?? '',
-    vehicle_type: driver.vehicle_type ?? '',
-    vehicle_plate: driver.vehicle_plate ?? '',
-    barcode: driver.barcode ?? '',
-    branch_id: driver.branch_id ?? '',
-  })
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const isSsot = driver.source === 'ssot_driver_airport'
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true)
-    setError('')
-    const { error } = await supabase.from('raos_drivers').update({
-      phone: form.phone || null,
-      vehicle_type: form.vehicle_type || null,
-      vehicle_plate: form.vehicle_plate || null,
-      barcode: form.barcode || null,
-      branch_id: form.branch_id || null,
-    }).eq('id', driver.id)
-    setSaving(false)
-    if (error) {
-      setError(error.message.includes('duplicate') ? 'Barcode sudah dipakai driver lain.' : 'Gagal menyimpan.')
-      return
-    }
-    onSaved()
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={onClose}>
-      <div
-        className="bg-white rounded-t-3xl w-full max-w-md mx-auto px-6 pt-6 max-h-[85vh] overflow-y-auto"
-        style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="font-bold text-gray-800">Lengkapi Data Driver</h2>
-          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
-        </div>
-        <p className="text-xs text-gray-400 mb-4">{driver.name} • {driver.driver_id}</p>
-
-        {isSsot && (
-          <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2 mb-3">
-            Nama &amp; status aktif driver ini otomatis diambil dari SSOT Driver Airport
-            (tidak bisa diubah di sini). Kolom di bawah khusus data operasional RAOS.
-          </p>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <input
-            placeholder="No. HP" value={form.phone}
-            onChange={e => setForm({ ...form, phone: e.target.value })}
-            className="input"
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              placeholder="Jenis Kendaraan" value={form.vehicle_type}
-              onChange={e => setForm({ ...form, vehicle_type: e.target.value })}
-              className="input"
-            />
-            <input
-              placeholder="Plat Nomor" value={form.vehicle_plate}
-              onChange={e => setForm({ ...form, vehicle_plate: e.target.value })}
-              className="input"
-            />
-          </div>
-          <input
-            placeholder="Barcode (opsional, boleh sama dengan ID Driver)" value={form.barcode}
-            onChange={e => setForm({ ...form, barcode: e.target.value })}
-            className="input"
-          />
-          <select
-            value={form.branch_id}
-            onChange={e => setForm({ ...form, branch_id: e.target.value })}
-            className="input"
-          >
-            <option value="">Pilih Cabang (opsional)</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-
-          {error && <p className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">{error}</p>}
-
-          <button type="submit" className="btn-primary flex items-center justify-center gap-2" disabled={saving}>
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={16} />}
-            {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
-          </button>
-        </form>
-      </div>
-    </div>
   )
 }

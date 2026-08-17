@@ -1,5 +1,5 @@
 export const ACCESS_POLICY_VERSION = 'p2.1-unified' as const
-export const ACCESS_POLICY_HARDENING_VERSION = 'p4.0-security-operational' as const
+export const ACCESS_POLICY_HARDENING_VERSION = 'p4.1-ssot-driver-readonly' as const
 export type RaosRole =
   | 'staff'
   | 'koordinator'
@@ -35,10 +35,10 @@ export type Capability =
 const CAPS: Record<RaosRole, ReadonlySet<Capability>> = {
   staff: new Set(['scan:create','attendance:self','history:self','saldo:submit','queue:operate','queue:branch:read','driver:read','kpi:self']),
   koordinator: new Set(['history:branch:read','saldo:branch:read','queue:branch:read','driver:read','staff:read','report:read','kpi:self','kpi:branch:read']),
-  admin: new Set(['history:branch:read','saldo:branch:read','saldo:mutate','queue:operate','queue:branch:read','driver:read','driver:mutate','staff:read','staff:mutate','report:read','kpi:branch:read','admin:panel','driver:barcode:manage','chat:moderate','announcement:broadcast']),
+  admin: new Set(['history:branch:read','saldo:branch:read','saldo:mutate','queue:operate','queue:branch:read','driver:read','staff:read','staff:mutate','report:read','kpi:branch:read','admin:panel','driver:barcode:manage','chat:moderate','announcement:broadcast']),
   management: new Set(['history:branch:read','saldo:branch:read','queue:branch:read','driver:read','staff:read','report:read','kpi:branch:read']),
-  direksi: new Set(['history:branch:read','saldo:branch:read','saldo:mutate','queue:operate','queue:branch:read','driver:read','driver:mutate','staff:read','staff:mutate','report:read','kpi:branch:read','admin:panel','driver:barcode:manage','chat:moderate','announcement:broadcast']),
-  direktur: new Set(['history:branch:read','saldo:branch:read','saldo:mutate','queue:operate','queue:branch:read','driver:read','driver:mutate','staff:read','staff:mutate','report:read','kpi:branch:read','admin:panel','driver:barcode:manage','chat:moderate','announcement:broadcast']),
+  direksi: new Set(['history:branch:read','saldo:branch:read','saldo:mutate','queue:operate','queue:branch:read','driver:read','staff:read','staff:mutate','report:read','kpi:branch:read','admin:panel','driver:barcode:manage','chat:moderate','announcement:broadcast']),
+  direktur: new Set(['history:branch:read','saldo:branch:read','saldo:mutate','queue:operate','queue:branch:read','driver:read','staff:read','staff:mutate','report:read','kpi:branch:read','admin:panel','driver:barcode:manage','chat:moderate','announcement:broadcast']),
   driver_manager: new Set(['queue:operate','queue:branch:read','driver:read','driver:barcode:manage']),
   driver: new Set(['history:self']),
 }

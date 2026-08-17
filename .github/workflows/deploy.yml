@@ -1,8 +1,8 @@
-name: Lint & Type Check
+name: Lint, Type Check & Access Contract
 
 # Deploy production dilakukan otomatis oleh integrasi native Vercel<->GitHub
 # (Vercel Dashboard -> Settings -> Git, Root Directory: apps/pwa), BUKAN oleh
-# workflow ini. Workflow ini murni gate kualitas kode (lint + type check).
+# workflow ini. Workflow ini murni gate kualitas kode.
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
 
 jobs:
   lint-and-type-check:
-    name: Lint & Type Check
+    name: Lint, Type Check & Access Contract
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -27,3 +27,4 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
+      - run: node scripts/test-access-policy-contract.cjs

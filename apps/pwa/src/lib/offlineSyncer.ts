@@ -37,44 +37,34 @@ async function flushItem(item: QueuedItem): Promise<{ ok: boolean; err?: string;
     if (!blobRes.ok) return blobRes
 
     if (item.kind === 'raos_attendance_in') {
-      // Conflict resolver: server-side onConflict staff_id,date sudah handle
-      // idempotent. Kalau replay dengan check_in_at lebih lama dari yang tersimpan,
-      // Postgres akan overwrite — sengaja: client punya "otoritas" untuk absen
-      // (staff punya niat pasti waktu itu). Untuk cegah data lebih baru
-      // ke-overwrite oleh replay yang lebih lama, cek dulu:
-      const { staff_id, date, check_in_at } = item.payload as any
-      const { data: existing } = await supabase
-        .from('raos_attendance')
-        .select('check_in_at')
-        .eq('staff_id', staff_id).eq('date', date).maybeSingle()
-      if (existing?.check_in_at && existing.check_in_at >= check_in_at) {
-        // Sudah ada absen yang lebih baru/sama waktu → skip (bukan error).
-        return { ok: true, skip: true }
-      }
-      const { error } = await supabase
-        .from('raos_attendance')
-        .upsert(item.payload, { onConflict: 'staff_id,date' })
+      // B2 fix: used to replay a raw upsert (client-decided staff_id/
+      // branch_id/date/status) with a client-side "is existing newer"
+      // pre-check that raced against concurrent writes. Now replays
+      // through the same RPC the online path uses -- server re-derives
+      // identity/branch/date/geofence/shift from auth.uid() + the queued
+      // evidence (lat/lng/selfie/captured-at), and the RPC's own row lock
+      // + "only update if incoming captured_at is newer" guard (see
+      // sql/raos_090_attendance_canonical_rpc_DRAFT.sql) makes this
+      // idempotent without a separate pre-check here.
+      const { error } = await supabase.rpc('raos_attendance_check_in', item.payload as {
+        p_lat: number | null
+        p_lng: number | null
+        p_selfie_url: string | null
+        p_client_captured_at: string
+      })
       if (error) return { ok: false, err: error.message }
       return { ok: true }
     }
 
     if (item.kind === 'raos_attendance_out') {
-      const { staff_id, date, ...updates } = item.payload as any
-      // Idempotent — check_out_at pasti belum ada (baru pertama absen pulang).
-      // Kalau sudah ada check_out_at yang lebih lama, biarkan replay overwrite
-      // (client authoritative). Tapi kalau server lebih baru, skip.
-      const { data: existing } = await supabase
-        .from('raos_attendance')
-        .select('check_out_at')
-        .eq('staff_id', staff_id).eq('date', date).maybeSingle()
-      if (existing?.check_out_at && existing.check_out_at >= updates.check_out_at) {
-        return { ok: true, skip: true }
-      }
-      const { error } = await supabase
-        .from('raos_attendance')
-        .update(updates)
-        .eq('staff_id', staff_id)
-        .eq('date', date)
+      // B2 fix: same as check-in above -- replays through
+      // raos_attendance_check_out, idempotent server-side.
+      const { error } = await supabase.rpc('raos_attendance_check_out', item.payload as {
+        p_lat: number | null
+        p_lng: number | null
+        p_selfie_url: string | null
+        p_client_captured_at: string
+      })
       if (error) return { ok: false, err: error.message }
       return { ok: true }
     }

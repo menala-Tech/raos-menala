@@ -8,15 +8,17 @@
 function importAbsensiFromSupabase() {
   const sh = getSheet(CONFIG.SHEETS.ABSENSI)
 
+  // B3 fix: raos_attendance has 2 FKs to user_profiles (staff_id AND
+  // manual_edited_by) -- an unhinted user_profiles(...) embed is ambiguous
+  // and PostgREST returns HTTP 300. Explicit FK hint picks the staff record,
+  // which is what this report actually needs (matches previous behavior).
   const rows = callSupabase(
     'raos_attendance?select=id,date,check_in_at,check_out_at,status,is_location_valid,' +
-    'pickup_points(name),user_profiles(full_name,staff_id)' +
+    'pickup_points(name),user_profiles!raos_attendance_staff_id_fkey(full_name,staff_id)' +
     '&order=check_in_at.desc&limit=500'
   )
 
   if (!rows || !rows.length) {
-    // getUi() throw dari time-based trigger context — wrap try/catch supaya
-    // trigger tidak 100% error (audit 1 Agu 2026).
     try { SpreadsheetApp.getUi().alert('Tidak ada data absensi di Supabase.') } catch (e) { /* trigger context */ }
     return
   }
@@ -89,11 +91,11 @@ function rekapAbulanan(bulan, tahun) {
   const rekap = {}
 
   for (let i = 1; i < rows.length; i++) {
-    const tgl = new Date(rows[i][1])  // index 1 = TANGGAL
+    const tgl = new Date(rows[i][1])
     if (!tgl || tgl.getMonth() + 1 !== bulan || tgl.getFullYear() !== tahun) continue
-    const nama = rows[i][2]           // index 2 = NAMA STAFF
+    const nama = rows[i][2]
     if (!rekap[nama]) rekap[nama] = { hadir: 0, terlambat: 0, alpha: 0 }
-    const status = rows[i][6]         // index 6 = STATUS
+    const status = rows[i][6]
     if (status === 'hadir') rekap[nama].hadir++
     else if (status === 'terlambat') rekap[nama].terlambat++
     else rekap[nama].alpha++
@@ -101,7 +103,6 @@ function rekapAbulanan(bulan, tahun) {
   return rekap
 }
 
-// Helper: ambil shift id by name dari Supabase (cache di script property utk hemat request).
 function getShiftIdByName_(name) {
   const key = 'SHIFT_ID_' + name.toUpperCase()
   let id = PropertiesService.getScriptProperties().getProperty(key)
@@ -115,32 +116,71 @@ function getShiftIdByName_(name) {
   return id
 }
 
-// Kirim reminder MASUK per shift. Panggil target: staff dengan shift ini
-// yang BELUM absen hari ini. Kirim WA (kalau ada phone) + push.
+// B14 timezone hardening: reminder audience follows each roster branch's
+// business date. BPN/MDC/UPG are Asia/Makassar (WITA); WIB branches use
+// Asia/Jakarta. Never derive roster date from UTC ISO date.
+function reminderBranchTimezoneMap_() {
+  const rows = callSupabase('branches?is_active=eq.true&select=id,timezone') || []
+  const out = {}
+  rows.forEach(b => { out[b.id] = b.timezone || 'Asia/Jakarta' })
+  return out
+}
+
+function reminderLocalDate_(dateObj, timezone) {
+  return Utilities.formatDate(dateObj || new Date(), timezone || 'Asia/Jakarta', 'yyyy-MM-dd')
+}
+
+function reminderRosterToday_(shiftId) {
+  const now = new Date()
+  const tzByBranch = reminderBranchTimezoneMap_()
+  let dates = Array.from(new Set(Object.keys(tzByBranch).map(id => reminderLocalDate_(now, tzByBranch[id]))))
+  if (dates.length === 0) dates = [reminderLocalDate_(now, 'Asia/Jakarta')]
+
+  const roster = callSupabase(
+    `raos_shift_schedules?tanggal=in.(${dates.join(',')})&shift_id=eq.${shiftId}&select=staff_id,branch_id,tanggal`
+  ) || []
+
+  const filtered = roster.filter(r => {
+    const tz = tzByBranch[r.branch_id] || 'Asia/Jakarta'
+    return r.tanggal === reminderLocalDate_(now, tz)
+  })
+
+  return {
+    rows: filtered,
+    dates: Array.from(new Set(filtered.map(r => r.tanggal))),
+  }
+}
+
 function kirimReminderMasukShift_(shiftName) {
   const shiftId = getShiftIdByName_(shiftName)
   if (!shiftId) {
     logSistem('warning', 'kirimReminderMasukShift_', 'warning', `Shift "${shiftName}" tidak ditemukan di DB shifts`)
     return
   }
-  // Note: user_profiles TIDAK punya kolom shift_id (shift ditentukan runtime
-  // by clock via detectCurrentShift). Untuk reminder, target = SEMUA staff
-  // aktif yang belum absen hari ini. Filter per shift bisa ditambah kalau
-  // nanti user_profiles punya kolom default_shift_id.
-  const staff = callSupabase(
-    'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
+
+  const rosterInfo = reminderRosterToday_(shiftId)
+  const roster = rosterInfo.rows
+  if (roster.length === 0) {
+    logSistem('cron', `reminderMasuk${shiftName}`, 'success', '0 staff berjadwal shift ini pada tanggal lokal cabang')
+    return
+  }
+
+  const scheduledDateByStaff = new Map(roster.map(r => [r.staff_id, r.tanggal]))
+  const staffAktif = callSupabase(
+    'user_profiles?is_active=eq.true&role=eq.staff&select=id,staff_id,full_name,phone,branch_id'
   ) || []
+  const staff = staffAktif.filter(s => scheduledDateByStaff.has(s.id))
   if (staff.length === 0) return
 
-  const today = new Date().toISOString().split('T')[0]
+  const attendanceDates = rosterInfo.dates
   const absensiHariIni = callSupabase(
-    `raos_attendance?date=eq.${today}&check_in_at=not.is.null&select=staff_id`
+    `raos_attendance?date=in.(${attendanceDates.join(',')})&check_in_at=not.is.null&select=staff_id,date`
   ) || []
-  const sudahAbsen = new Set(absensiHariIni.map(a => a.staff_id))
+  const sudahAbsen = new Set(absensiHariIni.map(a => `${a.staff_id}|${a.date}`))
 
-  const belum = staff.filter(s => !sudahAbsen.has(s.id))
+  const belum = staff.filter(s => !sudahAbsen.has(`${s.id}|${scheduledDateByStaff.get(s.id)}`))
   if (belum.length === 0) {
-    logSistem('cron', `reminderMasuk${shiftName}`, 'success', '0 staff belum absen (semua sudah check-in)')
+    logSistem('cron', `reminderMasuk${shiftName}`, 'success', '0 staff belum absen (semua roster lokal cabang sudah check-in)')
     return
   }
 
@@ -154,12 +194,13 @@ function kirimReminderMasukShift_(shiftName) {
     waTerkirim++
   })
 
+  const tagDate = attendanceDates.slice().sort().join('_')
   const pushRes = invokePushFromGas_(
     belum.map(s => s.id),
     `⏰ Reminder Masuk — Shift ${shiftName}`,
     `Sebentar lagi shift ${shiftName} mulai. Buka RAOS untuk check-in.`,
     '/absensi',
-    `reminder-masuk-${shiftName.toLowerCase()}-${today}`,
+    `reminder-masuk-${shiftName.toLowerCase()}-${tagDate}`,
     'pengingat_absen'
   )
 
@@ -167,31 +208,45 @@ function kirimReminderMasukShift_(shiftName) {
     `${belum.length} staff belum absen. WA: ${waTerkirim}, Push: ${pushRes.sent}/${pushRes.total}`)
 }
 
-// Kirim reminder PULANG per shift. Target: staff yang sudah check_in tapi
-// belum check_out.
 function kirimReminderPulangShift_(shiftName) {
-  const staff = callSupabase(
-    'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
+  const shiftId = getShiftIdByName_(shiftName)
+  if (!shiftId) {
+    logSistem('warning', 'kirimReminderPulangShift_', 'warning', `Shift "${shiftName}" tidak ditemukan di DB shifts`)
+    return
+  }
+
+  const rosterInfo = reminderRosterToday_(shiftId)
+  const roster = rosterInfo.rows
+  if (roster.length === 0) {
+    logSistem('cron', `reminderPulang${shiftName}`, 'success', '0 staff berjadwal shift ini pada tanggal lokal cabang')
+    return
+  }
+
+  const scheduledDateByStaff = new Map(roster.map(r => [r.staff_id, r.tanggal]))
+  const staffAktif = callSupabase(
+    'user_profiles?is_active=eq.true&role=eq.staff&select=id,staff_id,full_name,phone,branch_id'
   ) || []
+  const staff = staffAktif.filter(s => scheduledDateByStaff.has(s.id))
   if (staff.length === 0) return
 
-  const today = new Date().toISOString().split('T')[0]
+  const attendanceDates = rosterInfo.dates
   const attendance = callSupabase(
-    `raos_attendance?date=eq.${today}&check_in_at=not.is.null&check_out_at=is.null&select=staff_id`
+    `raos_attendance?date=in.(${attendanceDates.join(',')})&check_in_at=not.is.null&check_out_at=is.null&select=staff_id,date`
   ) || []
-  const belumPulangIds = new Set(attendance.map(a => a.staff_id))
-  const target = staff.filter(s => belumPulangIds.has(s.id))
+  const belumPulang = new Set(attendance.map(a => `${a.staff_id}|${a.date}`))
+  const target = staff.filter(s => belumPulang.has(`${s.id}|${scheduledDateByStaff.get(s.id)}`))
   if (target.length === 0) {
     logSistem('cron', `reminderPulang${shiftName}`, 'success', '0 staff perlu diingatkan')
     return
   }
 
+  const tagDate = attendanceDates.slice().sort().join('_')
   const pushRes = invokePushFromGas_(
     target.map(s => s.id),
     `🏁 Reminder Pulang — Shift ${shiftName}`,
     'Sudah waktunya check-out. Jangan lupa absen pulang di RAOS.',
     '/absensi',
-    `reminder-pulang-${shiftName.toLowerCase()}-${today}`,
+    `reminder-pulang-${shiftName.toLowerCase()}-${tagDate}`,
     'pengingat_absen'
   )
 
@@ -199,7 +254,6 @@ function kirimReminderPulangShift_(shiftName) {
     `Push ke ${pushRes.sent}/${target.length} staff belum check-out`)
 }
 
-// ─── Trigger callables (bind ke ScriptApp.newTrigger) ─────────────────
 function reminderMasukPagi()  { kirimReminderMasukShift_('Pagi') }
 function reminderMasukSiang() { kirimReminderMasukShift_('Siang') }
 function reminderMasukMalam() { kirimReminderMasukShift_('Malam') }
@@ -207,11 +261,9 @@ function reminderPulangPagi()  { kirimReminderPulangShift_('Pagi') }
 function reminderPulangSiang() { kirimReminderPulangShift_('Siang') }
 function reminderPulangMalam() { kirimReminderPulangShift_('Malam') }
 
-// Backward-compat alias untuk trigger lama
 function kirimReminderAbsensi() { kirimReminderMasukShift_('Pagi') }
 function kirimReminderPulang()  { kirimReminderPulangShift_('Pagi') }
 
-// F: Notif ke koordinator kalau ada scan pending > 15 menit.
 function notifyPendingScansKoordinator() {
   const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString()
   const pending = callSupabase(
@@ -219,7 +271,6 @@ function notifyPendingScansKoordinator() {
   ) || []
   if (pending.length === 0) return
 
-  // Ambil koordinator + admin + direksi + management
   const koord = callSupabase(
     `user_profiles?is_active=eq.true&role=in.(koordinator,admin,management,direksi)&select=id`
   ) || []
@@ -238,9 +289,6 @@ function notifyPendingScansKoordinator() {
     `${pending.length} scan pending → push ke ${pushRes.sent}/${koord.length} koord/admin`)
 }
 
-// Helper: invoke Edge Function raos-send-push dari GAS. Pakai SUPABASE_KEY
-// (service role) di Script Properties → Edge Function verify_jwt=true
-// bypass role check untuk service_role token.
 function invokePushFromGas_(userIds, title, body, url, tag, kategori) {
   if (!userIds || userIds.length === 0) return { sent: 0, total: 0, failed: 0 }
   try {

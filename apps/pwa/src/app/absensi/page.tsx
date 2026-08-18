@@ -11,12 +11,17 @@ import {
   Fingerprint, Navigation
 } from 'lucide-react'
 import Link from 'next/link'
+import clsx from 'clsx'
 import FullBodyRearCamera from '@/components/FullBodyRearCamera'
 import { checkGeofence, GEOFENCE_TOLERANCE_METERS, type GeofenceResult } from '@/lib/geo'
 import { requestLocationTiered } from '@/lib/gps'
 import { logActivity } from '@/lib/activity'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
-import { detectCurrentShift, formatShiftTime, isLate, type Shift } from '@/lib/shift'
+// B2 fix: isLate() no longer imported -- late/terlambat status is now
+// computed server-side by raos_attendance_check_in (mirrors this same
+// logic exactly). detectCurrentShift() stays: it's still used for the
+// "Shift Hari Ini" display card, which is UX-only now.
+import { detectCurrentShift, formatShiftTime, type Shift } from '@/lib/shift'
 import type { UserProfile, Attendance } from '@/types'
 import { branchDateKey } from '@/lib/branchTime'
 import { useSystemConfigNumber } from '@/lib/useSystemConfig'
@@ -33,6 +38,9 @@ export default function AbsensiPage() {
   const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid' | 'unavailable'>('checking')
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState<'form' | 'camera' | 'success'>('form')
+  // B11 fix: distinguishes an actual server commit from an offline enqueue
+  // on the success screen -- see submitAbsensi().
+  const [submitOutcome, setSubmitOutcome] = useState<'synced' | 'queued' | 'failed' | null>(null)
   const [type, setType] = useState<'in' | 'out'>('in')
   const [selfieBlob, setSelfieBlob] = useState<Blob | null>(null)
   const [shift, setShift] = useState<Shift | null>(null)
@@ -135,7 +143,8 @@ export default function AbsensiPage() {
   async function submitAbsensi() {
     if (!user || !selfieBlob) return
     setLoading(true)
-    const dateStr = branchDateKey((user as any)?.branches?.timezone)
+    // B2 fix: date bucketing moved server-side (RPC derives it from
+    // branch timezone + captured_at) -- no longer needed here.
     const now = new Date().toISOString()
     // Selfie upload — kalau gagal karena network, selfie blob ikut dienqueue
     // (syncer akan upload saat online + inject path ke row sebelum insert).
@@ -146,51 +155,80 @@ export default function AbsensiPage() {
     // supaya konsisten dengan bucket policy per-user folder.
     const pendingPath = `${user.id}/${type}-${Date.now()}.jpg`
 
+    // B2 fix: staff_id/branch_id/date/pickup_point_id/shift_id/status/
+    // is_location_valid used to be decided entirely by the browser and
+    // written via a direct upsert/update -- RLS only checked row
+    // ownership, never actually validated the geofence distance
+    // server-side. raos_attendance_check_in/_out (DRAFT migration
+    // sql/raos_090_attendance_canonical_rpc_DRAFT.sql, NOT yet applied)
+    // now derive all of that server-side from auth.uid(); the browser
+    // only supplies evidence (lat/lng/selfie path/client-captured time).
+    // B11 fix: outcome used to be implicit -- setStep('success') ran
+    // unconditionally after this block regardless of whether the RPC
+    // actually committed, got queued offline, or failed outright (a
+    // non-network error, e.g. geofence_blocked, still fell through to the
+    // same "success" step after its alert(), which is misleading). Now
+    // tracked explicitly so the render below can show the right message
+    // and so a genuine failure no longer advances past the camera step.
+    let outcome: 'synced' | 'queued' | 'failed' = 'failed'
     if (type === 'in') {
-      const status = shift && isLate(shift, new Date(), (user as any)?.branches?.timezone) ? 'terlambat' : 'hadir'
-      const payload = {
-        staff_id: user.id, branch_id: user.branch_id, date: dateStr,
-        shift_id: shift?.id ?? null,
-        check_in_at: now,
-        check_in_lat: location?.lat ?? null, check_in_lng: location?.lng ?? null,
-        pickup_point_id: geofence?.nearestPointId ?? null,
-        selfie_in_url: selfiePath, is_location_valid: locationValid, status,
+      const rpcParams = {
+        p_lat: location?.lat ?? null,
+        p_lng: location?.lng ?? null,
+        p_selfie_url: selfiePath,
+        p_client_captured_at: now,
       }
-      const { data, error } = await supabase.from('raos_attendance')
-        .upsert(payload, { onConflict: 'staff_id,date' })
-        .select().single()
+      const { data, error } = await supabase.rpc('raos_attendance_check_in', rpcParams)
       if ((error && isNetworkError(error)) || selfieOffline) {
         const blobs = selfieOffline
-          ? { selfie_in_url: { blob: selfieBlob, contentType: 'image/jpeg', targetBucket: 'selfies', pathHint: pendingPath } }
+          ? { p_selfie_url: { blob: selfieBlob, contentType: 'image/jpeg', targetBucket: 'selfies', pathHint: pendingPath } }
           : undefined
-        await enqueue('raos_attendance_in', payload, blobs)
-        logActivity('absensi_masuk_offline', `queued ${status} @ ${geofence?.nearestPointName ?? '-'}`)
+        await enqueue('raos_attendance_in', rpcParams, blobs)
+        logActivity('absensi_masuk_offline', `queued @ ${geofence?.nearestPointName ?? '-'}`)
+        outcome = 'queued'
+      } else if (error) {
+        alert(error.message === 'geofence_blocked'
+          ? 'Absensi ditolak server: di luar radius pickup point.'
+          : `Absensi gagal: ${error.message}`)
+        outcome = 'failed'
       } else {
-        setToday(data)
-        logActivity('absensi_masuk', `${status} @ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
+        const result = data as { status?: string; row?: Attendance } | null
+        setToday(result?.row ?? null)
+        logActivity('absensi_masuk', `${result?.status ?? 'unknown'} @ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'}`)
+        outcome = 'synced'
       }
     } else {
-      const updates = {
-        check_out_at: now,
-        check_out_lat: location?.lat ?? null, check_out_lng: location?.lng ?? null,
-        selfie_out_url: selfiePath,
+      const rpcParams = {
+        p_lat: location?.lat ?? null,
+        p_lng: location?.lng ?? null,
+        p_selfie_url: selfiePath,
+        p_client_captured_at: now,
       }
-      const { data, error } = await supabase.from('raos_attendance')
-        .update(updates).eq('staff_id', user.id).eq('date', dateStr).select().single()
+      const { data, error } = await supabase.rpc('raos_attendance_check_out', rpcParams)
       if ((error && isNetworkError(error)) || selfieOffline) {
         const blobs = selfieOffline
-          ? { selfie_out_url: { blob: selfieBlob, contentType: 'image/jpeg', targetBucket: 'selfies', pathHint: pendingPath } }
+          ? { p_selfie_url: { blob: selfieBlob, contentType: 'image/jpeg', targetBucket: 'selfies', pathHint: pendingPath } }
           : undefined
-        await enqueue('raos_attendance_out', { staff_id: user.id, date: dateStr, ...updates }, blobs)
+        await enqueue('raos_attendance_out', rpcParams, blobs)
         logActivity('absensi_pulang_offline', `queued @ ${geofence?.nearestPointName ?? '-'}`)
+        outcome = 'queued'
+      } else if (error) {
+        alert(`Absensi pulang gagal: ${error.message}`)
+        outcome = 'failed'
       } else {
-        setToday(data)
-        logActivity('absensi_pulang', `@ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'} (valid=${locationValid})`)
+        const result = data as { status?: string; row?: Attendance } | null
+        setToday(result?.row ?? null)
+        logActivity('absensi_pulang', `@ ${geofence?.nearestPointName ?? 'lokasi tidak terdeteksi'}`)
+        outcome = 'synced'
       }
     }
     setLoading(false)
     setSelfieBlob(null)
-    setStep('success')
+    setSubmitOutcome(outcome)
+    // A genuine failure (not queued, not synced) stays on the camera step --
+    // the alert() above already told the user what went wrong; advancing to
+    // "success" here would contradict that.
+    if (outcome !== 'failed') setStep('success')
   }
 
   const now = new Date()
@@ -385,14 +423,27 @@ export default function AbsensiPage() {
         {/* ===== STEP: SUCCESS ===== */}
         {step === 'success' && (
           <div className="card text-center space-y-4">
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-              <CheckCircle2 size={48} className="text-green-500" />
+            {/* B11 fix: "Berhasil"/green only for an actual server commit
+                (submitOutcome === 'synced'). A queued offline submission
+                gets its own yellow "tersimpan di perangkat" messaging so it
+                never reads as if the server already accepted it. */}
+            <div className={clsx('w-20 h-20 rounded-full flex items-center justify-center mx-auto',
+              submitOutcome === 'queued' ? 'bg-yellow-100' : 'bg-green-100')}>
+              {submitOutcome === 'queued'
+                ? <Clock size={48} className="text-yellow-500" />
+                : <CheckCircle2 size={48} className="text-green-500" />}
             </div>
             <div>
               <h2 className="font-black text-gray-800 text-lg">
-                Absensi {type === 'in' ? 'Masuk' : 'Pulang'} Berhasil!
+                {submitOutcome === 'queued'
+                  ? `Absensi ${type === 'in' ? 'Masuk' : 'Pulang'} Tersimpan di Perangkat`
+                  : `Absensi ${type === 'in' ? 'Masuk' : 'Pulang'} Berhasil!`}
               </h2>
-              <p className="text-sm text-gray-500 font-medium mt-1">Berhasil Dicatat</p>
+              <p className="text-sm text-gray-500 font-medium mt-1">
+                {submitOutcome === 'queued'
+                  ? 'Menunggu sinkronisasi — belum terkirim ke server'
+                  : 'Berhasil Dicatat'}
+              </p>
             </div>
             <div className="bg-gray-50 rounded-xl p-4 text-left space-y-2">
               <div className="flex justify-between text-xs">

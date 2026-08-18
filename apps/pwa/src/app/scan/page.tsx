@@ -11,8 +11,9 @@ import { logActivity } from '@/lib/activity'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
-import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera } from 'lucide-react'
+import { ArrowLeft, MapPin, CheckCircle2, XCircle, Loader2, Keyboard, Camera, Clock } from 'lucide-react'
 import Link from 'next/link'
+import clsx from 'clsx'
 import type { UserProfile } from '@/types'
 import { useSystemConfigNumber } from '@/lib/useSystemConfig'
 import { deriveOperationalGate } from '@/lib/operational-geofence-gate'
@@ -250,13 +251,26 @@ export default function ScanPage() {
         )}
 
         {scanState === 'success' && lastScan && (
+          // B11 fix: 'success' state was used for both an actual server
+          // commit AND an offline enqueue (lastScan.queued === true) with
+          // identical "Scan Berhasil!" text -- a queued scan the server has
+          // never seen looked indistinguishable from one it actually
+          // accepted. Text/color now branches on the same `queued` flag
+          // that was already being set (enqueue() call sites above) --
+          // offline queue engine itself is untouched.
           <div className="space-y-3">
-            <div className="card border-2 border-green-500">
+            <div className={clsx('card border-2', lastScan.queued ? 'border-yellow-400' : 'border-green-500')}>
               <div className="flex items-center gap-3 mb-4">
-                <CheckCircle2 size={32} className="text-green-500" />
+                {lastScan.queued
+                  ? <Clock size={32} className="text-yellow-500" />
+                  : <CheckCircle2 size={32} className="text-green-500" />}
                 <div>
-                  <p className="font-bold text-green-700">Scan Berhasil!</p>
-                  <p className="text-xs text-gray-500">Status: PENDING — Menunggu Validasi</p>
+                  <p className={clsx('font-bold', lastScan.queued ? 'text-yellow-700' : 'text-green-700')}>
+                    {lastScan.queued ? 'Tersimpan di Perangkat — Menunggu Sinkronisasi' : 'Scan Berhasil!'}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {lastScan.queued ? 'Belum terkirim ke server. Akan otomatis sync saat online.' : 'Status: PENDING — Menunggu Validasi'}
+                  </p>
                 </div>
               </div>
               <div className="space-y-2 text-sm">

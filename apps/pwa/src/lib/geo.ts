@@ -54,13 +54,41 @@ export function shouldBlockByGeofence(
   return geo.overshootMeters > toleranceMeters
 }
 
+// B9 fix: single canonical branch-scope rule, mirrored client-side from
+// the server's raos_branch_geofence_scope() SQL function (see
+// sql/raos_090_attendance_canonical_rpc_DRAFT.sql) so the UX badge/banner
+// agrees with what the server will actually accept. Before this fix,
+// checkGeofence() filtered by branchId *exactly*, so a SOETA-parent-
+// assigned staff member never saw T1/T2/T3 pickup points at all (0
+// points in scope -> always "outside radius"), while each terminal
+// correctly saw only its own point. This is UX-only: the attendance RPC
+// (once applied) is the actual authority and resolves the same scope
+// server-side regardless of what this function returns.
+async function resolveGeofenceScope(branchId: string): Promise<string[]> {
+  const { data: branch } = await supabase
+    .from('branches')
+    .select('id, branch_type')
+    .eq('id', branchId)
+    .maybeSingle()
+  if (branch?.branch_type === 'airport_hub') {
+    const { data: children } = await supabase
+      .from('branches')
+      .select('id')
+      .eq('parent_branch_id', branchId)
+    return [branchId, ...((children ?? []).map(c => c.id))]
+  }
+  return [branchId]
+}
+
 /**
  * Cek apakah koordinat berada di dalam radius geo-fence pickup point aktif.
  * Sesuai spec Absensi.md: setiap pickup point punya radius_meters sendiri.
  *
- * `branchId` opsional — kalau ada, hanya cek pickup point di Terminal user
- * (mis. staff T3 tidak divalidasi terhadap PP T1/T2). Kalau null (mis.
- * direksi Head Office yang lintas terminal), cek semua pickup point aktif.
+ * `branchId` opsional — kalau ada, hanya cek pickup point dalam scope
+ * cabang user (B9: SOETA parent → SOETA+T1+T2+T3; T1/T2/T3 individual →
+ * hanya milik sendiri; cabang lain → hanya milik sendiri). Kalau null
+ * (mis. direksi Head Office yang lintas terminal), cek semua pickup point
+ * aktif.
  */
 export async function checkGeofence(
   lat: number,
@@ -69,15 +97,17 @@ export async function checkGeofence(
 ): Promise<GeofenceResult> {
   // View raos_geofence_points menggabungkan pickup_points aktif +
   // fallback ke branches.lat/lng/default_radius_meters untuk cabang yang
-  // belum punya pickup point. Filter branchId supaya staff cabang lain
-  // tidak salah-validate ke titik cabang tetangga.
+  // belum punya pickup point. Filter by resolved scope supaya staff
+  // cabang lain tidak salah-validate ke titik cabang tetangga, tapi
+  // SOETA-parent tetap melihat titik T1/T2/T3 miliknya sendiri.
   let query = supabase
     .from('raos_geofence_points')
     .select('id, name, latitude, longitude, radius_meters, branch_id')
     .eq('is_active', true)
 
   if (branchId) {
-    query = query.eq('branch_id', branchId)
+    const scope = await resolveGeofenceScope(branchId)
+    query = query.in('branch_id', scope)
   }
 
   const { data: points } = await query

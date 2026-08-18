@@ -96,9 +96,16 @@ function importDriverFromSheet() {
 }
 
 function importOrderFromSupabase() {
+  // B3 fix: scan_orders has 3 FKs to user_profiles (staff_id, koordinator_id,
+  // admin_id) -- an unhinted user_profiles(...) embed is ambiguous and
+  // PostgREST returns HTTP 300. This report needs the scanning staff, so the
+  // hint picks staff_id explicitly (matches previous behavior/intent).
+  // raos_drivers(...) has exactly one FK from scan_orders (driver_id) so it
+  // was never actually ambiguous, but the hint is added anyway for
+  // consistency/defensiveness against a future second FK to raos_drivers.
   const data = callSupabase(
     'scan_orders?select=scan_id,scanned_at,status,gmv,incentive,' +
-    'raos_drivers(driver_id,name,vehicle_type),user_profiles(full_name)' +
+    'raos_drivers!scan_orders_driver_id_fkey(driver_id,name,vehicle_type),user_profiles!scan_orders_staff_id_fkey(full_name)' +
     '&order=scanned_at.desc&limit=500'
   )
   if (!data || !data.length) {

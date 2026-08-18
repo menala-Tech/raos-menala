@@ -8,9 +8,13 @@
 function importAbsensiFromSupabase() {
   const sh = getSheet(CONFIG.SHEETS.ABSENSI)
 
+  // B3 fix: raos_attendance has 2 FKs to user_profiles (staff_id AND
+  // manual_edited_by) -- an unhinted user_profiles(...) embed is ambiguous
+  // and PostgREST returns HTTP 300. Explicit FK hint picks the staff record,
+  // which is what this report actually needs (matches previous behavior).
   const rows = callSupabase(
     'raos_attendance?select=id,date,check_in_at,check_out_at,status,is_location_valid,' +
-    'pickup_points(name),user_profiles(full_name,staff_id)' +
+    'pickup_points(name),user_profiles!raos_attendance_staff_id_fkey(full_name,staff_id)' +
     '&order=check_in_at.desc&limit=500'
   )
 
@@ -117,22 +121,43 @@ function getShiftIdByName_(name) {
 
 // Kirim reminder MASUK per shift. Panggil target: staff dengan shift ini
 // yang BELUM absen hari ini. Kirim WA (kalau ada phone) + push.
+//
+// B14 fix (2026-08-19): shiftId dulu di-fetch tapi TIDAK PERNAH dipakai
+// untuk filter -- audience sebenarnya adalah SEMUA staff aktif yang belum
+// absen, terlepas dari shift mereka (komentar lama di sini bahkan mengakui
+// ini: "Filter per shift bisa ditambah kalau nanti user_profiles punya
+// kolom default_shift_id"). Sejak raos_shift_schedules (roster harian per
+// staff, dipakai juga oleh raos_attendance_check_in RPC draft, B2/B13)
+// sudah ada, filter itu sekarang mungkin: audience = staff yang punya
+// entri roster untuk shift INI hari ini. Staff tanpa roster shift ini
+// (shift lain, libur, atau roster belum diisi admin) tidak lagi menerima
+// reminder shift yang bukan miliknya.
 function kirimReminderMasukShift_(shiftName) {
   const shiftId = getShiftIdByName_(shiftName)
   if (!shiftId) {
     logSistem('warning', 'kirimReminderMasukShift_', 'warning', `Shift "${shiftName}" tidak ditemukan di DB shifts`)
     return
   }
-  // Note: user_profiles TIDAK punya kolom shift_id (shift ditentukan runtime
-  // by clock via detectCurrentShift). Untuk reminder, target = SEMUA staff
-  // aktif yang belum absen hari ini. Filter per shift bisa ditambah kalau
-  // nanti user_profiles punya kolom default_shift_id.
-  const staff = callSupabase(
-    'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
+  const today = new Date().toISOString().split('T')[0]
+
+  const roster = callSupabase(
+    `raos_shift_schedules?tanggal=eq.${today}&shift_id=eq.${shiftId}&select=staff_id`
   ) || []
+  if (roster.length === 0) {
+    logSistem('cron', `reminderMasuk${shiftName}`, 'success', '0 staff berjadwal shift ini hari ini (roster kosong)')
+    return
+  }
+  const scheduledIds = new Set(roster.map(r => r.staff_id))
+
+  // B14 review (round 4): explicit role=staff filter -- roster entries are
+  // staff-only in practice today, but this makes the "role staff" audience
+  // rule an actual query condition instead of an unstated assumption.
+  const staffAktif = callSupabase(
+    'user_profiles?is_active=eq.true&role=eq.staff&select=id,staff_id,full_name,phone'
+  ) || []
+  const staff = staffAktif.filter(s => scheduledIds.has(s.id))
   if (staff.length === 0) return
 
-  const today = new Date().toISOString().split('T')[0]
   const absensiHariIni = callSupabase(
     `raos_attendance?date=eq.${today}&check_in_at=not.is.null&select=staff_id`
   ) || []
@@ -140,7 +165,7 @@ function kirimReminderMasukShift_(shiftName) {
 
   const belum = staff.filter(s => !sudahAbsen.has(s.id))
   if (belum.length === 0) {
-    logSistem('cron', `reminderMasuk${shiftName}`, 'success', '0 staff belum absen (semua sudah check-in)')
+    logSistem('cron', `reminderMasuk${shiftName}`, 'success', '0 staff belum absen (semua berjadwal shift ini sudah check-in)')
     return
   }
 
@@ -167,15 +192,42 @@ function kirimReminderMasukShift_(shiftName) {
     `${belum.length} staff belum absen. WA: ${waTerkirim}, Push: ${pushRes.sent}/${pushRes.total}`)
 }
 
-// Kirim reminder PULANG per shift. Target: staff yang sudah check_in tapi
-// belum check_out.
+// Kirim reminder PULANG per shift. Target: staff berjadwal shift ini hari
+// ini yang sudah check_in tapi belum check_out.
+//
+// B14 fix (2026-08-19): shiftName dulu hanya dipakai untuk teks/logging --
+// TIDAK ADA filter shift sama sekali (parameter tidak pernah dipakai untuk
+// query). "Sudah check-in tapi belum check-out" saja tidak cukup: staff
+// shift Malam yang belum waktunya pulang bisa kena reminder "Pulang Pagi"
+// kalau kebetulan sudah check-in pagi itu untuk shift lain di hari yang
+// sama (jarang tapi bukan mustahil dengan roster fleksibel). Sekarang
+// di-scope ke staff yang rosternya memang shift ini hari ini.
 function kirimReminderPulangShift_(shiftName) {
-  const staff = callSupabase(
-    'user_profiles?is_active=eq.true&select=id,staff_id,full_name,phone'
+  const shiftId = getShiftIdByName_(shiftName)
+  if (!shiftId) {
+    logSistem('warning', 'kirimReminderPulangShift_', 'warning', `Shift "${shiftName}" tidak ditemukan di DB shifts`)
+    return
+  }
+  const today = new Date().toISOString().split('T')[0]
+
+  const roster = callSupabase(
+    `raos_shift_schedules?tanggal=eq.${today}&shift_id=eq.${shiftId}&select=staff_id`
   ) || []
+  if (roster.length === 0) {
+    logSistem('cron', `reminderPulang${shiftName}`, 'success', '0 staff berjadwal shift ini hari ini (roster kosong)')
+    return
+  }
+  const scheduledIds = new Set(roster.map(r => r.staff_id))
+
+  // B14 review (round 4): explicit role=staff filter -- roster entries are
+  // staff-only in practice today, but this makes the "role staff" audience
+  // rule an actual query condition instead of an unstated assumption.
+  const staffAktif = callSupabase(
+    'user_profiles?is_active=eq.true&role=eq.staff&select=id,staff_id,full_name,phone'
+  ) || []
+  const staff = staffAktif.filter(s => scheduledIds.has(s.id))
   if (staff.length === 0) return
 
-  const today = new Date().toISOString().split('T')[0]
   const attendance = callSupabase(
     `raos_attendance?date=eq.${today}&check_in_at=not.is.null&check_out_at=is.null&select=staff_id`
   ) || []

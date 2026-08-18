@@ -79,11 +79,20 @@ export default function AdminPage() {
   async function validateScan(scanId: string, status: 'valid' | 'rejected') {
     if (!user) return
     setProcessing(scanId)
+    // B12 fix: this page is gated by can(role,'admin:panel'), which only
+    // admin/direksi hold (koordinator does not -- confirmed in accessPolicy.ts
+    // CAPS and unreachable via ROLE_ROUTES/RoleGuard, B1) -- every caller here
+    // is Admin/Direksi, never Koordinator. The old code unconditionally wrote
+    // koordinator_id, falsely recording every Admin/Direksi validation as a
+    // koordinator action. scan_orders already has a separate admin_id column
+    // (FK-verified) that was simply unused -- writing there instead needs no
+    // schema change and stops overloading koordinator_id with a role it
+    // never represents.
     const { error } = await supabase
       .from('scan_orders')
       .update({
         status,
-        koordinator_id: user.id,
+        admin_id: user.id,
         validated_at: new Date().toISOString(),
       })
       .eq('id', scanId)

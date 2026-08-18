@@ -63,14 +63,16 @@ type MarkPaidRow={
   processed_by?:string|null
 }
 
-async function postSaldoProcessedMessage(opts:{roomId:string;senderId:string;requestNo:string;nominal:number;note?:string}){
-  const content=`✅ Saldo sudah diisi oleh admin.\n${opts.requestNo} • Rp${Number(opts.nominal).toLocaleString('id-ID')}\n${opts.note??''}`.trim()
-  const {error}=await supabase.from('chat_messages').insert({room_id:opts.roomId,sender_id:opts.senderId,type:'text',content})
-  if(error){
-    console.warn('[saldoRequest] post processed system message failed',error)
-    void logActivity('isi_saldo_processed_chat_warning',runtimeTechnicalMessage(error))
-  }
-}
+// B6 fix: postSaldoProcessedMessage() (removed) used to insert a second,
+// un-deduplicated "Saldo sudah diisi" chat message from the client after
+// every successful mark-paid. The canonical raos_saldo_mark_paid RPC
+// (Supabase, verified 2026-08-19) already inserts this exact message
+// server-side, exactly-once, guarded by an idempotency marker
+// (`<!--RAOS_SALDO_PAID:<id>-->` in the message content, checked via a
+// `not exists` before insert) -- see the RPC's own comment: "Exactly-once
+// room confirmation belongs to the lifecycle RPC, never to a client." The
+// client-side post was a plain duplicate with no dedup of its own, so every
+// paid request produced 2 chat messages instead of 1.
 
 async function resolveSaldoRoom(branchId:string){
   const {data:branch,error:branchError}=await supabase.from('branches').select('id,parent_branch_id').eq('id',branchId).single()
@@ -137,6 +139,11 @@ export async function rejectSaldoRequest(requestId:string,approverId:string,reas
  * UPDATE of financial lifecycle columns.
  */
 export async function markSaldoRequestProcessed(requestId:string,adminId:string,note?:string,messageId?:string):Promise<{ok:boolean;error?:string}>{
+  // note/messageId kept in the signature for caller compatibility; unused
+  // now that the chat message is owned entirely by the RPC (see B6 fix
+  // above -- the RPC never accepted a client-supplied note text anyway, so
+  // this parameter was already inert for the message content itself).
+  void note;void messageId
   const {data,error}=await supabase.rpc('raos_saldo_mark_paid',{p_request_id:requestId,p_processor_id:adminId})
   if(error)return {ok:false,error:runtimeMessage(error,'Gagal memproses isi saldo.')}
   const result=data as {status?:string;row?:MarkPaidRow}|null
@@ -148,11 +155,11 @@ export async function markSaldoRequestProcessed(requestId:string,adminId:string,
   const row=result.row
   if(!row?.id||!row.request_no)return {ok:false,error:'Response raos_saldo_mark_paid tidak lengkap.'}
 
-  // Do not duplicate the chat side-effect when an idempotent retry returns an
-  // already_processed row.
-  if(result.status==='updated'&&row.chat_room_id){
-    void postSaldoProcessedMessage({roomId:row.chat_room_id,senderId:adminId,requestNo:row.request_no,nominal:Number(row.nominal),note:note??'Saldo sudah diisi oleh admin.'})
-  }
+  // B6 fix: the chat "saldo selesai" message is inserted server-side by the
+  // raos_saldo_mark_paid RPC itself (exactly-once, idempotency-marker
+  // guarded) -- no client-side post here anymore. See comment above
+  // postSaldoProcessedMessage's old definition (function removed) for the
+  // verified RPC source.
   void logActivity('isi_saldo_mark_paid',`${row.request_no} request=${requestId} status=${result.status}`)
   return {ok:true}
 }

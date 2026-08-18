@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import RoleGuard from '@/components/RoleGuard'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -66,7 +67,17 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} h-full`}>
         <div className="min-h-full max-w-md mx-auto relative">
-          {children}
+          {/* B1 fix: canonical RoleGuard existed (roleGuard.ts + RoleGuard.tsx)
+              but was never mounted anywhere -- role-route enforcement only
+              happened where individual pages happened to add their own
+              (inconsistent) auth checks. Mounting it once here at the root
+              makes it the single gate for every route: PUBLIC paths (/,
+              /reset-password) pass through synchronously via
+              canRoleAccessRoute(null, pathname) with no network wait;
+              anything else is checked against ROLE_ROUTES after a session/
+              profile lookup. No new access matrix -- reuses the existing one
+              as-is. */}
+          <RoleGuard>{children}</RoleGuard>
         </div>
       </body>
     </html>

@@ -17,6 +17,7 @@ import clsx from 'clsx'
 import type { UserProfile } from '@/types'
 import { useSystemConfigNumber } from '@/lib/useSystemConfig'
 import { deriveOperationalGate } from '@/lib/operational-geofence-gate'
+import { can } from '@/lib/accessPolicy'
 
 type ScanState = 'idle' | 'scanning' | 'success' | 'error'
 
@@ -158,10 +159,10 @@ export default function ScanPage() {
           {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
           {locationStatus === 'valid' && geofence && `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`}
           {locationStatus === 'invalid' && geofence && (geofence.overshootMeters === null || geofence.nearestPointName === null) && 'Data pickup point cabang belum di-setup — hubungi admin.'}
-          {locationStatus === 'invalid' && geofence && geofence.overshootMeters !== null && user?.role === 'staff' && `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${geofenceTolerance}m — scan akan diblok kalau lewat.`}
-          {locationStatus === 'invalid' && geofence && geofence.distanceMeters !== null && user?.role !== 'staff' && `Di luar radius ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m.`}
-          {locationStatus === 'unavailable' && user?.role === 'staff' && 'GPS tidak terdeteksi — scan diblok. Aktifkan lokasi HP.'}
-          {locationStatus === 'unavailable' && user?.role !== 'staff' && 'GPS tidak terdeteksi.'}
+          {locationStatus === 'invalid' && geofence && geofence.overshootMeters !== null && can(user?.role,'scan:create') && `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${geofenceTolerance}m — scan akan diblok kalau lewat.`}
+          {locationStatus === 'invalid' && geofence && geofence.distanceMeters !== null && !can(user?.role,'scan:create') && `Di luar radius ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m.`}
+          {locationStatus === 'unavailable' && can(user?.role,'scan:create') && 'GPS tidak terdeteksi — scan diblok. Aktifkan lokasi HP.'}
+          {locationStatus === 'unavailable' && !can(user?.role,'scan:create') && 'GPS tidak terdeteksi.'}
         </div>
 
         {scanState === 'idle' && (

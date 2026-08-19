@@ -225,9 +225,44 @@ function updateTargetStaffPencapaian_(requestId) {
 }
 
 /**
- * Poin 7 (2026-08-08): cron 5-menit reminder chat "Belum Diisi".
- * Request eligible: belum diproses, umur >5 menit, reminder terakhir
- * NULL atau sudah >5 menit. Post WAJIB via raos_post_system_message.
+ * Reminder policy (2026-08-19 fix — Finding 2/3, replaces Poin 7
+ * 2026-08-08 flat 5-menit cadence).
+ *
+ * Root cause audited sebelum patch ini: eligibility lama pakai SATU cutoff
+ * (now-5min) untuk DUA hal sekaligus — umur minimum request DAN staleness
+ * last_reminded_at. Trigger sendiri jalan tiap 5 menit (gas/09_trigger.gs).
+ * Hasilnya: begitu request lolos umur 5 menit, ia jadi eligible LAGI setiap
+ * kali cron fire (tiap 5 menit) tanpa batas atas — production confirmed
+ * beberapa request pending berhari-hari terkumpul 87 reminder (query count
+ * dari chat_messages metadata `saldo_belum_diisi`, sebelum akhirnya
+ * diproses). Tidak ada cron Supabase (`cron.job` kosong) — semua reminder
+ * murni dari trigger GAS ini.
+ *
+ * Policy baru:
+ *   1. Request dibuat → 1 pesan awal (existing flow, DI LUAR fungsi ini —
+ *      raos_saldo_after_submitted / raos_broadcast_new_saldo_request).
+ *   2. Masih pending setelah 15 menit → reminder #1 (AGE_THRESHOLD_MS).
+ *   3. Sesudah itu maksimal 1 reminder / 60 menit (RATE_LIMIT_MS,
+ *      menggantikan last_reminded_at cutoff 5 menit lama).
+ *   4. Maksimal 6 reminder / 24 jam per request (DAILY_CAP) — dihitung
+ *      dari chat_messages system message metadata (`saldo_belum_diisi` +
+ *      request_id), BUKAN kolom baru. raos_post_system_message embed
+ *      metadata sebagai `<!--SYSMETA:{...}-->` di awal `content` (lihat
+ *      _countSaldoReminders24h_) — sudah cukup reliable untuk cap 24 jam,
+ *      jadi TIDAK perlu migration kolom reminder_count baru untuk gap ini.
+ *   5. is_processed=true / rejected / cancelled → STOP — sudah otomatis
+ *      terpenuhi oleh filter existing `is_processed=eq.false&status=in.
+ *      (pending,approved)`, tidak berubah.
+ *   6. Histori reminder lama TIDAK di-backfill/dihapus — last_reminded_at
+ *      existing tetap dipakai apa adanya, hanya threshold-nya yang berubah.
+ *
+ * Cron cadence sendiri (gas/09_trigger.gs, every 5 menit) TIDAK diubah di
+ * patch ini — mengubah cadence butuh re-run setupAllTriggers() yang hapus
+ * SEMUA trigger project lalu re-create (blast radius ke trigger lain di
+ * luar scope saldo), dan itu adalah aksi "deploy" yang di luar batas aman
+ * sesi ini. Cron 5-menit yang sering no-op (karena rate-limit 60 menit di
+ * dalam fungsi) valid secara fungsional, hanya sedikit boros — optional
+ * follow-up terpisah kalau mau dirapikan ke every 15 menit.
  */
 function reminderSaldoBelumDiisi() {
   const lock = LockService.getScriptLock()
@@ -237,15 +272,20 @@ function reminderSaldoBelumDiisi() {
     return { success: true, skipped: true }
   }
 
+  const AGE_THRESHOLD_MS = 15 * 60 * 1000   // reminder #1 setelah 15 menit
+  const RATE_LIMIT_MS = 60 * 60 * 1000      // sesudah itu max 1x / 60 menit
+  const DAILY_CAP = 6                       // max 6 reminder / 24 jam / request
+
   try {
     const now = new Date()
     const nowIso = now.toISOString()
-    const cutoffIso = new Date(now.getTime() - 5 * 60 * 1000).toISOString()
+    const ageCutoffIso = new Date(now.getTime() - AGE_THRESHOLD_MS).toISOString()
+    const rateCutoffIso = new Date(now.getTime() - RATE_LIMIT_MS).toISOString()
 
     const rows = callSupabase(
       'raos_saldo_requests?is_processed=eq.false&status=in.(pending,approved)' +
-      '&requested_at=lt.' + encodeURIComponent(cutoffIso) +
-      '&or=(last_reminded_at.is.null,last_reminded_at.lt.' + encodeURIComponent(cutoffIso) + ')' +
+      '&requested_at=lt.' + encodeURIComponent(ageCutoffIso) +
+      '&or=(last_reminded_at.is.null,last_reminded_at.lt.' + encodeURIComponent(rateCutoffIso) + ')' +
       '&select=id,request_no,requested_at,nominal,driver_name,' +
       'staff:user_profiles!staff_id(full_name),' +
       'branch:branches!branch_id(id,name)' +
@@ -255,16 +295,25 @@ function reminderSaldoBelumDiisi() {
     if (!rows.length) {
       logSistem('cron', 'reminderSaldoBelumDiisi', 'success',
         'Tidak ada request saldo yang perlu reminder')
-      return { success: true, reminded: 0, failed: 0 }
+      return { success: true, reminded: 0, capped: 0, failed: 0 }
     }
 
     let reminded = 0
+    let capped = 0
     let failed = 0
 
     rows.forEach(r => {
       if (!r.branch?.id) return
 
       try {
+        // Poin 4: cap 24 jam — cek SEBELUM kirim, bukan sesudah, supaya
+        // request yang sudah kena cap tidak ikut update last_reminded_at
+        // (last_reminded_at hanya berarti "reminder terakhir terkirim").
+        if (_countSaldoReminders24h_(r.id, DAILY_CAP) >= DAILY_CAP) {
+          capped++
+          return
+        }
+
         const roomId = callSupabase('rpc/raos_resolve_saldo_room', 'POST', {
 p_branch_id: r.branch.id,
         })
@@ -315,12 +364,50 @@ p_metadata: {
     })
 
     logSistem('cron', 'reminderSaldoBelumDiisi', failed ? 'warning' : 'success',
-      `${reminded} request di-remind, ${failed} error`)
-    return { success: failed === 0, reminded, failed }
+      `${reminded} request di-remind, ${capped} di-cap 24h, ${failed} error`)
+    return { success: failed === 0, reminded, capped, failed }
   } catch (e) {
     logSistem('error', 'reminderSaldoBelumDiisi', 'error', e.message)
     return { success: false, message: e.message }
   } finally {
     lock.releaseLock()
   }
+}
+
+/**
+ * Hitung berapa kali reminder 'saldo_belum_diisi' sudah dikirim untuk
+ * request ini dalam 24 jam terakhir. Sumber: chat_messages system message
+ * yang di-post raos_post_system_message — metadata (event, request_id, dst)
+ * di-embed sebagai `<!--SYSMETA:{...}-->` di awal kolom `content` (lihat
+ * RPC raos_post_system_message), BUKAN kolom terpisah. Tidak perlu kolom
+ * reminder_count baru untuk Finding 2 — count 24 jam ini cukup reliable
+ * karena setiap reminder yang berhasil terkirim SELALU lewat RPC yang sama
+ * (satu-satunya caller: reminderSaldoBelumDiisi di atas).
+ *
+ * Architect review (2026-08-19): match key WAJIB deterministic —
+ * `"event": "saldo_belum_diisi"` (exact JSON key:value, bukan cuma
+ * substring `saldo_belum_diisi` yang bisa keliru match field lain) DAN
+ * `"request_id": "<uuid>"` (exact JSON key:value). TIDAK pernah cari
+ * berdasarkan nama driver atau nominal — keduanya bukan identifier unik
+ * (driver/nominal yang sama bisa muncul di request lain).
+ *
+ * Dipanggil HANYA untuk row yang SUDAH lolos filter murah (status/
+ * is_processed, umur >=15 menit, last_reminded_at >=60 menit) di query
+ * PostgREST reminderSaldoBelumDiisi di atas — bukan untuk semua pending
+ * row setiap cron tick. Ini query tambahan (network call) per kandidat
+ * yang SUDAH eligible, bukan per semua row pending.
+ *
+ * `limit` dipakai sebagai batas count query (hemat payload) — cukup untuk
+ * cek "apakah sudah >= cap", tidak perlu count eksak di atas cap.
+ */
+function _countSaldoReminders24h_(requestId, limit) {
+  const cutoffIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const pattern = '*"event": "saldo_belum_diisi"*"request_id": "' + requestId + '"*'
+  const rows = callSupabase(
+    'chat_messages?type=eq.system' +
+    '&content=like.' + encodeURIComponent(pattern) +
+    '&created_at=gte.' + encodeURIComponent(cutoffIso) +
+    '&select=id&limit=' + encodeURIComponent(String(limit))
+  ) || []
+  return rows.length
 }

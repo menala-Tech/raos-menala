@@ -11,7 +11,7 @@ import MiniCalendar from '@/components/MiniCalendar'
 import {
   ScanLine, Clock, UserCheck, MessageCircle,
   Target, CheckCircle2, AlertCircle, Bell,
-  TrendingUp, ShieldCheck, PieChart, Car, FileBarChart,
+  TrendingUp, ShieldCheck, Car, FileBarChart,
   ClipboardCheck,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -95,7 +95,11 @@ export default function DashboardPage() {
     ...((can(role,'history:self')||can(role,'history:branch:read')) ? [{ href:'/riwayat', icon:Clock, label:'Riwayat', color:'bg-orange-500', bg:'bg-orange-50' }] : []),
     { href:'/chat', icon:MessageCircle, label:'Chat\nRoom', color:'bg-purple-600', bg:'bg-purple-50' },
     ...((can(role,'kpi:self')||can(role,'kpi:branch:read')) ? [{ href:'/kpi', icon:TrendingUp, label:'KPI &\nTarget', color:'bg-pink-600', bg:'bg-pink-50' }] : []),
-    ...((can(role,'history:self')||can(role,'history:branch:read')) ? [{ href:'/status', icon:PieChart, label:'Status\nScan', color:'bg-teal-600', bg:'bg-teal-50' }] : []),
+    // Fix A: "Status Scan" shortcut removed -- /riwayat is now the canonical
+    // operational history UI (Scan/Absensi/Isi Saldo/Antrian tabs, date +
+    // status filters, search, detail, summary) and fully supersedes the
+    // aggregate-only /status page. /status itself is kept as a redirect
+    // (see app/status/page.tsx) for anyone with the URL bookmarked/linked.
     ...(can(role,'driver:read') ? [{ href:'/drivers', icon:Car, label:'Driver &\nKendaraan', color:'bg-indigo-600', bg:'bg-indigo-50' }] : []),
     ...(can(role,'queue:branch:read') ? [{ href:'/antrian-driver', icon:Car, label:'Antrian\nDriver', color:'bg-amber-600', bg:'bg-amber-50' }] : []),
     ...(can(role,'saldo:branch:read') ? [{ href:'/validasi-saldo', icon:ClipboardCheck, label:'Riwayat\nSaldo', color:'bg-amber-600', bg:'bg-amber-50' }] : []),

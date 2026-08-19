@@ -397,7 +397,20 @@ function ChatPageInner() {
     loadReactions(activeRoom.id)
     loadPinnedMessage(activeRoom.id)
     loadPolls(activeRoom.id)
-    supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
+    // Fix B round 3: mark_chat_room_read() is now the canonical >50-message
+    // safety net -- it bulk-marks every post-cutover message in this room
+    // as read (chat_message_reads), not just the latest-50 batch
+    // loadMessages() fetches. Clear this room's badge optimistically so
+    // the sidebar updates instantly, then refresh from the server (loadRooms)
+    // so it reflects the real post-mark state -- covers a message arriving
+    // in the gap between the mark call and this callback.
+    void (async () => {
+      const { error } = await supabase.rpc('mark_chat_room_read', { p_room_id: activeRoom.id })
+      if (!error) {
+        setRooms(prev => prev.map(r => (r.id === activeRoom.id ? { ...r, unread_count: 0 } : r)))
+        void loadRooms()
+      }
+    })()
 
     const channel = supabase
       .channel(`room:${activeRoom.id}`)

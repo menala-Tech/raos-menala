@@ -1,0 +1,14 @@
+-- Corrective fix (2026-08-19, applied same session as raos_098): post-apply
+-- verification of raos_098 found `authenticated` still held
+-- INSERT/UPDATE/DELETE/TRUNCATE table-level grants on
+-- raos_chat_read_cutover despite raos_098's own `REVOKE ALL ... FROM
+-- PUBLIC, anon` + `GRANT SELECT ... TO authenticated`. CREATE TABLE in
+-- this project applies a broader default grant to `authenticated`
+-- directly (not via PUBLIC) that a REVOKE FROM PUBLIC does not touch. RLS
+-- (SELECT-only policy, no INSERT/UPDATE/DELETE policy) was already
+-- functionally blocking writes for `authenticated` as a second layer, but
+-- the explicit design intent was SELECT-only at the grant level too --
+-- tightened here to match exactly. Verified post-fix: authenticated shows
+-- only SELECT/REFERENCES/TRIGGER (the latter two are structural, not
+-- data-mutation, privileges).
+revoke insert, update, delete, truncate on public.raos_chat_read_cutover from authenticated;

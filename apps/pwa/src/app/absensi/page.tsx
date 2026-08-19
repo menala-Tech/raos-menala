@@ -27,6 +27,7 @@ import { branchDateKey, normalizeBranchTimeZone } from '@/lib/branchTime'
 import { useSystemConfigNumber } from '@/lib/useSystemConfig'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { deriveOperationalGate } from '@/lib/operational-geofence-gate'
+import { can } from '@/lib/accessPolicy'
 
 export default function AbsensiPage() {
   const router = useRouter()
@@ -298,12 +299,12 @@ export default function AbsensiPage() {
                 {locationStatus !== 'checking' && locationStatus !== 'unavailable' && geofence && (
                   <div className={`text-center text-xs font-bold py-1.5 rounded-lg
                     ${geofence.isValid ? 'bg-green-100 text-green-700'
-                      : (geofence.overshootMeters ?? 0) > geofenceTolerance && user?.role === 'staff'
+                      : (geofence.overshootMeters ?? 0) > geofenceTolerance && can(user?.role,'attendance:self')
                         ? 'bg-red-100 text-red-700'
                         : 'bg-yellow-100 text-yellow-700'}`}>
                     {geofence.isValid
                       ? `✓ DALAM AREA — ${geofence.nearestPointName}`
-                      : (geofence.overshootMeters ?? 0) > geofenceTolerance && user?.role === 'staff'
+                      : (geofence.overshootMeters ?? 0) > geofenceTolerance && can(user?.role,'attendance:self')
                         ? `✕ DILUAR RADIUS — ${geofence.nearestPointName} (+${geofence.overshootMeters}m, batas ${geofenceTolerance}m)`
                         : `⚠ ${geofence.nearestPointName} — ${geofence.distanceMeters}m dari titik`}
                   </div>

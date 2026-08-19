@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { can } from './accessPolicy'
 
 export function haversineDistance(
   lat1: number, lng1: number, lat2: number, lng2: number
@@ -31,12 +32,24 @@ export interface GeofenceResult {
 export const GEOFENCE_TOLERANCE_METERS = 500
 
 /**
- * Role staff dihard-block kalau di luar (radius + GEOFENCE_TOLERANCE_METERS).
- * Direksi/koordinator/management/admin bypass hard-block, tapi
- * `is_location_valid` tetap direkam untuk audit.
+ * Role dengan capability `attendance:self` (personal operational actions --
+ * currently Staff + Koordinator, see accessPolicy.ts) dihard-block kalau di
+ * luar (radius + GEOFENCE_TOLERANCE_METERS). Direksi/management/admin (no
+ * personal operational cap) bypass hard-block, tapi `is_location_valid`
+ * tetap direkam untuk audit.
  *
- * Staff dengan `is_geofence_exempt = true` (mis. Gusril, Hadityawarman S.E.
- * per sesi 17 rifim-isi-saldo) juga bypass — mereka boleh absen/scan/
+ * Koordinator parity fix (2026-08-20): previously hardcoded to `role ===
+ * 'staff'` only, so Koordinator's own scan/attendance/isi-saldo actions
+ * never got client-side hard-blocked even though the canonical RPCs
+ * (raos_submit_scan, raos_attendance_check_in/out) apply this exact same
+ * geofence rule server-side to ANY role once past their staff-only gate --
+ * a Koordinator outside radius would have passed the UI silently, then hit
+ * a confusing `geofence_blocked` RPC error. Deriving the gate from the
+ * `attendance:self` capability (rather than a hardcoded role string) keeps
+ * this in lockstep with accessPolicy.ts automatically.
+ *
+ * Individuals dengan `is_geofence_exempt = true` (mis. Gusril, Hadityawarman
+ * S.E. per sesi 17 rifim-isi-saldo) juga bypass — mereka boleh absen/scan/
  * isi saldo dari mana saja.
  */
 export function shouldBlockByGeofence(
@@ -47,7 +60,7 @@ export function shouldBlockByGeofence(
   toleranceMeters: number = GEOFENCE_TOLERANCE_METERS,
 ): boolean {
   if (isExempt) return false
-  if (role !== 'staff') return false
+  if (!can(role, 'attendance:self')) return false
   if (locationStatus === 'checking') return true
   if (locationStatus === 'unavailable') return true
   if (!geo || geo.overshootMeters === null) return true

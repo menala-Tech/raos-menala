@@ -50,12 +50,26 @@ async function flushItem(item: QueuedItem): Promise<{ ok: boolean; err?: string;
     }
 
     if (item.kind === 'scan_order') {
-      // Canonical replay: same RPC as online path. No raw scan_orders INSERT,
-      // no client-authoritative staff/status/validator fields. The RPC owns
-      // branch scope, driver scope, geofence and scan_id idempotency.
       const payload=item.payload as any
+      let driverRef=String(payload.driver_ref ?? payload.driver_id_or_barcode ?? '').trim()
+
+      // Backward compatibility for queue items created by the pre-RPC client:
+      // those items may contain only the internal raos_drivers UUID. Resolve it
+      // to the canonical barcode/driver_id before calling the new RPC so a
+      // software update cannot strand an already-queued Staff scan.
+      if(!driverRef && payload.driver_id){
+        const {data:drv,error:drvError}=await supabase
+          .from('raos_drivers')
+          .select('barcode,driver_id')
+          .eq('id',String(payload.driver_id))
+          .maybeSingle()
+        if(drvError) return {ok:false,err:drvError.message}
+        driverRef=String(drv?.barcode ?? drv?.driver_id ?? '').trim()
+      }
+      if(!driverRef) return {ok:false,err:'queued scan has no resolvable driver reference'}
+
       const { data, error } = await supabase.rpc('raos_submit_scan', {
-        p_driver_ref: String(payload.driver_ref ?? payload.driver_id_or_barcode ?? '').trim(),
+        p_driver_ref: driverRef,
         p_lat: payload.latitude ?? null,
         p_lng: payload.longitude ?? null,
         p_client_scan_id: String(payload.scan_id ?? ''),

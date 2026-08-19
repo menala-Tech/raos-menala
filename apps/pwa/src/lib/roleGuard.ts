@@ -25,7 +25,23 @@ const PUBLIC = new Set(['/','/reset-password'])
 
 export const ROLE_ROUTES: Readonly<Record<Role, readonly string[]>> = {
   staff: ['/dashboard','/scan','/absensi','/riwayat','/status','/antrian-driver','/drivers','/kpi','/chat','/settings','/notifications'],
-  koordinator: ['/dashboard','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
+  // '/scan' added 2026-08-20 (PR #102 koordinator-parity follow-up): this
+  // ROUTE-LEVEL matrix is separate from accessPolicy.ts's capability CAPS
+  // (which PR #102 updated) -- RoleGuard (mounted app-wide in
+  // app/layout.tsx) gates on THIS list before it ever renders {children},
+  // so granting koordinator the `scan:create` capability there was
+  // necessary but not sufficient: the dashboard tile correctly appeared,
+  // but every visit to /scan (click or direct URL) hit RoleGuard's
+  // `!canRoleAccessRoute(role,pathname)` branch and got silently
+  // `router.replace(defaultLandingForRole(role))` -> '/dashboard' before
+  // ScanPage's children (including BarcodeScanner) ever mounted -- a
+  // deterministic, 100%-reproducible client-side redirect, not a crash,
+  // matching "no server runtime error" and "/scan never becomes usable"
+  // exactly. Confirmed via code read of components/RoleGuard.tsx: it
+  // renders a loading state until `allowed===true`, never `{children}`
+  // otherwise, so this is the actual root cause independent of any
+  // BarcodeScanner lifecycle behavior.
+  koordinator: ['/dashboard','/scan','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   admin: ['*'],
   management: ['/dashboard','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   direksi: ['*'],

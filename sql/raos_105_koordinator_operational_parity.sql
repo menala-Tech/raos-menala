@@ -622,9 +622,21 @@ begin
     );
   end if;
 
+  -- Architect blocker fix (2026-08-20, PR #102 re-review): denominator for
+  -- derived_equal_share must count active target-bearing PEOPLE, not just
+  -- role='staff' -- KOORDINATOR = STAFF + BRANCH SUPERVISOR and Koordinator
+  -- is a target-bearing person per the business rule, same as
+  -- raos_compute_payroll_month's existing role=any('staff','koordinator')
+  -- roster query. Previously staff-only, which would have silently
+  -- excluded every branch's Koordinator from the equal-share pool, giving
+  -- remaining Staff an inflated derived share and the Koordinator a target
+  -- of 0 (source='unset') whenever no staff_override/branch_default was
+  -- configured. The name active_staff_count is kept (not renamed) to
+  -- minimize this migration's diff against the prior draft; it now means
+  -- "active target-bearing people" (Staff + Koordinator), not Staff alone.
   select count(*) into active_staff_count
   from public.user_profiles up
-  where up.is_active=true and lower(coalesce(up.role,''))='staff' and up.branch_id=any(scope_ids);
+  where up.is_active=true and lower(coalesce(up.role,'')) in ('staff','koordinator') and up.branch_id=any(scope_ids);
 
   -- Koordinator parity fix (2026-08-20): Koordinator is a target-bearing
   -- person just like Staff for personal KPI purposes ("KPI Saya = personal";

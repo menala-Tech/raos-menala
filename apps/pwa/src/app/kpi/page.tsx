@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useCachedQuery } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
-import { ArrowLeft, Target, TrendingUp, CalendarCheck, Banknote } from 'lucide-react'
+import { ArrowLeft, Target, TrendingUp, CalendarCheck, Banknote, Users } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
 import { useCanonicalKpi } from '@/lib/useCanonicalKpi'
@@ -18,13 +18,10 @@ const BULAN = [
 export default function KpiPage() {
   const router = useRouter()
   const [sessionUserId, setSessionUserId] = useState<string | null>(null)
-
   const now = new Date()
   const bulan = now.getMonth() + 1
   const tahun = now.getFullYear()
-  const startMonth = `${tahun}-${String(bulan).padStart(2, '0')}-01`
 
-  // Auth check
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { router.push('/'); return }
@@ -32,7 +29,6 @@ export default function KpiPage() {
     })
   }, [router])
 
-  // 3 query paralel cache-first — TTL 30m (KPI bulanan tidak sering berubah)
   const { data: user } = useCachedQuery<UserProfile>(
     ['user-profile', sessionUserId],
     async () => {
@@ -43,43 +39,57 @@ export default function KpiPage() {
     { enabled: !!sessionUserId, ttlMs: 30 * 60 * 1000 }
   )
 
-
-  const canonicalKpi=useCanonicalKpi(sessionUserId,user?.branch_id ?? null,(user as any)?.branches?.timezone ?? null)
-
-  const { data: scanStatsData, loading } = useCachedQuery(
-    ['kpi-scan-stats', sessionUserId, tahun, bulan],
-    async () => {
-      const { data: scans } = await supabase
-        .from('scan_orders').select('status, gmv')
-        .eq('staff_id', sessionUserId!).gte('scanned_at', startMonth)
-      const s = scans || []
-      return {
-        total: s.length,
-        valid: s.filter(x => x.status === 'valid').length,
-        gmv: s.reduce((sum, x) => sum + (parseFloat(x.gmv as any) || 0), 0),
-      }
-    },
-    { enabled: !!sessionUserId, ttlMs: 15 * 60 * 1000, refreshIntervalMs: 15 * 60 * 1000 }
+  const canonicalKpi=useCanonicalKpi(
+    sessionUserId,
+    user?.branch_id ?? null,
+    (user as any)?.branches?.timezone ?? null,
+    user?.role ?? null,
   )
-  const scanStats = scanStatsData ?? { total: 0, valid: 0, gmv: 0 }
 
-  const targetScan = canonicalKpi.data?.mode==='order' ? canonicalKpi.data.target : 0
-  const pctScan = targetScan > 0 ? Math.min((scanStats.valid / targetScan) * 100, 100) : 0
+  const loading=canonicalKpi.loading
+  const snap=canonicalKpi.data
+  const isOrder=snap?.mode==='order'
+  const isBranch=isOrder && snap?.scope==='branch'
+  const progress=Math.min(Number(snap?.achievementPct ?? 0),100)
 
-  const metrics = [
+  const metrics = isOrder ? [
     {
       icon: Target,
-      label: 'Scan Valid',
-      value: `${scanStats.valid}${targetScan ? ` / ${targetScan}` : ''}`,
-      pct: pctScan,
+      label: isBranch ? 'Scan Valid Cabang' : 'Scan Valid Saya',
+      value: `${Number(snap?.realized ?? 0).toLocaleString('id-ID')} / ${Number(snap?.target ?? 0).toLocaleString('id-ID')}`,
+      pct: progress,
       color: 'bg-blue-500',
     },
     {
+      icon: Users,
+      label: isBranch ? 'Target Cabang' : 'Target Cabang / Staff Aktif',
+      value: isBranch
+        ? Number(snap?.branchTarget ?? snap?.target ?? 0).toLocaleString('id-ID')
+        : `${Number(snap?.branchTarget ?? 0).toLocaleString('id-ID')} / ${Number(snap?.activeStaff ?? 0)} staff`,
+      pct: 0,
+      color: 'bg-purple-500',
+    },
+    {
+      icon: CalendarCheck,
+      label: 'Kehadiran',
+      value: 'Lihat HRIS',
+      pct: 0,
+      color: 'bg-orange-500',
+    },
+  ] : [
+    {
       icon: Banknote,
-      label: canonicalKpi.data?.mode==='saldo' ? 'Realisasi Saldo' : 'GMV Bulan Ini',
-      value: canonicalKpi.data?.mode==='saldo' ? `Rp ${Number(canonicalKpi.data.realized).toLocaleString('id-ID')}` : `Rp ${scanStats.gmv.toLocaleString('id-ID')}`,
-      pct: canonicalKpi.data?.mode==='saldo' ? canonicalKpi.data.achievementPct : 0,
+      label: 'Realisasi Saldo',
+      value: `Rp ${Number(snap?.realized ?? 0).toLocaleString('id-ID')}`,
+      pct: progress,
       color: 'bg-green-500',
+    },
+    {
+      icon: Target,
+      label: 'Target Saldo',
+      value: `Rp ${Number(snap?.target ?? 0).toLocaleString('id-ID')}`,
+      pct: progress,
+      color: 'bg-blue-500',
     },
     {
       icon: CalendarCheck,
@@ -96,12 +106,11 @@ export default function KpiPage() {
         <div className="flex items-center gap-3 mb-4">
           <Link href="/dashboard"><ArrowLeft size={22} /></Link>
           <div>
-            <h1 className="font-bold text-base">KPI Saya</h1>
+            <h1 className="font-bold text-base">{isBranch ? 'KPI Cabang' : 'KPI Saya'}</h1>
             <p className="text-white/50 text-xs">{BULAN[bulan - 1]} {tahun}</p>
           </div>
         </div>
 
-        {/* KPI Total Circle */}
         <div className="flex flex-col items-center py-2">
           <div className="relative w-28 h-28">
             <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
@@ -109,13 +118,11 @@ export default function KpiPage() {
               <circle
                 cx="50" cy="50" r="42" fill="none"
                 stroke="#F5A623" strokeWidth="10" strokeLinecap="round"
-                strokeDasharray={`${(canonicalKpi.data?.achievementPct ?? 0 / 100) * 264} 264`}
+                strokeDasharray={`${(progress / 100) * 264} 264`}
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-2xl font-black text-primary">
-                {(canonicalKpi.data?.achievementPct ?? 0).toFixed(0)}%
-              </span>
+              <span className="text-2xl font-black text-primary">{Number(snap?.achievementPct ?? 0).toFixed(0)}%</span>
               <span className="text-[9px] text-white/50">PENCAPAIAN TARGET</span>
             </div>
           </div>
@@ -123,41 +130,40 @@ export default function KpiPage() {
       </div>
 
       <div className="px-4 py-4 space-y-3">
-        {loading && (
-          <div className="text-center py-6 text-gray-400 text-sm">Memuat KPI...</div>
-        )}
+        {loading && <div className="text-center py-6 text-gray-400 text-sm">Memuat KPI...</div>}
 
-        {!loading && !canonicalKpi.data?.target && (
+        {!loading && !snap?.target && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-center">
             <TrendingUp size={28} className="text-yellow-500 mx-auto mb-2" />
             <p className="text-sm font-semibold text-yellow-800">Target belum diset</p>
-            <p className="text-xs text-yellow-600 mt-1">
-              Hubungi Admin untuk menetapkan target KPI bulan ini
-            </p>
+            <p className="text-xs text-yellow-600 mt-1">Hubungi Admin untuk menetapkan target KPI bulan ini</p>
           </div>
         )}
 
         {!loading && metrics.map(({ icon: Icon, label, value, pct, color }) => (
           <div key={label} className="card">
             <div className="flex items-center gap-3 mb-2">
-              <div className={`${color} p-2 rounded-xl`}>
-                <Icon size={16} className="text-white" />
-              </div>
+              <div className={`${color} p-2 rounded-xl`}><Icon size={16} className="text-white" /></div>
               <div className="flex-1">
                 <p className="text-xs text-gray-500">{label}</p>
                 <p className="font-bold text-gray-800">{value}</p>
               </div>
-              <span className="text-sm font-bold text-gray-600">{pct.toFixed(0)}%</span>
+              {pct > 0 && <span className="text-sm font-bold text-gray-600">{pct.toFixed(0)}%</span>}
             </div>
-            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className={`h-full ${color} rounded-full transition-all`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
+            {pct > 0 && (
+              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+              </div>
+            )}
           </div>
         ))}
-        <div className="card bg-gray-50 text-xs text-gray-500">Target dan realisasi mengikuti Finance/HRIS canonical engine. Bobot penilaian tidak dihitung ulang di PWA.</div>
+
+        {isOrder && !isBranch && snap?.source==='derived_equal_share' && (
+          <div className="card bg-blue-50 text-xs text-blue-700">
+            Target Staff dihitung otomatis dari Target Cabang ÷ jumlah Staff aktif. Admin dapat memberi target order khusus per Staff bila diperlukan.
+          </div>
+        )}
+        <div className="card bg-gray-50 text-xs text-gray-500">Target dan realisasi mengikuti canonical engine. Hanya scan berstatus VALID yang masuk realisasi order.</div>
       </div>
     </AppShell>
   )

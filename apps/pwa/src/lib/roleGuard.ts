@@ -1,4 +1,4 @@
-export const ROUTE_POLICY_VERSION = 'p2.1-unified' as const
+export const ROUTE_POLICY_VERSION = 'p2.2-riwayat-cabang' as const
 import { normalizeRole, type RaosRole } from './accessPolicy'
 export type Role = RaosRole
 export type InstallVariant = 'staff'|'koord'|'admin'|'mgmt'|'direksi'|'driver'|'dm'
@@ -25,9 +25,9 @@ const PUBLIC = new Set(['/','/reset-password'])
 
 export const ROLE_ROUTES: Readonly<Record<Role, readonly string[]>> = {
   staff: ['/dashboard','/scan','/absensi','/riwayat','/status','/antrian-driver','/drivers','/kpi','/chat','/settings','/notifications'],
-  koordinator: ['/dashboard','/riwayat','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
+  koordinator: ['/dashboard','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   admin: ['*'],
-  management: ['/dashboard','/riwayat','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
+  management: ['/dashboard','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   direksi: ['*'],
   direktur: ['*'],
   driver_manager: ['/dashboard','/antrian-driver','/drivers','/admin/barcodes','/chat','/settings','/notifications'],

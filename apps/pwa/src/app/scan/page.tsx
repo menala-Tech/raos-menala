@@ -20,6 +20,16 @@ import { deriveOperationalGate } from '@/lib/operational-geofence-gate'
 
 type ScanState = 'idle' | 'scanning' | 'success' | 'error'
 
+function scanErrorMessage(error: any): string {
+  const raw=`${error?.message ?? ''} ${error?.details ?? ''}`.toLowerCase()
+  if(raw.includes('driver_not_found_in_scope')) return 'Barcode/driver tidak ditemukan atau tidak terdaftar pada cabang Anda.'
+  if(raw.includes('geofence_blocked')) return 'Lokasi ditolak server karena berada di luar area operasional.'
+  if(raw.includes('replay_too_old')) return 'Scan offline sudah terlalu lama untuk disinkronkan. Silakan scan ulang.'
+  if(raw.includes('future_timestamp')) return 'Waktu perangkat tidak valid. Periksa tanggal/jam HP lalu coba lagi.'
+  if(raw.includes('role_not_allowed')) return 'Akun ini tidak diizinkan melakukan Scan Order.'
+  return 'Gagal menyimpan scan. Coba lagi.'
+}
+
 export default function ScanPage() {
   const router = useRouter()
   const [user, setUser] = useState<UserProfile | null>(null)
@@ -28,12 +38,6 @@ export default function ScanPage() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [geofence, setGeofence] = useState<GeofenceResult | null>(null)
   const [locationStatus, setLocationStatus] = useState<'checking' | 'valid' | 'invalid' | 'unavailable'>('checking')
-  // Kamera SELALU aktif secara default di setiap page load (user feedback
-  // 30 Juli 2026: "harusnya otomatis kamera scan barcode yang tampil").
-  // Toggle localStorage `raos_prefs.scanMode` di Settings sengaja tidak
-  // dipakai sebagai initial state — supaya user tidak stuck di mode manual
-  // gara-gara pernah switch di sesi sebelumnya. FAB pojok kanan bawah
-  // tetap available kalau butuh switch ke manual per sesi.
   const [inputMode, setInputMode] = useState<'camera' | 'manual'>('camera')
   const inputRef = useRef<HTMLInputElement>(null)
   const { value: geofenceTolerance } = useSystemConfigNumber('GEOFENCE_TOLERANCE_METER', GEOFENCE_TOLERANCE_METERS)
@@ -44,6 +48,7 @@ export default function ScanPage() {
     toleranceMeters: geofenceTolerance,
     isGeofenceExempt: (user as any)?.is_geofence_exempt,
   })
+
   useEffect(() => {
     let active=true
     let stopGps:(()=>void)|undefined
@@ -69,7 +74,8 @@ export default function ScanPage() {
   },[router])
 
   const handleScan = useCallback(async (barcode: string) => {
-    if (!barcode.trim() || !user) return
+    const driverRef=barcode.trim()
+    if (!driverRef || !user) return
 
     if (!operationalGate.scan_order) {
       setScanState('error')
@@ -87,72 +93,38 @@ export default function ScanPage() {
     }
 
     setScanState('scanning')
+    const scanId=`SCN-${Date.now()}`
+    const capturedAt=new Date().toISOString()
 
-    // Cari driver dari cache Supabase (butuh network).
-    const { data: driver, error: driverErr } = await supabase
-      .from('raos_drivers')
-      .select('id, driver_id, name, vehicle_plate, vehicle_type, barcode')
-      .or(`barcode.eq.${barcode.trim()},driver_id.eq.${barcode.trim()}`)
-      .eq('is_active', true)
-      .single()
-
-    // Kalau offline saat lookup driver → queue by driver_id/barcode string,
-    // syncer akan resolve driver saat replay dan skip kalau driver tidak ada.
-    if (driverErr && isNetworkError(driverErr)) {
-      const scanId = `SCN-${Date.now()}`
-      await enqueue('scan_order', {
-        scan_id: scanId,
-        driver_id_or_barcode: barcode.trim(),
-        staff_id: user.id,
-        pickup_point_id: geofence?.nearestPointId ?? null,
-        scanned_at: new Date().toISOString(),
-        latitude: location?.lat ?? null,
-        longitude: location?.lng ?? null,
-        status: 'pending',
-        _needs_driver_lookup: true,
-      })
-      setScanState('success')
-      setLastScan({ scan_id: scanId, queued: true, driver_hint: barcode.trim() })
-      logActivity('scan_offline', `queued ${scanId} for ${barcode.trim()}`)
-      if (inputRef.current) inputRef.current.value = ''
-      return
-    }
-
-    if (!driver) {
-      setScanState('error')
-      setLastScan({ error: 'Barcode tidak ditemukan dalam sistem.' })
-      return
-    }
-
-    const scanId = `SCN-${Date.now()}`
-    const payload = {
-      scan_id: scanId,
-      driver_id: driver.id,
-      staff_id: user.id,
-      pickup_point_id: geofence?.nearestPointId ?? null,
-      scanned_at: new Date().toISOString(),
-      latitude: location?.lat,
-      longitude: location?.lng,
-      status: 'pending',
-    }
-    const { data: scan, error } = await supabase
-      .from('scan_orders')
-      .insert(payload)
-      .select('*, raos_drivers(id, driver_id, name, vehicle_plate, vehicle_type)')
-      .single()
+    const { data, error } = await supabase.rpc('raos_submit_scan', {
+      p_driver_ref: driverRef,
+      p_lat: location?.lat ?? null,
+      p_lng: location?.lng ?? null,
+      p_client_scan_id: scanId,
+      // Online submission is server-time authoritative.
+      p_client_captured_at: null,
+    })
 
     if (error && isNetworkError(error)) {
-      await enqueue('scan_order', payload)
+      await enqueue('scan_order', {
+        scan_id: scanId,
+        driver_ref: driverRef,
+        captured_at: capturedAt,
+        latitude: location?.lat ?? null,
+        longitude: location?.lng ?? null,
+      })
       setScanState('success')
-      setLastScan({ ...payload, queued: true, raos_drivers: driver })
-      logActivity('scan_offline', `queued ${scanId} — ${driver.name}`)
+      setLastScan({ scan_id: scanId, scanned_at: capturedAt, queued: true, driver_hint: driverRef })
+      logActivity('scan_offline', `queued ${scanId} for ${driverRef}`)
     } else if (error) {
       setScanState('error')
-      setLastScan({ error: 'Gagal menyimpan scan. Coba lagi.' })
+      setLastScan({ error: scanErrorMessage(error) })
     } else {
+      const result=data as any
+      const row=result?.row ?? {}
       setScanState('success')
-      setLastScan(scan)
-      logActivity('scan_barcode', `${scanId} — ${driver.name} (${driver.driver_id})`)
+      setLastScan({ ...row, scan_id: row.scan_id ?? scanId, scanned_at: row.scanned_at ?? capturedAt, raos_drivers: result?.driver ?? null })
+      logActivity('scan_barcode', `${row.scan_id ?? scanId} — ${result?.driver?.name ?? driverRef}`)
     }
 
     if (inputRef.current) inputRef.current.value = ''
@@ -166,7 +138,6 @@ export default function ScanPage() {
 
   return (
     <AppShell>
-      {/* Header */}
       <div className="bg-secondary text-white px-4 pt-10 pb-5">
         <div className="flex items-center gap-3 mb-3">
           <Link href="/dashboard" className="text-white/70"><ArrowLeft size={22} /></Link>
@@ -182,62 +153,38 @@ export default function ScanPage() {
       </div>
 
       <div className="px-4 py-4 space-y-4">
-        {/* Location Status */}
-        <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg
-          ${locationStatus === 'valid' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+        <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg ${locationStatus === 'valid' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
           <MapPin size={14} />
           {locationStatus === 'checking' && 'Mengecek lokasi & geo-fence...'}
-          {locationStatus === 'valid' && geofence &&
-            `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`}
-          {locationStatus === 'invalid' && geofence && (geofence.overshootMeters === null || geofence.nearestPointName === null) &&
-            'Data pickup point cabang belum di-setup — hubungi admin.'}
-          {locationStatus === 'invalid' && geofence && geofence.overshootMeters !== null && user?.role === 'staff' &&
-            `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${geofenceTolerance}m — scan akan diblok kalau lewat.`}
-          {locationStatus === 'invalid' && geofence && geofence.distanceMeters !== null && user?.role !== 'staff' &&
-            `Di luar radius ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m. Scan tetap bisa (bypass role).`}
+          {locationStatus === 'valid' && geofence && `Lokasi valid — ${geofence.nearestPointName} (${geofence.distanceMeters}m)`}
+          {locationStatus === 'invalid' && geofence && (geofence.overshootMeters === null || geofence.nearestPointName === null) && 'Data pickup point cabang belum di-setup — hubungi admin.'}
+          {locationStatus === 'invalid' && geofence && geofence.overshootMeters !== null && user?.role === 'staff' && `Di luar radius ${geofence.nearestPointName} (+${geofence.overshootMeters}m). Batas ${geofenceTolerance}m — scan akan diblok kalau lewat.`}
+          {locationStatus === 'invalid' && geofence && geofence.distanceMeters !== null && user?.role !== 'staff' && `Di luar radius ${geofence.nearestPointName} terdekat ${geofence.distanceMeters}m.`}
           {locationStatus === 'unavailable' && user?.role === 'staff' && 'GPS tidak terdeteksi — scan diblok. Aktifkan lokasi HP.'}
-          {locationStatus === 'unavailable' && user?.role !== 'staff' && 'GPS tidak terdeteksi — scan tetap bisa (bypass role).'}
+          {locationStatus === 'unavailable' && user?.role !== 'staff' && 'GPS tidak terdeteksi.'}
         </div>
 
-        {/* Scanner Area — kamera langsung tampil saat buka tab, manual jadi FAB pojok */}
         {scanState === 'idle' && (
           <div className="card">
             {inputMode === 'camera' ? (
               <>
-                <BarcodeScanner active={inputMode === 'camera'} onDetected={handleScan} />
-                <p className="text-xs text-gray-400 text-center mt-2">
-                  Arahkan kamera ke barcode/QR di stiker kendaraan
-                </p>
+                <BarcodeScanner active onDetected={handleScan} />
+                <p className="text-xs text-gray-400 text-center mt-2">Arahkan kamera ke barcode/QR di stiker kendaraan</p>
               </>
             ) : (
               <>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Ketik barcode / ID Maxim..."
-                  className="input"
-                  autoFocus
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') handleScan((e.target as HTMLInputElement).value)
-                  }}
-                />
-                <p className="text-xs text-gray-400 text-center mt-2">
-                  Tekan Enter setelah mengetik barcode
-                </p>
+                <input ref={inputRef} type="text" placeholder="Ketik barcode / ID Maxim..." className="input" autoFocus
+                  onKeyDown={e => { if (e.key === 'Enter') handleScan((e.target as HTMLInputElement).value) }} />
+                <p className="text-xs text-gray-400 text-center mt-2">Tekan Enter setelah mengetik barcode</p>
               </>
             )}
           </div>
         )}
 
-        {/* FAB toggle — bulat di pojok kanan bawah, di atas BottomNav (bottom ~104px).
-            Selalu tampil (bahkan saat sedang proses/sudah ada hasil) supaya user
-            bisa switch mode kapan saja tanpa harus reset dulu. */}
         <button
           onClick={() => { setInputMode(m => m === 'camera' ? 'manual' : 'camera'); if (scanState !== 'idle') reset() }}
           aria-label={inputMode === 'camera' ? 'Ganti ke input manual' : 'Ganti ke kamera'}
-          className="fixed right-4 z-20 w-14 h-14 rounded-full bg-secondary text-white
-                     shadow-lg shadow-black/30 flex items-center justify-center
-                     active:scale-95 transition-transform border-2 border-white"
+          className="fixed right-4 z-20 w-14 h-14 rounded-full bg-secondary text-white shadow-lg shadow-black/30 flex items-center justify-center active:scale-95 transition-transform border-2 border-white"
           style={{ bottom: 'calc(104px + env(safe-area-inset-bottom))' }}
         >
           {inputMode === 'camera' ? <Keyboard size={22} /> : <Camera size={22} />}
@@ -251,46 +198,30 @@ export default function ScanPage() {
         )}
 
         {scanState === 'success' && lastScan && (
-          // B11 fix: 'success' state was used for both an actual server
-          // commit AND an offline enqueue (lastScan.queued === true) with
-          // identical "Scan Berhasil!" text -- a queued scan the server has
-          // never seen looked indistinguishable from one it actually
-          // accepted. Text/color now branches on the same `queued` flag
-          // that was already being set (enqueue() call sites above) --
-          // offline queue engine itself is untouched.
           <div className="space-y-3">
             <div className={clsx('card border-2', lastScan.queued ? 'border-yellow-400' : 'border-green-500')}>
               <div className="flex items-center gap-3 mb-4">
-                {lastScan.queued
-                  ? <Clock size={32} className="text-yellow-500" />
-                  : <CheckCircle2 size={32} className="text-green-500" />}
+                {lastScan.queued ? <Clock size={32} className="text-yellow-500" /> : <CheckCircle2 size={32} className="text-green-500" />}
                 <div>
                   <p className={clsx('font-bold', lastScan.queued ? 'text-yellow-700' : 'text-green-700')}>
                     {lastScan.queued ? 'Tersimpan di Perangkat — Menunggu Sinkronisasi' : 'Scan Berhasil!'}
                   </p>
-                  <p className="text-xs text-gray-500">
-                    {lastScan.queued ? 'Belum terkirim ke server. Akan otomatis sync saat online.' : 'Status: PENDING — Menunggu Validasi'}
-                  </p>
+                  <p className="text-xs text-gray-500">{lastScan.queued ? 'Belum terkirim ke server. Akan otomatis sync saat online.' : 'Status: PENDING — Menunggu Validasi'}</p>
                 </div>
               </div>
               <div className="space-y-2 text-sm">
                 {[
                   ['ID Scan', lastScan.scan_id],
-                  ['Driver', lastScan.raos_drivers?.name],
+                  ['Driver', lastScan.raos_drivers?.name ?? lastScan.driver_hint],
                   ['Kendaraan', lastScan.raos_drivers?.vehicle_plate ?? lastScan.raos_drivers?.vehicle_type],
-                  ['Waktu', new Date(lastScan.scanned_at).toLocaleTimeString('id')],
-                  ['Status', 'PENDING'],
+                  ['Waktu', lastScan.scanned_at ? new Date(lastScan.scanned_at).toLocaleTimeString('id') : '—'],
+                  ['Status', lastScan.queued ? 'QUEUED' : 'PENDING'],
                 ].map(([k, v]) => (
-                  <div key={k} className="flex justify-between">
-                    <span className="text-gray-500">{k}</span>
-                    <span className="font-medium text-gray-800">{v}</span>
-                  </div>
+                  <div key={k} className="flex justify-between"><span className="text-gray-500">{k}</span><span className="font-medium text-gray-800">{v}</span></div>
                 ))}
               </div>
             </div>
-            <button onClick={reset} className="btn-primary">
-              Scan Berikutnya
-            </button>
+            <button onClick={reset} className="btn-primary">Scan Berikutnya</button>
           </div>
         )}
 
@@ -299,15 +230,10 @@ export default function ScanPage() {
             <div className="card border-2 border-red-400">
               <div className="flex items-center gap-3">
                 <XCircle size={32} className="text-red-500" />
-                <div>
-                  <p className="font-bold text-red-700">Scan Gagal</p>
-                  <p className="text-xs text-gray-600">{lastScan?.error}</p>
-                </div>
+                <div><p className="font-bold text-red-700">Scan Gagal</p><p className="text-xs text-gray-600">{lastScan?.error}</p></div>
               </div>
             </div>
-            <button onClick={reset} className="btn-secondary">
-              Coba Lagi
-            </button>
+            <button onClick={reset} className="btn-secondary">Coba Lagi</button>
           </div>
         )}
       </div>

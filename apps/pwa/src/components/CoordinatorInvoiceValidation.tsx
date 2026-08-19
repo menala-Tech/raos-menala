@@ -55,19 +55,40 @@ export default function CoordinatorInvoiceValidation() {
     <section className="card">
       <h2 className="text-sm font-bold text-gray-800">Validasi Invoice Harian</h2>
       <p className="text-[11px] text-gray-400 mt-1 mb-3">
-        Hanya transaksi Lunas yang telah tervalidasi AIST.
+        Invoice hanya dapat divalidasi jika seluruh transaksi Lunas sudah tercatat AIST valid,
+        baik dari worker maupun konfirmasi manual Finance.
       </p>
+
+      {rows.length === 0 && (
+        <div className="rounded-xl bg-gray-50 px-3 py-4 text-center text-[11px] text-gray-400">
+          Belum ada invoice harian untuk scope cabang Anda.
+        </div>
+      )}
 
       <div className="space-y-3">
         {rows.map(row => {
-          const clean = row.mismatch_count === 0 && row.aist_valid_count === row.total_transactions
+          const clean = row.total_transactions > 0 && row.mismatch_count === 0 && row.aist_valid_count === row.total_transactions
+          const statusLabel = row.status === 'validated'
+            ? 'VALIDATED'
+            : row.status === 'correction_requested'
+              ? 'KOREKSI DIMINTA'
+              : 'PENDING'
+          const statusClass = row.status === 'validated'
+            ? 'bg-green-100 text-green-700'
+            : row.status === 'correction_requested'
+              ? 'bg-amber-100 text-amber-700'
+              : 'bg-gray-100 text-gray-600'
+
           return (
             <article key={row.id} className="rounded-xl border border-gray-100 p-3">
               <div className="flex justify-between gap-3">
                 <div>
-                  <p className="text-xs font-black text-gray-800">
-                    {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString('id-ID', { dateStyle:'long' })}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-black text-gray-800">
+                      {new Date(row.invoice_date + 'T00:00:00').toLocaleDateString('id-ID', { dateStyle:'long' })}
+                    </p>
+                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${statusClass}`}>{statusLabel}</span>
+                  </div>
                   <p className="text-[10px] text-gray-400 mt-1">{row.total_transactions} transaksi</p>
                 </div>
                 <p className="text-sm font-black">
@@ -83,6 +104,12 @@ export default function CoordinatorInvoiceValidation() {
                   Mismatch: <b>{row.mismatch_count}</b>
                 </div>
               </div>
+
+              {row.correction_note && (
+                <div className="mt-3 rounded-lg bg-amber-50 px-2 py-2 text-[10px] text-amber-800">
+                  Koreksi: {row.correction_note}
+                </div>
+              )}
 
               <div className="flex gap-2 mt-3">
                 <button

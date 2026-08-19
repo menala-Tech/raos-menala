@@ -91,7 +91,7 @@ export default function DashboardPage() {
   const quick = [
     ...(can(role,'scan:create') ? [{ href:'/scan', icon:ScanLine, label:'Scan\nBarcode', color:'bg-blue-600', bg:'bg-blue-50' }] : []),
     ...(can(role,'attendance:self') ? [{ href:'/absensi', icon:UserCheck, label:'Absensi', color:'bg-green-600', bg:'bg-green-50' }] : []),
-    ...((can(role,'history:self')||can(role,'history:branch:read')) ? [{ href:'/riwayat', icon:Clock, label:'Riwayat', color:'bg-orange-500', bg:'bg-orange-50' }] : []),
+    ...((can(role,'history:self')||can(role,'history:branch:read')) ? [{ href:can(role,'history:branch:read') ? '/riwayat-cabang' : '/riwayat', icon:Clock, label:'Riwayat', color:'bg-orange-500', bg:'bg-orange-50' }] : []),
     { href:'/chat', icon:MessageCircle, label:'Chat\nRoom', color:'bg-purple-600', bg:'bg-purple-50' },
     ...((can(role,'kpi:self')||can(role,'kpi:branch:read')) ? [{ href:isHeadOffice ? '/admin/kpi' : '/kpi', icon:TrendingUp, label:'KPI &\nTarget', color:'bg-pink-600', bg:'bg-pink-50' }] : []),
     ...(can(role,'driver:read') ? [{ href:'/drivers', icon:Car, label:'Driver &\nKendaraan', color:'bg-indigo-600', bg:'bg-indigo-50' }] : []),

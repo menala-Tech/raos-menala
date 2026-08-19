@@ -1,0 +1,11 @@
+-- Corrective fix (2026-08-19, applied same session as raos_098): post-apply
+-- verification of raos_098 found mark_chat_room_read(uuid) still had
+-- EXECUTE granted to `anon` despite raos_098's own `REVOKE ALL ... FROM
+-- PUBLIC` statement. The DROP FUNCTION + CREATE FUNCTION sequence
+-- (required for the void->integer return-type change) picked up a direct
+-- default-privilege grant to `anon` on the newly created function object
+-- that a REVOKE ... FROM PUBLIC does not touch (PUBLIC and a named role
+-- are separate grantees in Postgres). Explicit revoke closes the gap.
+-- authenticated execute is unaffected. Verified post-fix: anon no longer
+-- appears in information_schema.routine_privileges for this function.
+revoke execute on function public.mark_chat_room_read(uuid) from anon;

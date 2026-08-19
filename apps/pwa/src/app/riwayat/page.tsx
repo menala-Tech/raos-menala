@@ -76,6 +76,19 @@ function rangeToDates(range: DateRange): { from: Date; to: Date } {
 export default function RiwayatPage() {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('semua')
+
+  // Fix A (2026-08-19): /status now redirects here with ?tab=scan so a
+  // bookmarked/linked /status URL lands on the equivalent context instead
+  // of always defaulting to "Semua". Read once on mount via
+  // window.location.search (not next/navigation's useSearchParams, which
+  // would force this client page into a Suspense boundary for a single
+  // one-time query param read).
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('tab')
+      if (t === 'scan' || t === 'absensi' || t === 'saldo' || t === 'antrian') setTab(t)
+    } catch { /* no-op */ }
+  }, [])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('semua')
   const [dateRange, setDateRange] = useState<DateRange>('30-hari')
   const [search, setSearch] = useState('')

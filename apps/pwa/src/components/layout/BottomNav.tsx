@@ -6,8 +6,8 @@ import { Home, ScanLine, Clock, MessageCircle, User } from 'lucide-react'
 import clsx from 'clsx'
 
 const NAV_LEFT = [
-  { href: '/dashboard', icon: Home,          label: 'Beranda' },
-  { href: '/riwayat',   icon: Clock,         label: 'Riwayat' },
+  { href: '/dashboard',       icon: Home,  label: 'Beranda' },
+  { href: '/riwayat-cabang', icon: Clock, label: 'Riwayat' },
 ]
 const NAV_RIGHT = [
   { href: '/chat',      icon: MessageCircle, label: 'Chat' },
@@ -25,7 +25,9 @@ export default function BottomNav() {
       <div className="flex items-end h-16 relative">
 
         {NAV_LEFT.map(({ href, icon: Icon, label }) => {
-          const active = path.startsWith(href)
+          const active = href === '/riwayat-cabang'
+            ? path.startsWith('/riwayat-cabang') || path === '/riwayat'
+            : path.startsWith(href)
           return (
             <Link
               key={href}

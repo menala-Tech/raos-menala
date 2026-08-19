@@ -4,3 +4,4 @@
 -- must pass through raos_submit_scan(). Admin/Direksi policies remain.
 
 drop policy if exists scan_orders_staff_insert on public.scan_orders;
+drop policy if exists scan_orders_staff_insert_transition on public.scan_orders;

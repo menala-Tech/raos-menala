@@ -57,6 +57,18 @@ begin
     );
   end if;
 
+  -- Never let a manual Finance confirmation overwrite a job currently owned
+  -- by the desktop agent. This keeps one production owner per request and
+  -- prevents manual/worker double-processing when the worker is enabled again.
+  if exists (
+    select 1
+    from public.aist_jobs j
+    where j.request_id = v.id
+      and j.status in ('claimed', 'running', 'verifying')
+  ) then
+    raise exception 'aist_job_in_progress';
+  end if;
+
   update public.raos_saldo_requests
   set is_processed = true,
       processed_at = now(),

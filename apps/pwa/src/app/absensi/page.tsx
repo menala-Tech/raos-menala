@@ -23,7 +23,7 @@ import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 // "Shift Hari Ini" display card, which is UX-only now.
 import { detectCurrentShift, formatShiftTime, type Shift } from '@/lib/shift'
 import type { UserProfile, Attendance } from '@/types'
-import { branchDateKey } from '@/lib/branchTime'
+import { branchDateKey, normalizeBranchTimeZone } from '@/lib/branchTime'
 import { useSystemConfigNumber } from '@/lib/useSystemConfig'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { deriveOperationalGate } from '@/lib/operational-geofence-gate'
@@ -159,17 +159,8 @@ export default function AbsensiPage() {
     // is_location_valid used to be decided entirely by the browser and
     // written via a direct upsert/update -- RLS only checked row
     // ownership, never actually validated the geofence distance
-    // server-side. raos_attendance_check_in/_out (DRAFT migration
-    // sql/raos_090_attendance_canonical_rpc_DRAFT.sql, NOT yet applied)
-    // now derive all of that server-side from auth.uid(); the browser
-    // only supplies evidence (lat/lng/selfie path/client-captured time).
-    // B11 fix: outcome used to be implicit -- setStep('success') ran
-    // unconditionally after this block regardless of whether the RPC
-    // actually committed, got queued offline, or failed outright (a
-    // non-network error, e.g. geofence_blocked, still fell through to the
-    // same "success" step after its alert(), which is misleading). Now
-    // tracked explicitly so the render below can show the right message
-    // and so a genuine failure no longer advances past the camera step.
+    // server-side. raos_attendance_check_in/_out now derive all of that
+    // server-side from auth.uid(); the browser only supplies evidence.
     let outcome: 'synced' | 'queued' | 'failed' = 'failed'
     if (type === 'in') {
       const rpcParams = {
@@ -225,17 +216,18 @@ export default function AbsensiPage() {
     setLoading(false)
     setSelfieBlob(null)
     setSubmitOutcome(outcome)
-    // A genuine failure (not queued, not synced) stays on the camera step --
-    // the alert() above already told the user what went wrong; advancing to
-    // "success" here would contradict that.
     if (outcome !== 'failed') setStep('success')
   }
 
   const now = new Date()
   const hasCheckedIn  = !!today?.check_in_at
   const hasCheckedOut = !!today?.check_out_at
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  const dateStr = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const branchClock = normalizeBranchTimeZone((user as any)?.branches?.timezone)
+  const timeStr = now.toLocaleTimeString('id-ID', { timeZone: branchClock.timeZone, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const dateStr = now.toLocaleDateString('id-ID', { timeZone: branchClock.timeZone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const formatAttendanceTime = (value?: string | null) => value
+    ? new Date(value).toLocaleTimeString('id-ID', { timeZone: branchClock.timeZone, hour: '2-digit', minute: '2-digit' })
+    : ''
 
   return (
     <AppShell>
@@ -252,7 +244,7 @@ export default function AbsensiPage() {
             <h1 className="font-black text-xl tracking-wide">Absensi Staff</h1>
             <p className="text-white/50 text-xs mt-0.5">{dateStr}</p>
           </div>
-          <DateTimeStack />
+          <DateTimeStack timeZone={(user as any)?.branches?.timezone} />
         </div>
 
         {/* Location badge */}
@@ -294,15 +286,13 @@ export default function AbsensiPage() {
           </div>
         </div>
 
-        {/* ===== STEP: FORM ===== */}
         {step === 'form' && (
           <>
-            {/* Absensi MASUK card */}
             {!hasCheckedIn && (
               <div className="card space-y-4">
                 <div className="text-center">
                   <p className="text-xs text-gray-500 font-medium">ABSENSI MASUK</p>
-                  <p className="text-3xl font-black text-secondary mt-1">{timeStr} WIB</p>
+                  <p className="text-3xl font-black text-secondary mt-1">{timeStr} {branchClock.zoneLabel}</p>
                   <p className="text-xs text-gray-400 mt-1">{dateStr}</p>
                 </div>
                 {locationStatus !== 'checking' && locationStatus !== 'unavailable' && geofence && (
@@ -331,7 +321,6 @@ export default function AbsensiPage() {
               </div>
             )}
 
-            {/* Status setelah masuk */}
             {hasCheckedIn && (
               <div className="card">
                 <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
@@ -345,7 +334,7 @@ export default function AbsensiPage() {
                       <span className="text-xs text-gray-600 font-medium">Masuk</span>
                     </div>
                     <span className="text-sm font-black text-green-700">
-                      {new Date(today!.check_in_at!).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                      {formatAttendanceTime(today!.check_in_at)} {branchClock.zoneLabel}
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-2">
@@ -355,7 +344,7 @@ export default function AbsensiPage() {
                     </div>
                     <span className={`text-sm font-bold ${hasCheckedOut ? 'text-primary' : 'text-gray-400'}`}>
                       {today?.check_out_at
-                        ? `${new Date(today.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
+                        ? `${formatAttendanceTime(today.check_out_at)} ${branchClock.zoneLabel}`
                         : '— Belum absen'}
                     </span>
                   </div>
@@ -363,12 +352,11 @@ export default function AbsensiPage() {
               </div>
             )}
 
-            {/* ABSENSI PULANG button */}
             {hasCheckedIn && !hasCheckedOut && (
               <div className="card space-y-4">
                 <div className="text-center">
                   <p className="text-xs text-gray-500 font-medium">ABSENSI PULANG</p>
-                  <p className="text-3xl font-black text-secondary mt-1">{timeStr} WIB</p>
+                  <p className="text-3xl font-black text-secondary mt-1">{timeStr} {branchClock.zoneLabel}</p>
                 </div>
                 <button
                   className="btn-primary flex items-center justify-center gap-3"
@@ -393,7 +381,6 @@ export default function AbsensiPage() {
           </>
         )}
 
-        {/* ===== STEP: CAMERA ===== */}
         {step === 'camera' && (
           <div className="card space-y-4">
             <div className="text-center">
@@ -420,13 +407,8 @@ export default function AbsensiPage() {
           </div>
         )}
 
-        {/* ===== STEP: SUCCESS ===== */}
         {step === 'success' && (
           <div className="card text-center space-y-4">
-            {/* B11 fix: "Berhasil"/green only for an actual server commit
-                (submitOutcome === 'synced'). A queued offline submission
-                gets its own yellow "tersimpan di perangkat" messaging so it
-                never reads as if the server already accepted it. */}
             <div className={clsx('w-20 h-20 rounded-full flex items-center justify-center mx-auto',
               submitOutcome === 'queued' ? 'bg-yellow-100' : 'bg-green-100')}>
               {submitOutcome === 'queued'
@@ -449,13 +431,13 @@ export default function AbsensiPage() {
               <div className="flex justify-between text-xs">
                 <span className="text-gray-500">Tanggal</span>
                 <span className="font-semibold text-gray-800">
-                  {now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  {now.toLocaleDateString('id-ID', { timeZone: branchClock.timeZone, weekday: 'long', day: 'numeric', month: 'long' })}
                 </span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-gray-500">Jam</span>
                 <span className="font-black text-primary text-base">
-                  {now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                  {now.toLocaleTimeString('id-ID', { timeZone: branchClock.timeZone, hour: '2-digit', minute: '2-digit' })} {branchClock.zoneLabel}
                 </span>
               </div>
               <div className="flex justify-between text-xs">
@@ -477,7 +459,6 @@ export default function AbsensiPage() {
           </div>
         )}
 
-        {/* Riwayat Absensi 7 hari terakhir (spec Absensi.md: Riwayat harian) */}
         {step === 'form' && recentAttendance.length > 0 && (
           <div className="card">
             <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
@@ -489,7 +470,7 @@ export default function AbsensiPage() {
                 <div key={att.id} className="border-b border-gray-100 last:border-0 pb-2 last:pb-0">
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-xs font-bold text-gray-700">
-                      {new Date(att.date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short' })}
+                      {new Date(att.date).toLocaleDateString('id-ID', { timeZone: branchClock.timeZone, weekday: 'long', day: 'numeric', month: 'short' })}
                     </p>
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full capitalize
                       ${att.status === 'hadir' ? 'bg-green-100 text-green-700'
@@ -502,13 +483,13 @@ export default function AbsensiPage() {
                     <span className="text-[11px] text-gray-500">
                       <span className="text-green-600 font-semibold">Masuk:</span>{' '}
                       {att.check_in_at
-                        ? new Date(att.check_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                        ? `${formatAttendanceTime(att.check_in_at)} ${branchClock.zoneLabel}`
                         : '—'}
                     </span>
                     <span className="text-[11px] text-gray-500">
                       <span className="text-primary font-semibold">Pulang:</span>{' '}
                       {att.check_out_at
-                        ? new Date(att.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                        ? `${formatAttendanceTime(att.check_out_at)} ${branchClock.zoneLabel}`
                         : '—'}
                     </span>
                   </div>
@@ -518,7 +499,6 @@ export default function AbsensiPage() {
           </div>
         )}
 
-        {/* Footer info */}
         <div className="grid grid-cols-3 gap-2 pt-2">
           {[
             { icon: Navigation, label: 'GPS Validation', sub: 'Pastikan di area valid' },

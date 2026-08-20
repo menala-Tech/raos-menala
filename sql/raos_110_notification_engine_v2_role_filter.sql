@@ -9,8 +9,9 @@
 --   2) raos_dispatch_push() filters recipients BEFORE writing in-app rows and
 --      BEFORE calling raos-send-push.
 --   3) chat trigger selects only eligible active room members/mentions.
---   4) direct authenticated execution of raos_dispatch_push is revoked;
---      app-origin pushes use the guarded Edge Function, while DB triggers and
+--   4) direct authenticated execution of raos_dispatch_push AND
+--      raos_create_notification is revoked (service-role-only); app-origin
+--      pushes use the guarded Edge Function, while DB triggers and
 --      service-role automations keep working under their privileged context.
 
 -- ---------------------------------------------------------------------------
@@ -93,8 +94,13 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.raos_create_notification(uuid[],text,text,text,text,text,text,jsonb,text,int,int) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.raos_create_notification(uuid[],text,text,text,text,text,text,jsonb,text,int,int) TO authenticated, service_role;
+-- Client-visible execution stays service-role-only. raos_create_notification
+-- is called internally by raos_dispatch_push (SECURITY DEFINER) regardless of
+-- its own grants, so no functional caller loses access by keeping this
+-- restrictive — only a direct authenticated RPC would, and that path must
+-- not exist (Architect decision 2026-08-20: never grant authenticated here).
+REVOKE ALL ON FUNCTION public.raos_create_notification(uuid[],text,text,text,text,text,text,jsonb,text,int,int) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.raos_create_notification(uuid[],text,text,text,text,text,text,jsonb,text,int,int) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 2. Central Web Push dispatcher: filter BEFORE both in-app write and Edge

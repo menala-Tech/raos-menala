@@ -42,6 +42,34 @@ assert.match(migration, /ARRAY\['staff','koordinator','admin','driver'\]/)
 assert.match(migration, /REVOKE ALL ON FUNCTION public\.raos_dispatch_push/)
 assert.match(migration, /JOIN public\.user_profiles up ON up\.id = crm\.user_id/)
 
+// raos_create_notification is a SECURITY DEFINER write path into `notifications`
+// with caller-controlled title/body/data/dedup_key. It must stay service-role-only
+// — Architect decision 2026-08-20. Any direct `authenticated` grant on it (however
+// it's phrased) must fail this contract before it can reach production. Scan only
+// actual GRANT statement lines (not comments) to avoid false positives from prose.
+const grantStatementLines = migration
+  .split('\n')
+  .filter((line) => /^\s*GRANT\s/i.test(line))
+for (const line of grantStatementLines) {
+  if (/raos_create_notification/.test(line)) {
+    assert.doesNotMatch(
+      line,
+      /\bauthenticated\b/i,
+      'raos_create_notification must never be granted to authenticated',
+    )
+  }
+}
+assert.match(
+  migration,
+  /REVOKE ALL ON FUNCTION public\.raos_create_notification\([^)]*\) FROM PUBLIC, anon, authenticated;/,
+  'raos_create_notification must explicitly revoke PUBLIC/anon/authenticated',
+)
+assert.match(
+  migration,
+  /GRANT EXECUTE ON FUNCTION public\.raos_create_notification\([^)]*\) TO service_role;/,
+  'raos_create_notification must grant EXECUTE to service_role only',
+)
+
 // Lock-screen push + safe click routing.
 assert.match(sw, /requireInteraction:\s*true/)
 assert.match(sw, /vibrate/)

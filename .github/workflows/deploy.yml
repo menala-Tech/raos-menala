@@ -28,3 +28,4 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: node scripts/test-access-policy-contract.cjs
+      - run: node scripts/test-notification-engine-v2.cjs

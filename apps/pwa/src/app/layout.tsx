@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import RoleGuard from '@/components/RoleGuard'
+import PwaRoleManifestSync from '@/components/PwaRoleManifestSync'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -46,37 +47,30 @@ export default function RootLayout({
             var uk = prefs.ukuranTeks || 'sedang';
             document.documentElement.setAttribute('data-text-size', uk);
 
-            // Install variant per role (Opsi C batch 2) — inject <link rel="manifest">
-            // based on ?role= query. 5 variant: staff/koord/mgmt/direksi/driver.
-            // Chrome fetch manifest saat detect installable → icon variant sesuai URL install.
+            // Initial install variant from explicit URL, then
+            // PwaRoleManifestSync below replaces it from authenticated role.
             var p = new URLSearchParams(location.search);
             var r = (p.get('role') || '').toLowerCase();
             var v = (r === 'koord' || r === 'koordinator') ? 'koord'
+                  : (r === 'admin') ? 'admin'
                   : (r === 'mgmt' || r === 'management') ? 'mgmt'
-                  : (r === 'direksi') ? 'direksi'
+                  : (r === 'direksi' || r === 'direktur') ? 'direksi'
                   : (r === 'driver') ? 'driver'
+                  : (r === 'dm' || r === 'driver_manager') ? 'dm'
                   : 'staff';
             var link = document.createElement('link');
             link.rel = 'manifest';
             link.href = '/manifest-' + v;
+            link.setAttribute('data-raos-role-manifest','1');
             document.head.appendChild(link);
-            // Persist variant di localStorage supaya reload PWA tetap pakai variant sama
             try { localStorage.setItem('raos_install_variant', v); } catch(e) {}
           } catch(e) {}
         `}} />
       </head>
       <body className={`${inter.className} h-full`}>
+        <PwaRoleManifestSync />
         <div className="min-h-full max-w-md mx-auto relative">
-          {/* B1 fix: canonical RoleGuard existed (roleGuard.ts + RoleGuard.tsx)
-              but was never mounted anywhere -- role-route enforcement only
-              happened where individual pages happened to add their own
-              (inconsistent) auth checks. Mounting it once here at the root
-              makes it the single gate for every route: PUBLIC paths (/,
-              /reset-password) pass through synchronously via
-              canRoleAccessRoute(null, pathname) with no network wait;
-              anything else is checked against ROLE_ROUTES after a session/
-              profile lookup. No new access matrix -- reuses the existing one
-              as-is. */}
+          {/* Single app-wide role/route gate. */}
           <RoleGuard>{children}</RoleGuard>
         </div>
       </body>

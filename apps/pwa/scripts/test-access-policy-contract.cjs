@@ -4,7 +4,9 @@ const ts = require('typescript')
 const Module = require('module')
 
 const policyPath = path.resolve(__dirname, '../src/lib/accessPolicy.ts')
+const routePath = path.resolve(__dirname, '../src/lib/roleGuard.ts')
 const source = fs.readFileSync(policyPath, 'utf8')
+const routeSource = fs.readFileSync(routePath, 'utf8')
 const js = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.CommonJS,
@@ -30,18 +32,26 @@ function deny(role, capability) {
   assert(!can(role, capability), `${role} should deny ${capability}`)
 }
 
-// Canonical six-role contract.
+// Canonical role contract.
 allow('staff', 'scan:create')
 allow('staff', 'attendance:self')
 allow('staff', 'saldo:submit')
 deny('staff', 'staff:mutate')
 deny('staff', 'driver:mutate')
 
+// Koordinator = Staff personal operations + branch supervisor reads.
+allow('koordinator', 'scan:create')
+allow('koordinator', 'attendance:self')
+allow('koordinator', 'history:self')
+allow('koordinator', 'saldo:submit')
+allow('koordinator', 'kpi:self')
 allow('koordinator', 'history:branch:read')
 allow('koordinator', 'staff:read')
 deny('koordinator', 'staff:mutate')
 deny('koordinator', 'saldo:mutate')
-assert(isReadOnlyOperationalRole('koordinator'), 'koordinator must be read-only operational role')
+assert(!isReadOnlyOperationalRole('koordinator'), 'koordinator must have personal operational writes')
+assert(/koordinator:\s*\[[^\]]*'\/absensi'/.test(routeSource), 'koordinator route matrix must include /absensi')
+assert(/koordinator:\s*\[[^\]]*'\/scan'/.test(routeSource), 'koordinator route matrix must include /scan')
 
 allow('admin', 'admin:panel')
 allow('admin', 'staff:mutate')
@@ -58,13 +68,16 @@ allow('direksi', 'staff:mutate')
 deny('direksi', 'driver:mutate')
 assert(isAdministrativeWriter('direksi'), 'direksi must be administrative writer')
 
+allow('driver_manager', 'queue:operate')
+allow('driver_manager', 'driver:barcode:manage')
+deny('driver_manager', 'scan:create')
+
 allow('driver', 'history:self')
 deny('driver', 'driver:read')
 deny('driver', 'staff:read')
 deny('driver', 'queue:operate')
 
-// Alias/normalization behavior currently encoded by RAOS policy.
 assert(normalizeRole(' DIREKSI ') === 'direksi', 'role normalization must trim/lowercase')
 assert(normalizeRole('unknown') === null, 'unknown role must fail closed')
 
-console.log('PASS six-role access policy contract')
+console.log('PASS RAOS access policy + route parity contract')

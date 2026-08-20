@@ -127,9 +127,20 @@ const withPWA = require('@ducanh2912/next-pwa').default({
   },
 })
 
+const buildVersion = (
+  process.env.VERCEL_GIT_COMMIT_SHA
+  || process.env.RAOS_PWA_VERSION
+  || 'local'
+).slice(0, 40)
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  env: {
+    // Embedded into the client bundle so an installed/cached build can compare
+    // itself with the no-store /api/pwa-version response from the latest deploy.
+    NEXT_PUBLIC_RAOS_PWA_VERSION: buildVersion,
+  },
   images: {
     remotePatterns: [
       { hostname: 'vlievtojpmrbsmzlqswl.supabase.co' },

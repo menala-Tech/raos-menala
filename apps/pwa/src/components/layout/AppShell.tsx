@@ -3,7 +3,9 @@
 import BottomNav from './BottomNav'
 import SwipeBackWrapper from '../SwipeBackWrapper'
 import OnlineStatusBanner from '../OnlineStatusBanner'
+import PwaMaintenancePanel from '../PwaMaintenancePanel'
 import { useAutoPushSubscribe } from '@/lib/useAutoPushSubscribe'
+import { usePwaUpdateManager } from '@/lib/usePwaUpdateManager'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -14,6 +16,7 @@ interface AppShellProps {
 
 export default function AppShell({ children, noSwipe }: AppShellProps) {
   useAutoPushSubscribe()
+  usePwaUpdateManager()
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
@@ -25,6 +28,7 @@ export default function AppShell({ children, noSwipe }: AppShellProps) {
           <main className="flex-1 pb-20">{children}</main>
         </SwipeBackWrapper>
       )}
+      <PwaMaintenancePanel />
       <BottomNav />
     </div>
   )

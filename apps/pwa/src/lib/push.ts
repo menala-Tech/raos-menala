@@ -1,20 +1,12 @@
 import { supabase } from './supabase'
+import { isNotificationEligibleRole } from './notificationPolicy'
 
 /**
- * Web Push (VAPID) — tanpa Firebase, mengikuti pola isisaldo.
+ * Web Push (VAPID) — tanpa Firebase.
  *
- * Setup:
- * 1. Generate VAPID keypair: `npx web-push generate-vapid-keys`
- * 2. Simpan public key di env `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
- * 3. Simpan private key di Supabase Secret `VAPID_PRIVATE_KEY` (untuk
- *    Edge Function kirim push, TIDAK boleh expose ke client)
- * 4. Deploy Edge Function `send-push` yang trigger web-push kirim ke
- *    subscriber. Trigger event: mis. scan_orders UPDATE ke 'valid',
- *    absensi reminder cron, chat_messages INSERT untuk mention, dst.
- *
- * SW handler (public/sw.js — extend dari next-pwa) render notification
- * dengan requireInteraction + vibrate supaya tetap muncul di lock screen
- * Android + banner iOS.
+ * Recipient policy is fail-closed: hanya staff, koordinator, admin, driver.
+ * Server-side enforcement tetap authoritative; client check di sini mencegah
+ * role excluded membuat subscription baru / memunculkan permission prompt.
  */
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
@@ -37,6 +29,28 @@ export function pushPermissionState(): NotificationPermission | 'unsupported' {
   return Notification.permission
 }
 
+async function currentUserMayReceivePush(): Promise<{
+  ok: boolean
+  userId?: string
+  reason?: string
+}> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user) return { ok: false, reason: 'not_authenticated' }
+
+  const { data: profile, error } = await supabase
+    .from('user_profiles')
+    .select('role, is_active')
+    .eq('id', session.user.id)
+    .single()
+
+  if (error || !profile) return { ok: false, reason: 'profile_not_found' }
+  if (profile.is_active !== true || !isNotificationEligibleRole(profile.role)) {
+    return { ok: false, reason: 'role_not_eligible' }
+  }
+
+  return { ok: true, userId: session.user.id }
+}
+
 /**
  * Minta izin notifikasi + subscribe PushManager + simpan ke Supabase.
  * Aman dipanggil berulang (dedup by endpoint UNIQUE di DB).
@@ -46,26 +60,34 @@ export async function subscribePush(): Promise<{ ok: boolean; reason?: string }>
   if (!VAPID_PUBLIC_KEY) return { ok: false, reason: 'vapid_public_key_missing' }
 
   try {
+    // Cek role SEBELUM permission prompt. Role excluded tidak boleh membuat
+    // subscription walaupun browser/device mendukung Web Push.
+    const eligibility = await currentUserMayReceivePush()
+    if (!eligibility.ok || !eligibility.userId) {
+      return { ok: false, reason: eligibility.reason ?? 'role_not_eligible' }
+    }
+
     if (Notification.permission !== 'granted') {
       const perm = await Notification.requestPermission()
       if (perm !== 'granted') return { ok: false, reason: 'permission_denied' }
     }
 
     const reg = await navigator.serviceWorker.ready
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
-    })
-    const json = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
+    let sub = await reg.pushManager.getSubscription()
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
+      })
+    }
 
-    // Pakai getSession() (baca token dari client storage) bukan getUser()
-    // (query ke server, bisa timeout/fail meski session valid). Konsisten
-    // dengan pattern di lib/pushClient.ts + app/admin/page.tsx.
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return { ok: false, reason: 'not_authenticated' }
+    const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      return { ok: false, reason: 'invalid_push_subscription' }
+    }
 
     const { error } = await supabase.from('push_subscriptions').upsert({
-      user_id: session.user.id,
+      user_id: eligibility.userId,
       endpoint: json.endpoint,
       p256dh: json.keys.p256dh,
       auth: json.keys.auth,

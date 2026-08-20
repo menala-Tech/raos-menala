@@ -6,11 +6,12 @@ import { supabase } from '@/lib/supabase'
 import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
 import BrandLoadingShell from '@/components/BrandLoadingShell'
-import { ArrowLeft, Download, FileSpreadsheet, Printer, TrendingUp, Banknote, UserCheck, ScanLine } from 'lucide-react'
+import { FileSpreadsheet, Printer, TrendingUp, Banknote, UserCheck, ScanLine } from 'lucide-react'
 import Link from 'next/link'
 import type { UserProfile } from '@/types'
 import { can } from '@/lib/accessPolicy'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import { branchDateKey } from '@/lib/branchTime'
 
 type RangeKey = 'harian' | 'mingguan' | 'bulanan'
 
@@ -30,6 +31,14 @@ interface DayRow {
   absensi: number
 }
 
+function shiftDateKey(key: string, deltaDays: number) {
+  // Calendar-key arithmetic only; noon UTC avoids edge effects when a key is
+  // converted to Date. Indonesia has no DST, and grouping itself uses branchDateKey.
+  const d = new Date(`${key}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + deltaDays)
+  return d.toISOString().slice(0, 10)
+}
+
 export default function LaporanPage() {
   const router = useRouter()
   const [user, setUser] = useState<UserProfile | null>(null)
@@ -39,9 +48,11 @@ export default function LaporanPage() {
   const [authorized, setAuthorized] = useState(false)
 
   const loadReport = useCallback(async (days: number, opts: { forceRefresh?: boolean } = {}, profile?: UserProfile | null) => {
-    const cacheKey = ['laporan','aggregate',profile?.id,profile?.role,profile?.branch_id,days]
+    const timeZone = (profile as any)?.branches?.timezone as string | undefined
+    const todayKey = branchDateKey(timeZone)
+    const firstKey = shiftDateKey(todayKey, -(days - 1))
+    const cacheKey = ['laporan','aggregate',profile?.id,profile?.role,profile?.branch_id,timeZone,firstKey,days]
 
-    // Phase 1: instant render kalau cache ada
     if (!opts.forceRefresh) {
       const cached = cacheReadSync<DayRow[]>(cacheKey, 30 * 60 * 1000)
       if (cached) {
@@ -54,32 +65,30 @@ export default function LaporanPage() {
       setLoading(true)
     }
 
-    // Phase 2: fetch fresh selalu (background/foreground)
-    const since = new Date()
-    since.setDate(since.getDate() - days + 1)
-    since.setHours(0, 0, 0, 0)
+    // Fetch one extra UTC day before the first branch date. The final grouping
+    // is by branch-local calendar key, so WIB/WITA/WIT activity around midnight
+    // cannot leak into the previous/next report day.
+    const fetchSince = new Date(Date.now() - (days + 1) * 24 * 60 * 60 * 1000).toISOString()
 
     const [{ data: scans }, { data: attendance }] = await Promise.all([
       supabase
         .from('scan_orders')
         .select('scanned_at, status, gmv')
-        .gte('scanned_at', since.toISOString()),
+        .gte('scanned_at', fetchSince),
       supabase
         .from('raos_attendance')
         .select('date')
-        .gte('date', since.toISOString().split('T')[0]),
+        .gte('date', firstKey),
     ])
 
     const byDate = new Map<string, DayRow>()
     for (let i = 0; i < days; i++) {
-      const d = new Date(since)
-      d.setDate(d.getDate() + i)
-      const key = d.toISOString().split('T')[0]
+      const key = shiftDateKey(firstKey, i)
       byDate.set(key, { date: key, totalScan: 0, valid: 0, pending: 0, rejected: 0, gmv: 0, absensi: 0 })
     }
 
     scans?.forEach(s => {
-      const key = new Date(s.scanned_at).toISOString().split('T')[0]
+      const key = branchDateKey(timeZone, new Date(s.scanned_at))
       const row = byDate.get(key)
       if (!row) return
       row.totalScan++
@@ -152,7 +161,7 @@ export default function LaporanPage() {
     const ws = XLSX.utils.json_to_sheet(sheetData)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Laporan')
-    XLSX.writeFile(wb, `RAOS_Laporan_${range}_${new Date().toISOString().split('T')[0]}.xlsx`)
+    XLSX.writeFile(wb, `RAOS_Laporan_${range}_${branchDateKey((user as any)?.branches?.timezone)}.xlsx`)
   }
 
   function exportPdf() {
@@ -165,7 +174,7 @@ export default function LaporanPage() {
     <AppShell>
       <div className="bg-secondary text-white px-4 pt-10 pb-4 print:hidden">
         <div className="flex items-center gap-3 mb-3">
-          <Link href="/dashboard"><ArrowLeft size={22} /></Link>
+          <Link href="/dashboard"><span aria-hidden="true">←</span></Link>
           <div>
             <h1 className="font-bold text-base">Laporan & Analitik</h1>
             <p className="text-white/50 text-xs capitalize">{user?.role}</p>
@@ -195,7 +204,6 @@ export default function LaporanPage() {
           <div className="text-center py-10 text-gray-400 text-sm">Memuat laporan...</div>
         ) : (
           <>
-            {/* Summary Cards */}
             <div className="grid grid-cols-2 gap-3">
               {[
                 { icon: ScanLine, label: 'Total Scan', value: totals.totalScan, color: 'bg-blue-500' },
@@ -213,7 +221,6 @@ export default function LaporanPage() {
               ))}
             </div>
 
-            {/* Export Buttons */}
             <div className="flex gap-2 print:hidden">
               <button onClick={exportExcel} className="flex-1 bg-green-600 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-2">
                 <FileSpreadsheet size={16} /> Export Excel
@@ -223,7 +230,6 @@ export default function LaporanPage() {
               </button>
             </div>
 
-            {/* Table */}
             <div className="card overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -239,7 +245,7 @@ export default function LaporanPage() {
                   {rows.map(r => (
                     <tr key={r.date} className="border-b border-gray-50">
                       <td className="py-2 pr-2 text-gray-700">
-                        {new Date(r.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                        {new Date(`${r.date}T12:00:00Z`).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
                       </td>
                       <td className="py-2 pr-2 text-right text-gray-700">{r.totalScan}</td>
                       <td className="py-2 pr-2 text-right text-green-600 font-medium">{r.valid}</td>

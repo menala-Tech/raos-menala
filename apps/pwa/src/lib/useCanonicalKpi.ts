@@ -4,7 +4,15 @@ import { supabase } from './supabase'
 import { useRealtimeRefresh } from './useRealtimeRefresh'
 import { branchMonthKey } from './branchTime'
 
-export const CANONICAL_KPI_CONSUMER_VERSION='p4-order-rpc' as const
+export const CANONICAL_KPI_CONSUMER_VERSION='p5-koordinator-branch-kpi' as const
+
+export interface CanonicalKpiBranchSnapshot{
+  target:number
+  realized:number
+  remaining:number
+  achievementPct:number
+  activePeople:number
+}
 
 export type CanonicalKpiSnapshot={
   effectiveMonth:string
@@ -16,6 +24,22 @@ export type CanonicalKpiSnapshot={
   source:'staff_override'|'branch_default'|'derived_equal_share'|'branch_target'|'unset'
   branchTarget?:number
   activeStaff?:number
+  // Koordinator-only (2026-08-20 branch-KPI fix): populated alongside the
+  // personal fields above (which stay `scope:'staff'`, never overwritten)
+  // when raos_saldo_kpi_snapshot()/raos_order_kpi_snapshot() detect the
+  // caller is koordinator. undefined for every other role.
+  branch?:CanonicalKpiBranchSnapshot
+}
+
+function mapBranchSnapshot(raw:any):CanonicalKpiBranchSnapshot|undefined{
+  if(!raw) return undefined
+  return {
+    target:Number(raw.target ?? 0),
+    realized:Number(raw.realized ?? 0),
+    remaining:Number(raw.remaining ?? 0),
+    achievementPct:Number(raw.achievementPct ?? 0),
+    activePeople:Number(raw.activePeople ?? 0),
+  }
 }
 
 export function useCanonicalKpi(
@@ -56,6 +80,34 @@ export function useCanonicalKpi(
         source:(snap.source ?? 'unset') as CanonicalKpiSnapshot['source'],
         branchTarget:Number(snap.branchTarget ?? bt?.target_cabang ?? 0),
         activeStaff:Number(snap.activeStaff ?? 0),
+        branch:mapBranchSnapshot(snap.branch),
+      }
+    }
+
+    // Saldo-mode: Staff/Koordinator go through the canonical RPC (2026-08-20
+    // koordinator-branch-KPI fix) -- it's the only path that can compute the
+    // derived_equal_share tier-3 fallback correctly for BOTH roles (a
+    // client-side count of active branch people is RLS-blocked for Staff;
+    // see raos_106 migration header for the full audit). Every other role
+    // (admin/management/direksi/direktur, or unset) keeps the EXACT prior
+    // client-side query below, unchanged -- their /kpi saldo-mode behavior
+    // is intentionally left as-is per this task's scope.
+    const normalizedRole=String(role ?? '').trim().toLowerCase()
+    if(normalizedRole==='staff'||normalizedRole==='koordinator'){
+      const {data,error}=await supabase.rpc('raos_saldo_kpi_snapshot')
+      if(error) throw error
+      const snap=(data ?? {}) as any
+      return {
+        effectiveMonth:String(snap.effectiveMonth ?? month),
+        mode:'saldo',
+        scope:snap.scope==='branch'?'branch':'staff',
+        target:Number(snap.target ?? 0),
+        realized:Number(snap.realized ?? 0),
+        achievementPct:Number(snap.achievementPct ?? 0),
+        source:(snap.source ?? 'unset') as CanonicalKpiSnapshot['source'],
+        branchTarget:Number(snap.branchTarget ?? bt?.target_cabang ?? 0),
+        activeStaff:Number(snap.activeStaff ?? 0),
+        branch:mapBranchSnapshot(snap.branch),
       }
     }
 
@@ -84,7 +136,7 @@ export function useCanonicalKpi(
       source:hasStaffOverride?'staff_override':bt?.target_staff_default!=null?'branch_default':'unset',
       branchTarget:Number(bt?.target_cabang ?? 0),
     }
-  },{enabled:!!userId&&!!branchId,ttlMs:15*60*1000})
+  },{enabled:!!userId&&!!branchId&&!!role,ttlMs:15*60*1000})
 
   useRealtimeRefresh(`kpi-${userId}-${month}`,[
     {table:'raos_kpi_targets_branch'},

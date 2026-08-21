@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+
+        <!--
+          RAOS background location — foreground Service. Not exported (no
+          other app may bind/start it). foregroundServiceType="location" is
+          required on Android 10+ so the OS treats this correctly under Doze/
+          App Standby; Android 14 additionally requires the matching
+          FOREGROUND_SERVICE_LOCATION permission below.
+          See android/app/src/main/java/com/rifim/raos/location/
+          RaosLocationForegroundService.kt for the lifecycle contract (start
+          only on explicit opt-in, stop on logout/session-invalid/shift end).
+        -->
+        <service
+            android:name=".location.RaosLocationForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Background location permission staging (A3): the app must request
+      ACCESS_FINE_LOCATION (+ ACCESS_COARSE_LOCATION as the OS-mandated
+      companion) FIRST, get that granted, and only THEN separately request
+      ACCESS_BACKGROUND_LOCATION as its own follow-up prompt (Android 10+
+      requires this two-step flow; requesting both together is rejected by
+      the OS on API 30+). See RaosLocationBridgePlugin.requestLocationPermissions()
+      — never request all of these in one blind call at app startup.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Camera access for the Staff/Koordinator native scanner and selfie capture. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Required to run the persistent tracking foreground Service at all (API 28+). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+ (API 34) foreground service type declaration requirement. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Android 13+ (API 33) runtime permission for the persistent tracking notification. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+</manifest>

@@ -162,6 +162,9 @@ export default function DriverWorkspacePage() {
     cacheClearAll()
     await clearOfflineReadCache()
     localStorage.removeItem('raos_install_variant')
+    // A8: stop Android background-location tracking + clear native
+    // session bridge before signOut — no-op on the browser PWA.
+    await (await import('@/lib/nativeLocationBridge')).stopTrackingOnLogout()
     await supabase.auth.signOut()
     router.push('/')
   }

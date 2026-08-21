@@ -6,6 +6,7 @@ import OnlineStatusBanner from '../OnlineStatusBanner'
 import PwaMaintenancePanel from '../PwaMaintenancePanel'
 import { useAutoPushSubscribe } from '@/lib/useAutoPushSubscribe'
 import { usePwaUpdateManager } from '@/lib/usePwaUpdateManager'
+import { useNativeLocationAuthBridge } from '@/lib/nativeLocationBridge'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -17,6 +18,7 @@ interface AppShellProps {
 export default function AppShell({ children, noSwipe }: AppShellProps) {
   useAutoPushSubscribe()
   usePwaUpdateManager()
+  useNativeLocationAuthBridge()
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">

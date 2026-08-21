@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
 
 interface Props {
   onDetected: (code: string) => void
@@ -110,7 +111,12 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
         // the one mounted; a cancelled instance's failure is expected
         // noise (we tore it down on purpose) and must not touch state.
         if (!cancelled) {
-          setError('Tidak bisa mengakses kamera. Periksa izin kamera di browser.')
+          const native = Capacitor.isNativePlatform()
+          setError(
+            native
+              ? 'Izin kamera ditolak atau belum diizinkan. Buka Pengaturan Aplikasi > RAOS Staff > Izin > Kamera.'
+              : 'Tidak bisa mengakses kamera. Periksa izin kamera di browser.'
+          )
         }
       }
     }

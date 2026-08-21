@@ -175,6 +175,10 @@ export default function SettingsPage() {
     await clearOfflineReadScope(user?.id)
     await clearOfflineReadCache()
     localStorage.removeItem('raos_install_variant')
+    // A8: no-ops on the browser PWA — stops the Android foreground
+    // tracking service (if running) and clears the native session bridge
+    // before the Supabase session itself is torn down.
+    await (await import('@/lib/nativeLocationBridge')).stopTrackingOnLogout()
     await supabase.auth.signOut()
     router.push('/')
   }
@@ -288,6 +292,13 @@ export default function SettingsPage() {
               onChange={v => savePrefs({ ...prefs, getaran: v })} />
           </div>
         </div>
+
+        {/* Native-only background location tracking card */}
+        <SectionTrackingLokasi
+          userId={user?.id}
+          branchId={user?.branch_id}
+          role={user?.role}
+        />
 
         {/* Menu List */}
         <div className="space-y-1">
@@ -906,6 +917,7 @@ function SectionKeamanan() {
     await clearOfflineReadScope(currentUser?.id)
     await clearOfflineReadCache()
     localStorage.removeItem('raos_install_variant')
+    await (await import('@/lib/nativeLocationBridge')).stopTrackingOnLogout()
     await supabase.auth.signOut({ scope: 'global' })
     router.push('/')
   }
@@ -976,6 +988,83 @@ function SectionKeamanan() {
       <p className="text-[10px] text-gray-400 px-1">
         Jangan bagikan akun kepada siapapun. Logout setelah selesai menggunakan sistem.
         Hubungi Admin jika mengalami kendala login.
+      </p>
+    </div>
+  )
+}
+
+/* ================= SECTION: PELACAKAN LOKASI (Android native shell only) ================= */
+// A7: minimal UI integration point for the Android background-location
+// bridge (android/app/src/main/java/com/rifim/raos/location/). Renders
+// nothing at all in the browser PWA — isNativeAndroidShell() is false
+// there, so this whole block is invisible/no-op for every existing user.
+const ALLOWED_TRACKING_ROLES = new Set(['staff', 'koordinator', 'driver_manager', 'driver'])
+
+function SectionTrackingLokasi({
+  userId,
+  branchId,
+  role,
+}: {
+  userId?: string | null
+  branchId?: string | null
+  role?: string | null
+}) {
+  const [native, setNative] = useState(false)
+  const [status, setStatus] = useState<{ tracking: boolean; hasValidSession: boolean; hasRequiredPermissions: boolean; queuedPointCount: number } | null>(null)
+  const [tracking, setTracking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    import('@/lib/nativeLocationBridge').then(async (m) => {
+      if (!mounted) return
+      const isNative = m.isNativeAndroidShell()
+      setNative(isNative)
+      if (isNative) {
+        const s = await m.getBackgroundTrackingStatus()
+        if (!mounted) return
+        setStatus(s)
+        setTracking(!!s?.tracking)
+      }
+    })
+    return () => { mounted = false }
+  }, [])
+
+  if (!native || !role || !ALLOWED_TRACKING_ROLES.has(role.toLowerCase())) return null
+
+  async function toggle() {
+    if (!userId) return
+    setBusy(true); setMsg('')
+    const m = await import('@/lib/nativeLocationBridge')
+    try {
+      if (tracking) {
+        await m.stopBackgroundTracking()
+        setTracking(false)
+      } else {
+        const perm = await m.requestLocationPermissions()
+        if (!perm.granted) { setMsg('Izin lokasi ditolak — buka Pengaturan Android untuk mengizinkan.'); setBusy(false); return }
+        const res = await m.startBackgroundTracking(userId, branchId)
+        setTracking(res.tracking)
+      }
+      setStatus(await m.getBackgroundTrackingStatus())
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card space-y-3">
+      <p className="font-bold text-gray-700 text-xs">Pelacakan Lokasi</p>
+      <InfoRow label="Status" value={tracking ? 'Aktif' : 'Tidak aktif'} />
+      <InfoRow label="Izin Lokasi" value={status?.hasRequiredPermissions ? 'Diberikan' : 'Belum diberikan'} />
+      <InfoRow label="Titik Tertunda" value={String(status?.queuedPointCount ?? 0)} />
+      <button onClick={toggle} disabled={busy || !userId} className={tracking ? 'btn-secondary' : 'btn-primary'}>
+        {busy ? <Loader2 size={16} className="animate-spin mx-auto" /> : tracking ? 'Hentikan Pelacakan' : 'Aktifkan Pelacakan'}
+      </button>
+      {msg && <p className="text-[10px] text-red-500">{msg}</p>}
+      <p className="text-[10px] text-gray-400">
+        Notifikasi tracking akan tetap tampil selama aktif — ini wajib dari Android, bukan bug.
       </p>
     </div>
   )

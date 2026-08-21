@@ -13,6 +13,11 @@
     "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/geolocation": "^8.2.2",
+    "@capacitor/push-notifications": "^8.1.2",
     "@ducanh2912/next-pwa": "^10.2.9",
     "@supabase/ssr": "^0.5.1",
     "@supabase/supabase-js": "^2.45.0",
@@ -29,6 +34,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@types/node": "^20.14.12",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

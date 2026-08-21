@@ -1,0 +1,97 @@
+-- raos_111_driver_ssot_mirror_rpc — ALREADY APPLIED IN PRODUCTION, DO NOT RE-APPLY
+-- Retroactive tracked copy for source-control parity only.
+--
+-- Applied live 2026-08-21 by Architect as Supabase migration
+-- `raos_driver_ssot_audit_only_mirror` (see `supabase migrations list` /
+-- list_migrations MCP — this file mirrors that migration's contract
+-- byte-for-byte, pulled via pg_get_functiondef against project
+-- vlievtojpmrbsmzlqswl). This file exists so the RPC contract is visible
+-- in git history — apply_migration was intentionally NOT called for this
+-- file; the object already exists.
+--
+-- Context: RAOS FINAL CLOSURE decision F (2026-08-21) — driver SSOT sync
+-- (gas/12_driver_airport_sync.gs syncDriverAirportFromSSOT) gets an
+-- audit-only mirror path alongside its existing raos_drivers upsert
+-- lifecycle. This RPC is that mirror path's sole write target. It NEVER
+-- writes raos_drivers, raos_driver_ssot_records is a separate audit/report
+-- table only.
+--
+-- Consumers: gas/12_driver_airport_sync.gs `_drvMirrorCall_()` — POST
+-- rpc/raos_mirror_driver_ssot_records with {p_source, p_records}, gated
+-- behind Script Property DRIVER_SSOT_MIRROR_ENABLED='true' (currently
+-- unset in production — mirror call is a local no-op until Architect
+-- flips the property after confirming this migration/RPC is the intended
+-- shape).
+
+-- ============================================================
+-- Table: raos_driver_ssot_records (audit/report table — confirmed live
+-- schema, listed here for reference; NOT created by this file)
+-- ============================================================
+-- id                  bigint, PK
+-- source              text NOT NULL          -- 'ssot_driver_airport' | 'ssot_driver_external'
+-- workbook_name       text NOT NULL
+-- sheet_name          text NOT NULL
+-- source_row          integer NOT NULL
+-- driver_id           text NOT NULL
+-- driver_name         text NOT NULL
+-- legacy_branch_name  text NOT NULL
+-- branch_id           uuid                    -- resolved via branches.slug, NULL if unmapped
+-- driver_type         text NOT NULL           -- 'airport' | 'external', derived from p_source
+-- record_hash         text NOT NULL           -- md5(source|sheet_name|driver_id|driver_name|legacy_branch_name)
+-- duplicate_count     integer NOT NULL DEFAULT 1
+-- conflict_status     text NOT NULL DEFAULT 'none'
+--                        -- 'none' | 'duplicate_same_branch' | 'name_conflict_same_branch'
+--                        -- | 'branch_conflict' | 'unmapped_branch'
+-- imported_at         timestamptz NOT NULL DEFAULT now()
+--
+-- RLS: enabled, zero policies defined (relforcerowsecurity=false) — the
+-- table is unreachable to anon/authenticated by default; only
+-- service_role (which bypasses RLS) and the SECURITY DEFINER RPC below
+-- can read/write it.
+
+-- ============================================================
+-- Function: raos_mirror_driver_ssot_records(p_source text, p_records jsonb)
+-- ============================================================
+-- SECURITY DEFINER, search_path locked to 'public'. service_role only —
+-- raises 'service_role_required' if the calling JWT role claim isn't
+-- exactly 'service_role' (GAS calls it with the service key, matching).
+--
+-- Contract:
+--   p_source   must be 'ssot_driver_airport' or 'ssot_driver_external'
+--              (raises 'invalid_source' otherwise)
+--   p_records  jsonb array; raises 'records_must_be_array' if not an array.
+--              Each element: {workbook_name, sheet_name, source_row,
+--              driver_id, driver_name, legacy_branch_name} — matches
+--              gas/12_driver_airport_sync.gs `_drvMirrorPayloadBuilder_()`
+--              exactly.
+--
+-- Behavior (full REPLACE semantics per source, not incremental upsert):
+--   1. DELETE all existing raos_driver_ssot_records rows WHERE source = p_source
+--   2. INSERT one row per p_records element that has non-empty
+--      driver_id/driver_name/sheet_name and a non-null source_row.
+--      workbook_name falls back to a source-specific default string if
+--      blank. branch_id resolved via `branches.slug = trim(legacy_branch_name)`
+--      (LEFT JOIN — unmatched rows get branch_id = NULL, not rejected).
+--      driver_type derived from p_source ('airport'/'external').
+--      record_hash = md5(source|sheet_name|driver_id|driver_name|legacy_branch_name).
+--   3. Recompute duplicate_count + conflict_status per driver_id within
+--      that source:
+--        - 'unmapped_branch'          — any row for that driver_id has branch_id NULL
+--        - 'branch_conflict'          — driver_id appears under >1 distinct legacy_branch_name
+--        - 'name_conflict_same_branch'— duplicate rows, same branch, driver_name text differs (normalized)
+--        - 'duplicate_same_branch'    — duplicate rows, same branch, same name
+--        - 'none'                     — single row, no conflict
+--   4. Returns jsonb: {status:'ok', source, raw_records, conflict_driver_ids, unmapped_driver_ids}
+--
+-- IMPORTANT — this function never references public.raos_drivers or
+-- auth.users in any INSERT/UPDATE/DELETE. It is a pure audit mirror of
+-- the SSOT sheet's raw reconciled state, fully separate from the
+-- operational raos_drivers table that gas/12_driver_airport_sync.gs's
+-- existing upsert lifecycle writes to.
+--
+-- Grants (confirmed live via information_schema.routine_privileges):
+--   EXECUTE granted to: postgres (owner), service_role
+--   EXECUTE NOT granted to: PUBLIC, anon, authenticated
+--   (i.e. REVOKE ALL ... FROM PUBLIC, anon, authenticated is satisfied by
+--   never having granted it in the first place — standard Supabase
+--   default-deny for new SECURITY DEFINER functions.)

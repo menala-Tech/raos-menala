@@ -14,6 +14,7 @@ import {
 import Link from 'next/link'
 import clsx from 'clsx'
 import type { Notification, NotificationPriority, NotificationStatus } from '@/types'
+import { branchDateTimeLabel } from '@/lib/branchTime'
 
 type Filter = 'today' | '7d' | '30d' | 'all'
 type StatusFilter = 'unread' | 'all' | 'archived'
@@ -73,6 +74,7 @@ export default function NotificationsPage() {
   const [filter, setFilter] = useState<Filter>('7d')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('unread')
   const [userId, setUserId] = useState<string | null>(null)
+  const [myTimeZone, setMyTimeZone] = useState<string | null>(null)
 
   const loadNotifications = useCallback(async (uid: string, f: Filter, s: StatusFilter) => {
     const cacheKey=['notifications',uid,f,s] as const
@@ -95,6 +97,13 @@ export default function NotificationsPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/'); return }
       setUserId(session.user.id)
+      // Timezone display fix: notifications are always the current user's own,
+      // so their own branch timezone (WIB/WITA/WIT) applies to every row —
+      // no per-notification branch join needed.
+      const { data: myProfile } = await supabase.from('user_profiles')
+        .select('branches(timezone)').eq('id', session.user.id).single()
+      const branchRel = myProfile?.branches as { timezone: string | null } | { timezone: string | null }[] | null
+      setMyTimeZone((Array.isArray(branchRel) ? branchRel[0]?.timezone : branchRel?.timezone) ?? null)
     }
     init()
   }, [router])
@@ -255,9 +264,7 @@ export default function NotificationsPage() {
                       <p className="text-xs text-gray-500 whitespace-pre-wrap break-words">{notif.body}</p>
                       <div className="flex items-center justify-between gap-2 mt-1.5">
                         <p className="text-[10px] text-gray-400">
-                          {new Date(notif.created_at).toLocaleString('id-ID', {
-                            day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                          })}
+                          {branchDateTimeLabel(myTimeZone, new Date(notif.created_at))}
                         </p>
                         <div className="flex items-center gap-1">
                           {targetUrl && (

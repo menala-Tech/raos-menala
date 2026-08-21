@@ -84,16 +84,16 @@ export function useCanonicalKpi(
       }
     }
 
-    // Saldo-mode: Staff/Koordinator go through the canonical RPC (2026-08-20
-    // koordinator-branch-KPI fix) -- it's the only path that can compute the
-    // derived_equal_share tier-3 fallback correctly for BOTH roles (a
-    // client-side count of active branch people is RLS-blocked for Staff;
-    // see raos_106 migration header for the full audit). Every other role
-    // (admin/management/direksi/direktur, or unset) keeps the EXACT prior
-    // client-side query below, unchanged -- their /kpi saldo-mode behavior
-    // is intentionally left as-is per this task's scope.
+    // Saldo-mode: ALL known roles go through the canonical RPC (2026-08-21
+    // admin/management/direksi/direktur wiring fix, extends the 2026-08-20
+    // koordinator-branch-KPI fix) -- raos_saldo_kpi_snapshot() computes
+    // role-aware branch scope for every one of these roles, same as
+    // raos_order_kpi_snapshot() already does (see raos_106 migration
+    // header). The legacy client-side query below stays ONLY as a fail-safe
+    // fallback for a null/unset/unrecognized role.
     const normalizedRole=String(role ?? '').trim().toLowerCase()
-    if(normalizedRole==='staff'||normalizedRole==='koordinator'){
+    const usesCanonicalSaldoRpc=['staff','koordinator','admin','management','direksi','direktur'].includes(normalizedRole)
+    if(usesCanonicalSaldoRpc){
       const {data,error}=await supabase.rpc('raos_saldo_kpi_snapshot')
       if(error) throw error
       const snap=(data ?? {}) as any

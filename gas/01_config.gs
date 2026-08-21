@@ -47,15 +47,16 @@ function getSistemConfig() {
   return cfg
 }
 
-function callSupabase(endpoint, method = 'GET', body = null) {
+function callSupabase(endpoint, method = 'GET', body = null, options = {}) {
+  const defaultHeaders = {
+    'apikey': CONFIG.SUPABASE_KEY,
+    'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': method === 'POST' ? 'return=representation' : '',
+  }
   const opts = {
     method,
-    headers: {
-      'apikey': CONFIG.SUPABASE_KEY,
-      'Authorization': `Bearer ${CONFIG.SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': method === 'POST' ? 'return=representation' : '',
-    },
+    headers: { ...defaultHeaders, ...(options.headers || {}) },
     muteHttpExceptions: true,
   }
   if (body) opts.payload = JSON.stringify(body)

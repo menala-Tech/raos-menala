@@ -901,6 +901,11 @@ function SectionKeamanan() {
 
   async function signOutAllDevices() {
     setSigningOutAll(true)
+    cacheClearAll()
+    const { data: { user: currentUser } = { user: null } } = await supabase.auth.getUser()
+    await clearOfflineReadScope(currentUser?.id)
+    await clearOfflineReadCache()
+    localStorage.removeItem('raos_install_variant')
     await supabase.auth.signOut({ scope: 'global' })
     router.push('/')
   }

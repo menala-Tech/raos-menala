@@ -18,7 +18,7 @@ import { ArrowLeft, Car, Phone, CheckCircle2, Clock, RefreshCw, ScanLine, X, Map
 
 /**
  * Halaman monitoring antrian driver — real-time via Supabase subscription.
- * Staff bisa panggil/selesaikan langsung dari sini (short-cut, alternatif chat command).
+ * Staff bisa panggil/selesaikan langsung dari sini.
  * RLS enforce scope by cabang.
  */
 
@@ -229,7 +229,7 @@ export default function AntrianDriverPage() {
             <Car size={40} className="mx-auto mb-3 opacity-30" />
             <p className="text-sm font-medium">Tidak ada antrean aktif</p>
             <p className="text-[11px] text-gray-300 mt-1">
-              Driver bisa masuk antrean via chat: <code className="bg-gray-100 px-1 rounded">/antri &lt;id_driver&gt;</code>
+              Gunakan tombol <span className="font-semibold text-gray-400">Antri Driver via Barcode</span> saat driver tiba di lokasi.
             </p>
           </div>
         )}
@@ -297,15 +297,10 @@ export default function AntrianDriverPage() {
             })}
           </div>
         ))}
-
         <div className="card bg-gray-50 text-[11px] text-gray-500 space-y-1">
-          <p className="font-bold text-gray-700 text-xs">Chat Command Cheat Sheet</p>
-          <p>• <code className="bg-white px-1 rounded">/antri &lt;id_driver&gt;</code> — masuk antrean</p>
-          <p>• <code className="bg-white px-1 rounded">/panggil &lt;nomor&gt;</code> — panggil driver</p>
-          <p>• <code className="bg-white px-1 rounded">/selesai &lt;nomor&gt;</code> — selesai jemput</p>
-          <p>• <code className="bg-white px-1 rounded">/keluar &lt;id_driver&gt;</code> — keluar antrean</p>
-          <p className="pt-1 text-gray-400">Command hanya jalan di chat room cabang spesifik.</p>
-          <p className="pt-1 text-primary font-semibold">Anti-cheat: gunakan tombol Antri via Barcode di atas — validate barcode + GPS.</p>
+          <p className="font-bold text-gray-700 text-xs">Panduan Singkat</p>
+          <p>Masukkan driver ke antrean lewat barcode + GPS, lalu kelola statusnya dari halaman ini.</p>
+          <p className="pt-1 text-primary font-semibold">Anti-cheat aktif: antre hanya valid bila barcode cocok dan lokasi staff masih dalam scope cabang.</p>
         </div>
       </div>
 

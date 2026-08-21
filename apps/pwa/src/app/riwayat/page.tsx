@@ -16,7 +16,7 @@ import Link from 'next/link'
 import clsx from 'clsx'
 import type { ScanOrder, Attendance, UserProfile } from '@/types'
 import { can } from '@/lib/accessPolicy'
-import { branchDateKey } from '@/lib/branchTime'
+import { branchDateKey, branchDateTimeLabel, branchTimeLabel } from '@/lib/branchTime'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
 
@@ -31,7 +31,7 @@ interface QueueRow {
   called_at: string | null
   completed_at: string | null
   driver: { name: string; driver_id: string } | null
-  branch: { name: string } | null
+  branch: { name: string; timezone: string | null } | null
 }
 
 interface SaldoRequest {
@@ -170,7 +170,7 @@ export default function RiwayatPage() {
         // cabang mereka; driver secara RLS hanya lihat cabang mereka juga.
         supabase.from('raos_driver_queue')
           .select('id, branch_id, position, status, joined_at, called_at, completed_at,' +
-                  'driver:raos_drivers(name, driver_id), branch:branches(name)')
+                  'driver:raos_drivers(name, driver_id), branch:branches(name, timezone)')
           .gte('joined_at', fromIso).lte('joined_at', toIso)
           .order('joined_at', { ascending: false }).limit(200),
       ])
@@ -202,6 +202,15 @@ export default function RiwayatPage() {
   }, [router, dateRange, profile, refreshNonce])
 
   useRealtimeRefresh(`riwayat-${profile?.id ?? 'anon'}`,[{table:'scan_orders'},{table:'raos_attendance'},{table:'raos_saldo_requests'},{table:'raos_driver_queue'}],()=>setRefreshNonce(n=>n+1),350,!!profile?.id)
+
+  // Timezone display fix: scan/absensi/saldo rows don't carry their own
+  // branch join (schema-level — a real per-row branch join is a broader
+  // refactor, out of scope here), so fall back to the viewer's own branch
+  // timezone. Exact for staff/koordinator (RLS-scoped to one branch);
+  // an approximation for admin/direksi viewing rows across branches.
+  // Queue rows DO carry a real per-row branch (joined above) so they use
+  // that instead, not this fallback.
+  const myTz = (profile as any)?.branches?.timezone ?? null
 
   const filteredScans = scans.filter(s => {
     if (statusFilter !== 'semua' && s.status !== statusFilter) return false
@@ -290,7 +299,14 @@ export default function RiwayatPage() {
     if (!canEdit) return
     const next = row.status === 'pending' ? 'valid' : row.status === 'valid' ? 'rejected' : 'pending'
     if (!confirm(`Ubah status scan ${row.scan_id} dari ${row.status} → ${next}?`)) return
-    const { error } = await supabase.from('scan_orders').update({ status: next }).eq('id', row.id)
+    // B12-parity fix: mirror the admin_id + validated_at audit trail that
+    // app/admin/page.tsx validateScan() writes, so this staff-scope edit path
+    // doesn't silently drop who/when the status was changed.
+    const { error } = await supabase.from('scan_orders').update({
+      status: next,
+      admin_id: profile?.id ?? null,
+      validated_at: new Date().toISOString(),
+    }).eq('id', row.id)
     if (error) { console.warn('[riwayat] status update failed', runtimeTechnicalMessage(error)); alert(runtimeMessage(error,'Gagal mengubah status.')); return }
     setScans(prev => prev.map(r => r.id === row.id ? { ...r, status: next } as ScanOrder : r))
     invalidateRiwayat()
@@ -471,9 +487,7 @@ export default function RiwayatPage() {
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {scan.scan_id} •{' '}
-                  {new Date(scan.scanned_at).toLocaleString('id-ID', {
-                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                  })}
+                  {branchDateTimeLabel(myTz, new Date(scan.scanned_at))}
                 </p>
               </div>
             </button>
@@ -529,12 +543,12 @@ export default function RiwayatPage() {
                 <div className="flex gap-3 mt-1">
                   {att.check_in_at && (
                     <span className="text-[11px] text-green-600 font-semibold">
-                      Masuk: {new Date(att.check_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      Masuk: {branchTimeLabel(myTz, new Date(att.check_in_at))}
                     </span>
                   )}
                   {att.check_out_at && (
                     <span className="text-[11px] text-primary font-semibold">
-                      Pulang: {new Date(att.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      Pulang: {branchTimeLabel(myTz, new Date(att.check_out_at))}
                     </span>
                   )}
                 </div>
@@ -615,23 +629,21 @@ export default function RiwayatPage() {
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-400 mt-0.5">
-                  {req.request_no} · {new Date(req.requested_at).toLocaleString('id-ID', {
-                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                  })}
+                  {req.request_no} · {branchDateTimeLabel(myTz, new Date(req.requested_at))}
                   {req.driver_name && <span className="text-gray-500"> · Driver: {req.driver_name}</span>}
                 </p>
                 {/* Info lifecycle sesuai state */}
                 {meta.status === 'approved' && req.approved_by_user?.full_name && (
                   <p className="text-[11px] text-emerald-600 mt-0.5">
                     Disetujui oleh {req.approved_by_user.full_name}
-                    {req.approved_at && ` · ${new Date(req.approved_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`}
+                    {req.approved_at && ` · ${branchDateTimeLabel(myTz, new Date(req.approved_at))}`}
                     <span className="block text-[10px] text-gray-400">Menunggu Finance untuk melunasi.</span>
                   </p>
                 )}
                 {meta.status === 'paid' && (
                   <p className="text-[11px] text-sky-700 mt-0.5">
                     Dilunasi{req.processed_by_user?.full_name ? ` oleh ${req.processed_by_user.full_name}` : ''}
-                    {req.processed_at && ` · ${new Date(req.processed_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`}
+                    {req.processed_at && ` · ${branchDateTimeLabel(myTz, new Date(req.processed_at))}`}
                     {req.note && <span className="block text-[10px] text-gray-500">Catatan: {req.note}</span>}
                   </p>
                 )}
@@ -675,20 +687,18 @@ export default function RiwayatPage() {
                 <p className="text-[11px] text-gray-400 mt-0.5">
                   {row.driver?.driver_id ?? '-'} · {row.branch?.name ?? '-'}
                   {' · '}
-                  {new Date(row.joined_at).toLocaleString('id-ID', {
-                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                  })}
+                  {branchDateTimeLabel(row.branch?.timezone ?? myTz, new Date(row.joined_at))}
                 </p>
                 {(row.called_at || row.completed_at) && (
                   <div className="flex gap-3 mt-1">
                     {row.called_at && (
                       <span className="text-[10px] text-blue-600">
-                        Panggil: {new Date(row.called_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                        Panggil: {branchTimeLabel(row.branch?.timezone ?? myTz, new Date(row.called_at))}
                       </span>
                     )}
                     {row.completed_at && (
                       <span className="text-[10px] text-emerald-600">
-                        Selesai: {new Date(row.completed_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                        Selesai: {branchTimeLabel(row.branch?.timezone ?? myTz, new Date(row.completed_at))}
                       </span>
                     )}
                   </div>
@@ -777,9 +787,7 @@ export default function RiwayatPage() {
                   <>
                     <DetailRow icon={ScanLine} label="Jenis Aktivitas" value="Scan Barcode" />
                     <DetailRow icon={Clock} label="Waktu"
-                      value={new Date(detail.data.scanned_at).toLocaleString('id-ID', {
-                        day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
-                      }) + ' WIB'} />
+                      value={branchDateTimeLabel(myTz, new Date(detail.data.scanned_at), { month: 'long' })} />
                     <DetailRow icon={ScanLine} label="ID Scan" value={detail.data.scan_id} />
                     <DetailRow icon={User} label="Driver" value={detail.data.raos_drivers?.name ?? '—'} />
                     <DetailRow icon={Car} label="Kendaraan"
@@ -803,11 +811,11 @@ export default function RiwayatPage() {
                         : '—'} />
                     <DetailRow icon={Clock} label="Masuk"
                       value={detail.data.check_in_at
-                        ? new Date(detail.data.check_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                        ? branchTimeLabel(myTz, new Date(detail.data.check_in_at))
                         : '—'} />
                     <DetailRow icon={Clock} label="Pulang"
                       value={detail.data.check_out_at
-                        ? new Date(detail.data.check_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+                        ? branchTimeLabel(myTz, new Date(detail.data.check_out_at))
                         : '—'} />
                     <DetailRow icon={MapPin} label="Lokasi"
                       value={detail.data.pickup_points?.name ?? 'Tidak terdeteksi'} />

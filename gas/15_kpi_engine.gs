@@ -34,8 +34,39 @@ function kpiGetSpreadsheet_() {
  * Return { order, saldo, mode }:
  *   mode = 'order' → RAOS Soeta (Pilar 1 = jumlah scan)
  *   mode = 'saldo' → cabang lain (Pilar 1 = Rp saldo)
+ *
+ * SSOT fix (2026-08-21): Supabase `raos_kpi_targets_branch` is canonical
+ * (dipakai PWA /kpi via raos_order_kpi_snapshot()/raos_saldo_kpi_snapshot()).
+ * Sheet "MASTER TARGET" dulu jadi satu-satunya sumber untuk engine ini —
+ * split-brain kalau admin update salah satu tapi tidak yang lain. Kalau
+ * branchId dikirim (dari updateAllKpiRAOS, punya branch_id asli dari
+ * user_profiles.branches), coba baca canonical dulu; MASTER TARGET jadi
+ * fallback murni (dipakai kalau branchId tidak dikirim, atau kalau belum
+ * ada row canonical untuk bulan berjalan — cabang lama/belum di-migrate
+ * tetap jalan tanpa breaking). Sheet TIDAK dihapus/dikosongkan — tetap
+ * legacy/report surface, lihat initKpiSheetsRAOS().
  */
-function kpiGetTargetByCabang_(slug) {
+function kpiGetTargetByCabang_(slug, branchId) {
+  if (branchId) {
+    try {
+      const [yr, mo] = kpiCurrentPeriode_().split('-')
+      const effectiveMonth = `${yr}-${mo}-01` // match branchMonthKey() format dipakai PWA
+      const rows = callSupabase(
+        `raos_kpi_targets_branch?branch_id=eq.${branchId}&effective_month=eq.${effectiveMonth}&select=mode,target_cabang`
+      )
+      const row = rows && rows[0]
+      if (row && row.target_cabang != null) {
+        const mode = row.mode === 'order' ? 'order' : 'saldo'
+        const value = Number(row.target_cabang) || 0
+        return { order: mode === 'order' ? value : 0, saldo: mode === 'saldo' ? value : 0, mode }
+      }
+    } catch (e) {
+      // Canonical read gagal (network/transient) — fall through ke Sheet
+      // supaya 1 error Supabase tidak memblokir seluruh cron KPI.
+      logSistem('warning', 'kpiGetTargetByCabang_', 'warning',
+        `Canonical target read gagal untuk branch ${branchId} (${slug}): ${e.message} — fallback ke MASTER TARGET`)
+    }
+  }
   const sh = kpiGetSpreadsheet_().getSheetByName(KPI_CONFIG.SHEET.MASTER_TARGET)
   if (!sh) return { order: 0, saldo: 0, mode: 'order' }
   const rows = sh.getDataRange().getValues().slice(1)
@@ -235,17 +266,24 @@ function updateAllKpiRAOS() {
 
   const staffList = kpiGetActiveStaff_()
   if (staffList.length === 0) {
-    logSistem('warning', 'updateAllKpiRAOS', 'skipped', 'Tidak ada staff aktif')
+    logSistem('warning', 'updateAllKpiRAOS', 'warning', 'Tidak ada staff aktif — run dilewati')
     return
   }
 
   // Group staff per cabang → hitung Target Staff per cabang.
-  const perCabang = {} // { slug: [staff...] }
+  // branchId (2026-08-21 SSOT fix) diambil langsung dari staff.branches yang
+  // sudah di-fetch kpiGetActiveStaff_() (parent kalau sub-terminal T1/T2/T3,
+  // kalau bukan pakai id cabang sendiri) — tanpa call Supabase tambahan,
+  // dipakai kpiGetTargetByCabang_() untuk baca canonical raos_kpi_targets_branch.
+  const perCabang = {} // { slug: { staff:[...], branchId } }
   staffList.forEach(s => {
     const slug = kpiResolveCabangSlug_(s)
     if (!slug) return
-    if (!perCabang[slug]) perCabang[slug] = []
-    perCabang[slug].push(s)
+    if (!perCabang[slug]) {
+      const branchId = (s.branches && (s.branches.parent_branch_id || s.branches.id)) || null
+      perCabang[slug] = { staff: [], branchId }
+    }
+    perCabang[slug].staff.push(s)
   })
 
   const manualEntries = kpiGetManualEntries_()
@@ -253,13 +291,13 @@ function updateAllKpiRAOS() {
   const results = []
 
   Object.keys(perCabang).forEach(slug => {
-    const staffCabang = perCabang[slug]
-    const tgt = kpiGetTargetByCabang_(slug)
+    const staffCabang = perCabang[slug].staff
+    const tgt = kpiGetTargetByCabang_(slug, perCabang[slug].branchId)
     const targetCabang = tgt.mode === 'order' ? tgt.order : tgt.saldo
 
     if (!targetCabang) {
-      logSistem('warning', 'updateAllKpiRAOS', 'skipped',
-        `Target ${tgt.mode.toUpperCase()} cabang "${slug}" = 0 di MASTER TARGET — skip ${staffCabang.length} staff`)
+      logSistem('warning', 'updateAllKpiRAOS', 'warning',
+        `Target ${tgt.mode.toUpperCase()} cabang "${slug}" = 0 (canonical/MASTER TARGET) — skip ${staffCabang.length} staff`)
       return
     }
     const jumlahStaff = staffCabang.length

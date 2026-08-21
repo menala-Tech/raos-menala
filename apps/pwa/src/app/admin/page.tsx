@@ -7,6 +7,7 @@ import { can } from '@/lib/accessPolicy'
 import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { runtimeMessage, runtimeTechnicalMessage } from '@/lib/runtimeError'
+import { branchDateTimeLabel } from '@/lib/branchTime'
 import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, CheckCircle2, XCircle, ShieldCheck,
@@ -293,9 +294,7 @@ export default function AdminPage() {
                 </p>
                 <p className="text-xs text-gray-400">
                   Scanner: {scan.user_profiles?.full_name} •{' '}
-                  {new Date(scan.scanned_at).toLocaleString('id-ID', {
-                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                  })}
+                  {branchDateTimeLabel((user as any)?.branches?.timezone ?? null, new Date(scan.scanned_at))}
                 </p>
               </div>
               <span className="badge-pending">PENDING</span>

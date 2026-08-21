@@ -63,7 +63,11 @@ export default function KpiPage() {
   const loading=canonicalKpi.loading
   const snap=canonicalKpi.data
   const isOrder=snap?.mode==='order'
-  const isBranch=isOrder && snap?.scope==='branch'
+  // 2026-08-21 fix: scope is mode-agnostic on the canonical RPC response --
+  // raos_saldo_kpi_snapshot() now returns scope:'branch' for
+  // admin/management/direksi/direktur exactly like raos_order_kpi_snapshot()
+  // already did, so isBranch must not be restricted to order mode.
+  const isBranch=snap?.scope==='branch'
   const progress=Math.min(Number(snap?.achievementPct ?? 0),100)
 
   // Koordinator branch-KPI section (2026-08-20): "KPI Saya" above stays
@@ -116,14 +120,14 @@ export default function KpiPage() {
   ] : [
     {
       icon: Banknote,
-      label: 'Realisasi Saldo',
+      label: isBranch ? 'Realisasi Saldo Cabang' : 'Realisasi Saldo',
       value: `Rp ${Number(snap?.realized ?? 0).toLocaleString('id-ID')}`,
       pct: progress,
       color: 'bg-green-500',
     },
     {
       icon: Target,
-      label: 'Target Saldo',
+      label: isBranch ? 'Target Saldo Cabang' : 'Target Saldo',
       value: `Rp ${Number(snap?.target ?? 0).toLocaleString('id-ID')}`,
       pct: progress,
       color: 'bg-blue-500',

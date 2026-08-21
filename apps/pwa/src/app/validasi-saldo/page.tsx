@@ -10,6 +10,7 @@ import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
+import { branchDateTimeLabel } from '@/lib/branchTime'
 import CoordinatorSaldoHistory from '@/components/CoordinatorSaldoHistory'
 import CoordinatorInvoiceValidation from '@/components/CoordinatorInvoiceValidation'
 import Link from 'next/link'
@@ -37,7 +38,7 @@ interface SaldoRequest {
   processed_at: string | null
   rejection_reason: string | null
   staff: { full_name: string; staff_id: string } | null
-  branch: { name: string; slug: string } | null
+  branch: { name: string; slug: string; timezone: string | null } | null
 }
 
 export default function ValidasiSaldoPage() {
@@ -67,7 +68,7 @@ export default function ValidasiSaldoPage() {
     const { data } = await supabase.from('raos_saldo_requests')
       .select('id, request_no, nominal, status, is_processed, requested_at, processed_at, rejection_reason,' +
         'staff_id,' +
-        'branch:branches!branch_id(name, slug)')
+        'branch:branches!branch_id(name, slug, timezone)')
       .order('requested_at', { ascending: false })
       .limit(500)
     const rawRows=(data ?? []) as any[]
@@ -192,9 +193,7 @@ export default function ValidasiSaldoPage() {
                   <p className="text-[11px] text-gray-400">{req.request_no}</p>
                   <div className="flex justify-between items-center mt-1 pt-1 border-t border-gray-100">
                     <span className="text-[11px] text-gray-500">
-                      {new Date(req.requested_at).toLocaleString('id-ID', {
-                        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                      })}
+                      {branchDateTimeLabel(req.branch?.timezone, new Date(req.requested_at))}
                     </span>
                     <span className="text-sm font-black text-primary">Rp{Number(req.nominal).toLocaleString('id-ID')}</span>
                   </div>

@@ -267,7 +267,7 @@ function updateTargetStaffPencapaian_(requestId) {
 function reminderSaldoBelumDiisi() {
   const lock = LockService.getScriptLock()
   if (!lock.tryLock(10000)) {
-    logSistem('cron', 'reminderSaldoBelumDiisi', 'skipped',
+    logSistem('cron', 'reminderSaldoBelumDiisi', 'warning',
       'Run sebelumnya masih aktif — skip duplicate reminder')
     return { success: true, skipped: true }
   }

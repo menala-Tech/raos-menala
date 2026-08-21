@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, RefreshCcw, Settings } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
+import { getCameraPermissionStatus, requestCameraPermission, openAppSettings } from '../lib/nativeCameraBridge'
 
 interface Props {
   onDetected: (code: string) => void
@@ -13,6 +14,8 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const scannerRef = useRef<any>(null)
   const [error, setError] = useState('')
+  const [needsSettings, setNeedsSettings] = useState(false)
+  const [retry, setRetry] = useState(0)
   const lastDetectedRef = useRef<{ code: string; at: number } | null>(null)
 
   // Lifecycle hardening (2026-08-20): unique per-mounted-instance DOM id --
@@ -66,6 +69,27 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
 
     async function start() {
       try {
+        if (!cancelled) {
+          setError('')
+          setNeedsSettings(false)
+        }
+
+        // Native Android: request camera permission BEFORE getUserMedia. Browser/PWA no-op.
+        if (Capacitor.isNativePlatform()) {
+          let { status } = await getCameraPermissionStatus()
+          if (status === 'prompt') {
+            const res = await requestCameraPermission()
+            status = res.status
+          }
+          if (status !== 'granted') {
+            if (!cancelled) {
+              setError('Izin kamera ditolak atau belum diizinkan. Aktifkan kamera di Pengaturan Aplikasi.')
+              setNeedsSettings(true)
+            }
+            return
+          }
+        }
+
         const { Html5Qrcode } = await import('html5-qrcode')
         if (cancelled || !containerRef.current) return
 
@@ -114,9 +138,10 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
           const native = Capacitor.isNativePlatform()
           setError(
             native
-              ? 'Izin kamera ditolak atau belum diizinkan. Buka Pengaturan Aplikasi > RAOS Staff > Izin > Kamera.'
+              ? 'Tidak bisa mengakses kamera. Periksa izin kamera di Pengaturan Aplikasi.'
               : 'Tidak bisa mengakses kamera. Periksa izin kamera di browser.'
           )
+          setNeedsSettings(native)
         }
       }
     }
@@ -140,13 +165,31 @@ export default function BarcodeScanner({ onDetected, active }: Props) {
     // memintanya. Hanya `active` yang memicu start/stop (mode
     // camera↔manual switch); `elementId` stabil sepanjang hidup instance
     // (useId) dan disertakan murni untuk kelengkapan deps.
-  }, [active, elementId])
+  }, [active, elementId, retry])
 
   if (error) {
     return (
-      <div className="bg-gray-900 rounded-xl h-52 flex flex-col items-center justify-center gap-2 px-4">
+      <div className="bg-gray-900 rounded-xl h-52 flex flex-col items-center justify-center gap-3 px-4">
         <AlertCircle size={32} className="text-red-400" />
         <p className="text-white/70 text-xs text-center">{error}</p>
+        {needsSettings && (
+          <button
+            type="button"
+            onClick={openAppSettings}
+            className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white active:bg-red-700"
+          >
+            <Settings size={14} />
+            Buka Pengaturan Kamera
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setRetry(r => r + 1)}
+          className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-white active:bg-white/20"
+        >
+          <RefreshCcw size={14} />
+          Coba Lagi
+        </button>
       </div>
     )
   }

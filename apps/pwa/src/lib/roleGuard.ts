@@ -21,16 +21,16 @@ export function parseInstallVariant(searchParams:URLSearchParams|null):InstallVa
 }
 
 const HOME: Partial<Record<Role,string>> = { driver:'/driver-workspace' }
-const PUBLIC = new Set(['/','/reset-password'])
+const PUBLIC = new Set(['/','/reset-password','/offline'])
 
 export const ROLE_ROUTES: Readonly<Record<Role, readonly string[]>> = {
-  staff: ['/dashboard','/scan','/absensi','/riwayat','/status','/antrian-driver','/drivers','/kpi','/chat','/settings','/notifications'],
+  staff: ['/dashboard','/scan','/absensi','/riwayat','/status','/antrian-driver','/drivers','/kpi','/documents','/chat','/settings','/notifications'],
   // Koordinator = Staff + branch supervisor. Route-level policy must mirror
   // personal operational capabilities from accessPolicy.ts; otherwise the
   // app-wide RoleGuard redirects a valid dashboard tile before page render.
   koordinator: ['/dashboard','/scan','/absensi','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   admin: ['*'],
-  management: ['/dashboard','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
+  management: ['/dashboard','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/admin/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   direksi: ['*'],
   direktur: ['*'],
   driver_manager: ['/dashboard','/antrian-driver','/drivers','/admin/barcodes','/chat','/settings','/notifications'],

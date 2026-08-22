@@ -7,7 +7,7 @@ import { App } from '@capacitor/app'
 import { supabase } from '@/lib/supabase'
 import { canRoleAccessRoute, defaultLandingForRole } from '@/lib/roleGuard'
 
-const PUBLIC = new Set(['/','/reset-password'])
+const PUBLIC = new Set(['/','/reset-password','/offline'])
 
 const INSTALL_ALLOWED: Record<string, string[]> = {
   'com.rifim.raos.staff': ['staff'],

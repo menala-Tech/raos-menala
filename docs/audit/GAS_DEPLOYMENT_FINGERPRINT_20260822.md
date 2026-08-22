@@ -13,12 +13,21 @@
 }
 ```
 
-| Field | Value |
-|---|---|
-| Local repo | `C:\\Projects\\menala\\RAOS\\gas` |
-| Script ID | `1iMN1ZGZVM0x2nSWmGMVx_umtEEzR-VQMwDZqK_pgHOzzOKVEprSN91jb` |
-| Web App deployment label | `rifim os V1` |
-| Web App URL | `https://script.google.com/macros/s/AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA/exec` |
+| Field | Value | Provenance |
+|---|---|---|
+| Local repo | `C:\\Projects\\menala\\RAOS\\gas` | Local filesystem |
+| Script ID | `1iMN1ZGZVM0x2nSWmGMVx_umtEEzR-VQMwDZqK_pgHOzzOKVEprSN91jb` | `gas/.clasp.json` (local) |
+| Web App deployment label | `rifim os V1` | Repository/config reference — **not live-verified** |
+| Web App URL | `https://script.google.com/macros/s/AKfycbxrgQ_MWvsdA_bsbNF4deIALWATDCspYvY47fakpuXMZeAtGAd4baeVVe1dPGDAi1tZJA/exec` | `GAS_PROJECTS_MAP.md` reference — **not live-verified** |
+
+## Local vs Live Deployment Fingerprint
+
+| Category | Status | Evidence |
+|---|---|---|
+| **Local source fingerprint** | VERIFIED in this audit | Hashes computed from `gas/*.gs` + `appsscript.json` below |
+| **Live deployment fingerprint** | **NOT VERIFIED** | `clasp` CLI unavailable; no `clasp pull` or `clasp version` run |
+
+The Web App URL and deployment label above are taken from `GAS_PROJECTS_MAP.md` and `gas/.clasp.json` as repository references only. They were not confirmed against current Google Apps Script deployment metadata because `clasp` could not run in this environment.
 
 ## File Inventory & Local Hashes
 Total source files: **24**

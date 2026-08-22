@@ -27,7 +27,7 @@ function compileTsToJs(sourcePath, outDir) {
 compileTsToJs(accessPolicyPath, libTmpDir)
 compileTsToJs(roleGuardPath, libTmpDir)
 
-const { canRoleAccessRoute } = require(path.join(libTmpDir, 'roleGuard.js'))
+const { canRoleAccessRoute, resolveRoleRoute } = require(path.join(libTmpDir, 'roleGuard.js'))
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -53,7 +53,7 @@ const PAGE_ROUTE_OWNERSHIP = {
 
   '/scan': { roles: ['staff', 'koordinator'] },
   '/absensi': { roles: ['staff', 'koordinator'] },
-  '/riwayat': { roles: ['staff', 'koordinator', 'management'] },
+  '/riwayat': { roles: ['staff', 'management'] },
   '/status': { roles: ['staff', 'koordinator', 'management'] },
   '/riwayat-cabang': { roles: ['koordinator', 'management'] },
   '/kpi': { roles: ['staff', 'koordinator', 'management'] },
@@ -128,5 +128,12 @@ for (const [route, meta] of Object.entries(PAGE_ROUTE_OWNERSHIP)) {
 for (const route of PUBLIC_ROUTES) {
   assert(PAGE_ROUTE_OWNERSHIP[route]?.public, `Public route ${route} must be declared public in the ownership manifest`)
 }
+
+// Hard-coded Koordinator redirect must be preserved: /riwayat -> /riwayat-cabang.
+assert(resolveRoleRoute('koordinator', '/riwayat') === '/riwayat-cabang', 'Koordinator /riwayat must redirect to /riwayat-cabang')
+assert(resolveRoleRoute('staff', '/riwayat') === '/riwayat', 'Staff /riwayat must not redirect')
+assert(resolveRoleRoute('management', '/riwayat') === '/riwayat', 'Management /riwayat must not redirect')
+assert(!canRoleAccessRoute('koordinator', '/riwayat'), 'Koordinator must not be able to access /riwayat directly')
+assert(canRoleAccessRoute('koordinator', '/riwayat-cabang'), 'Koordinator must be able to access /riwayat-cabang')
 
 console.log('PASS RAOS route ownership contract')

@@ -2,12 +2,12 @@
 
 **Audit branch:** `audit/reliability-pass-20260822`  
 **Date:** 2026-08-22  
-**Scope:** Compare `sql/` (source of truth schema) against `supabase/migrations/` (Supabase CLI / hosted migration history).
+**Scope:** Compare `sql/` (intended source of truth schema) against `supabase/migrations/` (Supabase CLI migration directory on disk).
 
 ## Methodology
 1. List `.sql` files in `sql/` and `supabase/migrations/`.
 2. Assume each applied production migration should have a matching source file in `sql/`.
-3. Flag `supabase/migrations/` files not present in `sql/` as **deployment drift**.
+3. Flag `supabase/migrations/` files not present in `sql/` as a **repository SSoT gap** (source-directory divergence).
 4. Flag `sql/` files with `_DRAFT` in the name as **not production-ready**.
 5. Report candidate missing production files and sequence gaps.
 
@@ -16,8 +16,10 @@
 - `supabase/migrations/` total files: **4**
 - DRAFT files in `sql/`: **4**
 - `supabase/migrations/` files also present in `sql/`: **0**
-- `supabase/migrations/` files **NOT** in `sql/` (drift): **4**
+- `supabase/migrations/` files **NOT** in `sql/` (repository mirror gap): **4**
 - Highest `raos_` number seen in `sql/`: `raos_112`
+
+**Important:** This report compares two local directories only. It does **not** constitute a complete comparison against live Supabase migration history. The gaps below are repository SSoT / mirror gaps, not proven live production deployment drift.
 
 ## sql/ files
 - `001_schema.sql`
@@ -90,10 +92,10 @@
 - `raos_112_background_location_ingest.sql`
 
 ## supabase/migrations/ files
-- `crm_004_security_hardening.sql` **[DRIFT — not in sql/]**
-- `raos_084_hris_target_roster_rule.sql` **[DRIFT — not in sql/]**
-- `raos_103_invoice_coordinator_manual_finance.sql` **[DRIFT — not in sql/]**
-- `smart_office_089_direksi_only_approval_hardening.sql` **[DRIFT — not in sql/]**
+- `crm_004_security_hardening.sql` **[REPOSITORY MIRROR GAP — not in sql/]**
+- `raos_084_hris_target_roster_rule.sql` **[REPOSITORY MIRROR GAP — not in sql/]**
+- `raos_103_invoice_coordinator_manual_finance.sql` **[REPOSITORY MIRROR GAP — not in sql/]**
+- `smart_office_089_direksi_only_approval_hardening.sql` **[REPOSITORY MIRROR GAP — not in sql/]**
 
 ## DRAFT migrations (do not apply to production)
 - `raos_090_attendance_canonical_rpc_DRAFT.sql`
@@ -101,14 +103,14 @@
 - `raos_092_scan_canonical_rpc_DRAFT.sql`
 - `raos_106_koordinator_kpi_branch_target_DRAFT.sql`
 
-## Deployment drift details
-- `supabase/migrations/crm_004_security_hardening.sql` exists but `sql/crm_004_security_hardening.sql` does not. Either the source file was deleted, or the migration was generated locally and not back-ported to `sql/`.
-- `supabase/migrations/raos_084_hris_target_roster_rule.sql` exists but `sql/raos_084_hris_target_roster_rule.sql` does not. Either the source file was deleted, or the migration was generated locally and not back-ported to `sql/`.
-- `supabase/migrations/raos_103_invoice_coordinator_manual_finance.sql` exists but `sql/raos_103_invoice_coordinator_manual_finance.sql` does not. Either the source file was deleted, or the migration was generated locally and not back-ported to `sql/`.
-- `supabase/migrations/smart_office_089_direksi_only_approval_hardening.sql` exists but `sql/smart_office_089_direksi_only_approval_hardening.sql` does not. Either the source file was deleted, or the migration was generated locally and not back-ported to `sql/`.
+## Repository SSoT gap details
+- `supabase/migrations/crm_004_security_hardening.sql` exists but `sql/crm_004_security_hardening.sql` does not. This is a repository SSoT gap — the source file is missing from `sql/` or the migration was generated locally and not back-ported.
+- `supabase/migrations/raos_084_hris_target_roster_rule.sql` exists but `sql/raos_084_hris_target_roster_rule.sql` does not. This is a repository SSoT gap — the source file is missing from `sql/` or the migration was generated locally and not back-ported.
+- `supabase/migrations/raos_103_invoice_coordinator_manual_finance.sql` exists but `sql/raos_103_invoice_coordinator_manual_finance.sql` does not. This is a repository SSoT gap — the source file is missing from `sql/` or the migration was generated locally and not back-ported.
+- `supabase/migrations/smart_office_089_direksi_only_approval_hardening.sql` exists but `sql/smart_office_089_direksi_only_approval_hardening.sql` does not. This is a repository SSoT gap — the source file is missing from `sql/` or the migration was generated locally and not back-ported.
 
 ## Recommendations
-1. **Back-port or move drifted migration files** from `supabase/migrations/` into `sql/` so the schema source-of-truth remains complete.
+1. **Back-port or mirror missing-in-sql migration files** from `supabase/migrations/` into `sql/` so the repository source-of-truth remains complete.
 2. **Apply DRAFT migrations only after renaming** and validating their role guards and search paths.
 3. **Document any intentionally one-off file** such as `p8_production_reconciliation_20260810.sql` and why it does not need a `supabase/migrations/` counterpart.
 4. Consider adding a CI check that warns when `supabase/migrations/` contains a filename not present in `sql/`.

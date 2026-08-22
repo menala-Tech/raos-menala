@@ -28,7 +28,8 @@ export const ROLE_ROUTES: Readonly<Record<Role, readonly string[]>> = {
   // Koordinator = Staff + branch supervisor. Route-level policy must mirror
   // personal operational capabilities from accessPolicy.ts; otherwise the
   // app-wide RoleGuard redirects a valid dashboard tile before page render.
-  koordinator: ['/dashboard','/scan','/absensi','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
+  // Koordinator accesses branch history through /riwayat-cabang, not /riwayat.
+  koordinator: ['/dashboard','/scan','/absensi','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   admin: ['*'],
   management: ['/dashboard','/riwayat','/riwayat-cabang','/status','/antrian-driver','/drivers','/kpi','/admin/kpi','/laporan','/validasi-saldo','/chat','/settings','/notifications'],
   direksi: ['*'],
@@ -41,6 +42,15 @@ export function defaultLandingForRole(role: string | null | undefined) {
   const r = normalizeRole(role)
   return r ? (HOME[r] ?? '/dashboard') : '/'
 }
+
+// Resolve any hard-coded role-specific route redirect before access checks.
+// This must stay in sync with RoleGuard.tsx so the contract test can guard it.
+export function resolveRoleRoute(role: string | null | undefined, pathname: string) {
+  const r = normalizeRole(role)
+  if (r === 'koordinator' && pathname === '/riwayat') return '/riwayat-cabang'
+  return pathname
+}
+
 export function canRoleAccessRoute(role: string | null | undefined, pathname: string) {
   if (PUBLIC.has(pathname)) return true
   const r = normalizeRole(role)

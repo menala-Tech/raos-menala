@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test:access": "node scripts/test-access-policy-contract.cjs",
     "test:notifications": "node scripts/test-notification-engine-v2.cjs",
-    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications"
+    "test:routes": "node scripts/test-route-ownership.cjs",
+    "test:smart-office": "node scripts/test-smart-office-wiring.cjs",
+    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications && npm run test:routes && npm run test:smart-office"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

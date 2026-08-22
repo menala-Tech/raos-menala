@@ -5,9 +5,9 @@ import { useRouter, usePathname } from 'next/navigation'
 import { Capacitor } from '@capacitor/core'
 import { App } from '@capacitor/app'
 import { supabase } from '@/lib/supabase'
-import { canRoleAccessRoute, defaultLandingForRole } from '@/lib/roleGuard'
+import { canRoleAccessRoute, defaultLandingForRole, resolveRoleRoute } from '@/lib/roleGuard'
 
-const PUBLIC = new Set(['/','/reset-password'])
+const PUBLIC = new Set(['/','/reset-password','/offline'])
 
 const INSTALL_ALLOWED: Record<string, string[]> = {
   'com.rifim.raos.staff': ['staff'],
@@ -59,12 +59,13 @@ export default function RoleGuard({ children }: { children: React.ReactNode }) {
       }
     }
 
-    if (role === 'koordinator' && pathname === '/riwayat') {
-      router.replace('/riwayat-cabang')
+    const resolved = resolveRoleRoute(role, pathname)
+    if (resolved !== pathname) {
+      router.replace(resolved)
       return
     }
 
-    if (!canRoleAccessRoute(role, pathname)) { router.replace(defaultLandingForRole(role)); return }
+    if (!canRoleAccessRoute(role, resolved)) { router.replace(defaultLandingForRole(role)); return }
     setAllowed(true); setChecking(false)
   })()}, [pathname, router])
 

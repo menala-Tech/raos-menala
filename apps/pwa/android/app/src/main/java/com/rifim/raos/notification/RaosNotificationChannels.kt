@@ -24,6 +24,7 @@ object RaosNotificationChannels {
     const val CHANNEL_CHAT = "raos_chat"
     const val CHANNEL_REMINDERS = "raos_reminders"
 
+    @JvmStatic
     fun createAll(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 

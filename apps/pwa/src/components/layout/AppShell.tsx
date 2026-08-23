@@ -5,6 +5,7 @@ import SwipeBackWrapper from '../SwipeBackWrapper'
 import OnlineStatusBanner from '../OnlineStatusBanner'
 import PwaMaintenancePanel from '../PwaMaintenancePanel'
 import { useAutoPushSubscribe } from '@/lib/useAutoPushSubscribe'
+import { useNativePushSubscribe } from '@/lib/useNativePushSubscribe'
 import { usePwaUpdateManager } from '@/lib/usePwaUpdateManager'
 import { useNativeLocationAuthBridge } from '@/lib/nativeLocationBridge'
 
@@ -17,6 +18,7 @@ interface AppShellProps {
 
 export default function AppShell({ children, noSwipe }: AppShellProps) {
   useAutoPushSubscribe()
+  useNativePushSubscribe()
   usePwaUpdateManager()
   useNativeLocationAuthBridge()
 

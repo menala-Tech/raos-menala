@@ -10,6 +10,7 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import webpush from 'npm:web-push@3.6.7'
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4'
+import { getFcmAccessToken, sendFcm, type FcmSendResult } from './fcm.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -168,7 +169,7 @@ Deno.serve(async (req) => {
 
   const { data: subs, error: subErr } = await adminClient
     .from('push_subscriptions')
-    .select('endpoint, p256dh, auth, user_id')
+    .select('platform, token, endpoint, p256dh, auth, user_id')
     .in('user_id', effectiveUserIds)
 
   if (subErr) return json(500, { error: 'db_error', detail: subErr.message })
@@ -208,30 +209,83 @@ Deno.serve(async (req) => {
   let failed = 0
   const errors: Array<{ endpoint: string; status: number; msg: string }> = []
 
-  await Promise.all(subs.map(async (subscription) => {
-    const payload = buildPayload(prefsById.get(subscription.user_id))
-    try {
-      await webpush.sendNotification(
-        {
-          endpoint: subscription.endpoint,
-          keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-        },
-        payload,
-      )
-      sent++
-    } catch (err: any) {
-      failed++
-      const status = err?.statusCode ?? 0
-      errors.push({
-        endpoint: subscription.endpoint.slice(0, 60) + '...',
-        status,
-        msg: String(err?.message ?? err).slice(0, 200),
-      })
-      if (status === 410 || status === 404) {
-        await adminClient.from('push_subscriptions').delete().eq('endpoint', subscription.endpoint)
+  const fcmSubs = subs.filter((s) => s.platform === 'fcm' && s.token)
+  const webSubs = subs.filter((s) => s.platform !== 'fcm' || !s.token)
+
+  // Hybrid dispatch: FCM via HTTP v1, Web Push via VAPID.
+  const fcmAuth = fcmSubs.length > 0 ? await getFcmAccessToken() : null
+
+  const fcmData: Record<string, string> = {
+    url: cleanUrl,
+    tag: cleanTag,
+    type: kategori ?? 'raos-notif',
+  }
+
+  const fcmProjectId = Deno.env.get('RAOS_FCM_PROJECT_ID') ?? ''
+
+  await Promise.all([
+    ...webSubs.map(async (subscription) => {
+      const payload = buildPayload(prefsById.get(subscription.user_id))
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: subscription.endpoint,
+            keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+          },
+          payload,
+        )
+        sent++
+      } catch (err: any) {
+        failed++
+        const status = err?.statusCode ?? 0
+        errors.push({
+          endpoint: subscription.endpoint.slice(0, 60) + '...',
+          status,
+          msg: String(err?.message ?? err).slice(0, 200),
+        })
+        if (status === 410 || status === 404) {
+          await adminClient.from('push_subscriptions').delete().eq('endpoint', subscription.endpoint)
+        }
       }
-    }
-  }))
+    }),
+
+    ...fcmSubs.map(async (subscription) => {
+      if (!fcmAuth?.ok) {
+        failed++
+        errors.push({
+          endpoint: subscription.token!.slice(0, 30) + '...',
+          status: fcmAuth?.reason === 'fcm_not_configured' ? 503 : 401,
+          msg: `fcm dispatch skipped: ${fcmAuth?.reason ?? 'unknown'}`,
+        })
+        return
+      }
+
+      const result = await sendFcm(
+        fcmProjectId,
+        fcmAuth.token,
+        subscription.token!,
+        cleanTitle,
+        cleanBody,
+        fcmData,
+        'raos_chat',
+      )
+
+      if (result.ok) {
+        sent++
+      } else {
+        failed++
+        const status = result.invalid ? 410 : 500
+        errors.push({
+          endpoint: subscription.token!.slice(0, 30) + '...',
+          status,
+          msg: String(result.reason).slice(0, 200),
+        })
+        if (result.invalid) {
+          await adminClient.from('push_subscriptions').delete().eq('token', subscription.token)
+        }
+      }
+    }),
+  ])
 
   return json(200, {
     sent,

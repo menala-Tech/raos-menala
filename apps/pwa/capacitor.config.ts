@@ -1,5 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
+const productionServerUrl = 'https://raos-menala.vercel.app'
+const androidServerUrl = process.env.RAOS_ANDROID_SERVER_URL || productionServerUrl
+
 // RAOS Android native shell — Capacitor wrapper around the existing
 // production Next.js PWA. Do NOT bundle/export web assets locally: RAOS has
 // server-rendered/dynamic routes (manifest-*, /api/pwa-version) that a
@@ -27,7 +30,7 @@ const config: CapacitorConfig = {
     // session storage exactly like the browser PWA does — no separate
     // native auth path (see AUTH BRIDGE notes in
     // android/app/src/main/java/.../RaosLocationBridgePlugin.kt).
-    url: 'https://raos-menala.vercel.app',
+    url: androidServerUrl,
     androidScheme: 'https',
     cleartext: false,
   },

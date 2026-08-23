@@ -1,5 +1,6 @@
 const fs = require('node:fs')
 const path = require('node:path')
+const { execSync } = require('node:child_process')
 const assert = require('node:assert/strict')
 
 const root = path.resolve(__dirname, '..')
@@ -28,6 +29,29 @@ assert.doesNotMatch(manifest, /android\.permission\.BLUETOOTH/)
 assert.doesNotMatch(manifest, /android\.permission\.SCHEDULE_EXACT_ALARM/)
 assert.match(mainActivity, /RaosMicrophoneBridgePlugin/)
 assert.match(mainActivity, /RaosNotificationChannels\.createAll/)
+
+// Android debug builds may opt into a preview URL, while default stays production.
+// We spawn a fresh Node process per case to avoid ESM module cache and to fully
+// exercise the real config logic.
+function resolveServerUrl(envValue) {
+  const env = { ...process.env }
+  if (envValue === undefined) {
+    delete env.RAOS_ANDROID_SERVER_URL
+  } else {
+    env.RAOS_ANDROID_SERVER_URL = envValue
+  }
+  const out = execSync(
+    'node --experimental-transform-types --input-type=module --eval "import config from \'./capacitor.config.ts\'; console.log(config.server.url)"',
+    { cwd: root, env, stdio: 'pipe', encoding: 'utf8' }
+  )
+  return out.trim()
+}
+
+const defaultUrl = resolveServerUrl(undefined)
+assert.strictEqual(defaultUrl, 'https://raos-menala.vercel.app')
+
+const previewUrl = resolveServerUrl('https://example-preview.invalid')
+assert.strictEqual(previewUrl, 'https://example-preview.invalid')
 
 // Chat page wires mic permission bridge and photo capture.
 assert.match(chat, /getMicrophonePermissionStatus/)

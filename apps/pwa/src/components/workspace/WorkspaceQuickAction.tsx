@@ -1,7 +1,7 @@
 'use client'
 
 import type React from 'react'
-import { Camera, Car, Loader2, MapPin, Paperclip, Wallet } from 'lucide-react'
+import { Car, Loader2, MapPin, Paperclip, Wallet } from 'lucide-react'
 
 interface Props {
   disabled?: boolean
@@ -10,8 +10,7 @@ interface Props {
   showQueueRequestButton?: boolean
   /** @deprecated tombol polling di-sunset per 30 Juli 2026 */
   showPollButton?: boolean
-  onPickFile: () => void
-  onCapturePhoto: () => void
+  onOpenAttachmentMenu: () => void
   onSendLocation: () => void
   /** @deprecated tombol polling di-sunset per 30 Juli 2026 */
   onOpenPoll?: () => void
@@ -32,8 +31,7 @@ export default function WorkspaceQuickAction({
   sendingLocation,
   showSaldoRequestButton,
   showQueueRequestButton,
-  onPickFile,
-  onCapturePhoto,
+  onOpenAttachmentMenu,
   onSendLocation,
   onOpenSaldo,
   onOpenQueue,
@@ -42,20 +40,12 @@ export default function WorkspaceQuickAction({
   return (
     <>
       <button
-        onClick={onPickFile}
+        onClick={onOpenAttachmentMenu}
         disabled={disabled}
         className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
-        title="Kirim foto / file"
+        title="Lampiran (kamera / file)"
       >
         <Paperclip size={20} />
-      </button>
-      <button
-        onClick={onCapturePhoto}
-        disabled={disabled}
-        className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
-        title="Ambil foto"
-      >
-        <Camera size={20} />
       </button>
       <button
         onClick={onSendLocation}

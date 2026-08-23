@@ -1354,7 +1354,6 @@ function ChatPageInner() {
             roomMembers={roomMembers}
             roomDrivers={roomDrivers}
             currentUserId={user?.id}
-            onPickFile={() => fileInputRef.current?.click()}
             onCapturePhoto={handleCapturePhoto}
             onFileSelect={handleFileSelect}
             onClearPendingFile={clearPendingFile}

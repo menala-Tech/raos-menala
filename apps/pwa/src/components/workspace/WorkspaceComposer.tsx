@@ -1,7 +1,8 @@
 'use client'
 
 import type React from 'react'
-import { FileText, Loader2, Mic, Send, StopCircle, Trash, Truck, X } from 'lucide-react'
+import { useState } from 'react'
+import { Camera, FileText, Loader2, Mic, Send, StopCircle, Trash, Truck, X } from 'lucide-react'
 import WorkspaceQuickAction from './WorkspaceQuickAction'
 import { formatFileSize, type WorkspaceMember } from './types'
 
@@ -36,8 +37,7 @@ interface Props {
   roomMembers: WorkspaceMember[]
   roomDrivers: Array<{ id: string; driver_id: string; name: string }>
   currentUserId: string | undefined
-  onPickFile: () => void
-  onCapturePhoto: () => void
+  onCapturePhoto: () => void | Promise<void>
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onClearPendingFile: () => void
   onSendLocation: () => void
@@ -61,12 +61,23 @@ export default function WorkspaceComposer(props: Props) {
     fileInputRef, cameraInputRef, textInputRef,
     showSaldoRequestButton, showQueueRequestButton,
     mentionDropdown, roomMembers, roomDrivers, currentUserId,
-    onPickFile, onCapturePhoto, onFileSelect, onClearPendingFile, onSendLocation, onOpenSaldo, onOpenQueue,
+    onCapturePhoto, onFileSelect, onClearPendingFile, onSendLocation, onOpenSaldo, onOpenQueue,
     onStartRecording, onStopRecording, onCancelRecording,
     onSubmit, onSubmitAttachment, onInsertMention, onCloseMentionDropdown,
   } = props
 
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false)
   const quickActionsDisabled = uploading || sendingLocation || pollSending || uploadingAudio
+
+  const openAttachmentMenu = () => setAttachmentMenuOpen(o => !o)
+  const chooseCamera = () => {
+    setAttachmentMenuOpen(false)
+    onCapturePhoto()
+  }
+  const chooseFile = () => {
+    setAttachmentMenuOpen(false)
+    fileInputRef.current?.click()
+  }
 
   return (
     <>
@@ -96,6 +107,29 @@ export default function WorkspaceComposer(props: Props) {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {attachmentMenuOpen && !recording && (
+        <div className="bg-gray-50 border-t border-gray-200 px-3 py-2 flex items-center gap-3 flex-shrink-0">
+          <button
+            onClick={chooseCamera}
+            disabled={quickActionsDisabled}
+            className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 hover:text-primary transition-colors disabled:opacity-40"
+            title="Ambil foto dengan kamera"
+          >
+            <Camera size={18} />
+            <span>Kamera</span>
+          </button>
+          <button
+            onClick={chooseFile}
+            disabled={quickActionsDisabled}
+            className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 hover:text-primary transition-colors disabled:opacity-40"
+            title="Pilih foto atau file"
+          >
+            <FileText size={18} />
+            <span>Foto / File</span>
+          </button>
         </div>
       )}
 
@@ -135,8 +169,7 @@ export default function WorkspaceComposer(props: Props) {
             sendingLocation={sendingLocation}
             showSaldoRequestButton={showSaldoRequestButton}
             showQueueRequestButton={showQueueRequestButton}
-            onPickFile={onPickFile}
-            onCapturePhoto={onCapturePhoto}
+            onOpenAttachmentMenu={openAttachmentMenu}
             onSendLocation={onSendLocation}
             onOpenSaldo={onOpenSaldo}
             onOpenQueue={onOpenQueue}

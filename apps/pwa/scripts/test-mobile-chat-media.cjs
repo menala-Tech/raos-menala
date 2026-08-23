@@ -35,12 +35,16 @@ assert.match(chat, /requestMicrophonePermission/)
 assert.match(chat, /handleCapturePhoto/)
 assert.match(chat, /cameraInputRef/)
 
-// Composer exposes a native-camera file input and camera quick-action.
+// Composer exposes a native-camera file input and a reachable attachment menu.
 assert.match(composer, /capture="environment"/)
 assert.match(composer, /cameraInputRef/)
 assert.match(composer, /onCapturePhoto/)
-assert.match(quick, /onCapturePhoto/)
-assert(quick.includes('<Camera size={20} />'), 'camera icon quick action missing')
+assert.match(quick, /onOpenAttachmentMenu/)
+assert.match(quick, /Paperclip/)
+assert.match(composer, /attachmentMenuOpen/)
+assert.match(composer, /chooseCamera/)
+assert.match(composer, /chooseFile/)
+assert(composer.includes('<Camera size={18} />'), 'camera icon in attachment menu missing')
 
 // Microphone bridge contract exists.
 assert.match(micBridge, /getMicrophonePermissionStatus/)

@@ -39,10 +39,10 @@ self.addEventListener('push', function (event) {
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: '/icons/icon-192x192.png',
-      badge: '/icons/icon-192x192.png',
+      icon: '/icons/icon-96x96.png',
+      badge: '/icons/icon-72x72.png',
       tag,
-      requireInteraction: true,
+      requireInteraction: false,
       renotify: true,
       silent,
       vibrate,

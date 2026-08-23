@@ -1,7 +1,7 @@
 'use client'
 
 import type React from 'react'
-import { Car, Loader2, MapPin, Paperclip, Wallet } from 'lucide-react'
+import { Camera, Car, Loader2, MapPin, Paperclip, Wallet } from 'lucide-react'
 
 interface Props {
   disabled?: boolean
@@ -11,6 +11,7 @@ interface Props {
   /** @deprecated tombol polling di-sunset per 30 Juli 2026 */
   showPollButton?: boolean
   onPickFile: () => void
+  onCapturePhoto: () => void
   onSendLocation: () => void
   /** @deprecated tombol polling di-sunset per 30 Juli 2026 */
   onOpenPoll?: () => void
@@ -32,6 +33,7 @@ export default function WorkspaceQuickAction({
   showSaldoRequestButton,
   showQueueRequestButton,
   onPickFile,
+  onCapturePhoto,
   onSendLocation,
   onOpenSaldo,
   onOpenQueue,
@@ -46,6 +48,14 @@ export default function WorkspaceQuickAction({
         title="Kirim foto / file"
       >
         <Paperclip size={20} />
+      </button>
+      <button
+        onClick={onCapturePhoto}
+        disabled={disabled}
+        className="text-gray-400 hover:text-primary transition-colors disabled:opacity-40 flex-shrink-0"
+        title="Ambil foto"
+      >
+        <Camera size={20} />
       </button>
       <button
         onClick={onSendLocation}

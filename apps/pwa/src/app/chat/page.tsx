@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { enrichChatMessages, loadChatDirectory } from '@/lib/chatProfileDirectory'
 import { can } from '@/lib/accessPolicy'
+import { getCameraPermissionStatus, requestCameraPermission, isNativeAndroid } from '@/lib/nativeCameraBridge'
+import { getMicrophonePermissionStatus, requestMicrophonePermission, openMicrophoneAppSettings } from '@/lib/nativeMicrophoneBridge'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
 // Note: sesi 22 — parseIsiSaldoCommand & parseDriverQueueCommand tidak
@@ -90,6 +92,7 @@ function ChatPageInner() {
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [pendingPreview, setPendingPreview] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -604,11 +607,30 @@ function ChatPageInner() {
     const file = e.target.files?.[0]; if (!file) return
     setPendingFile(file)
     setPendingPreview(file.type.startsWith('image/') ? URL.createObjectURL(file) : null)
+    e.target.value = ''
   }
   function clearPendingFile() {
     if (pendingPreview) URL.revokeObjectURL(pendingPreview)
     setPendingFile(null); setPendingPreview(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
+  }
+
+  async function handleCapturePhoto() {
+    if (!isNativeAndroid()) {
+      cameraInputRef.current?.click()
+      return
+    }
+    let { status } = await getCameraPermissionStatus()
+    if (status === 'prompt') {
+      const res = await requestCameraPermission()
+      status = res.status
+    }
+    if (status !== 'granted') {
+      alert('Izin kamera ditolak atau belum diizinkan. Aktifkan kamera di Pengaturan Aplikasi.')
+      return
+    }
+    cameraInputRef.current?.click()
   }
   async function sendWithAttachment() {
     if (!pendingFile || !activeRoom || !user) return
@@ -848,6 +870,18 @@ function ChatPageInner() {
 
   async function startRecording() {
     if (!activeRoom || !user || recording) return
+    if (isNativeAndroid()) {
+      let { status } = await getMicrophonePermissionStatus()
+      if (status === 'prompt') {
+        const res = await requestMicrophonePermission()
+        status = res.status
+      }
+      if (status !== 'granted') {
+        const goSettings = confirm('Izin mikrofon ditolak. Buka Pengaturan Aplikasi untuk mengaktifkan mikrofon?')
+        if (goSettings) await openMicrophoneAppSettings()
+        return
+      }
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mime = pickAudioMime()
@@ -1311,6 +1345,7 @@ function ChatPageInner() {
             pendingFile={pendingFile}
             pendingPreview={pendingPreview}
             fileInputRef={fileInputRef}
+            cameraInputRef={cameraInputRef}
             textInputRef={textInputRef}
             showSaldoRequestButton={showSaldoRequestButton}
             showQueueRequestButton={showQueueRequestButton}
@@ -1320,6 +1355,7 @@ function ChatPageInner() {
             roomDrivers={roomDrivers}
             currentUserId={user?.id}
             onPickFile={() => fileInputRef.current?.click()}
+            onCapturePhoto={handleCapturePhoto}
             onFileSelect={handleFileSelect}
             onClearPendingFile={clearPendingFile}
             onSendLocation={sendLocation}

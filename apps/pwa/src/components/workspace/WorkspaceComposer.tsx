@@ -26,6 +26,7 @@ interface Props {
   pendingFile: File | null
   pendingPreview: string | null
   fileInputRef: React.RefObject<HTMLInputElement>
+  cameraInputRef: React.RefObject<HTMLInputElement>
   textInputRef: React.RefObject<HTMLInputElement>
   showSaldoRequestButton: boolean
   showQueueRequestButton: boolean
@@ -36,6 +37,7 @@ interface Props {
   roomDrivers: Array<{ id: string; driver_id: string; name: string }>
   currentUserId: string | undefined
   onPickFile: () => void
+  onCapturePhoto: () => void
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onClearPendingFile: () => void
   onSendLocation: () => void
@@ -56,10 +58,10 @@ export default function WorkspaceComposer(props: Props) {
   const {
     text, onTextChange, disabled, sending, uploading, sendingLocation, pollSending, uploadingAudio,
     recording, recSeconds, voiceMaxSeconds, pendingFile, pendingPreview,
-    fileInputRef, textInputRef,
+    fileInputRef, cameraInputRef, textInputRef,
     showSaldoRequestButton, showQueueRequestButton,
     mentionDropdown, roomMembers, roomDrivers, currentUserId,
-    onPickFile, onFileSelect, onClearPendingFile, onSendLocation, onOpenSaldo, onOpenQueue,
+    onPickFile, onCapturePhoto, onFileSelect, onClearPendingFile, onSendLocation, onOpenSaldo, onOpenQueue,
     onStartRecording, onStopRecording, onCancelRecording,
     onSubmit, onSubmitAttachment, onInsertMention, onCloseMentionDropdown,
   } = props
@@ -134,6 +136,7 @@ export default function WorkspaceComposer(props: Props) {
             showSaldoRequestButton={showSaldoRequestButton}
             showQueueRequestButton={showQueueRequestButton}
             onPickFile={onPickFile}
+            onCapturePhoto={onCapturePhoto}
             onSendLocation={onSendLocation}
             onOpenSaldo={onOpenSaldo}
             onOpenQueue={onOpenQueue}
@@ -142,6 +145,14 @@ export default function WorkspaceComposer(props: Props) {
             ref={fileInputRef}
             type="file"
             accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            className="hidden"
+            onChange={onFileSelect}
+          />
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
             className="hidden"
             onChange={onFileSelect}
           />

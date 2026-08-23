@@ -70,8 +70,10 @@ assert.match(
   'raos_create_notification must grant EXECUTE to service_role only',
 )
 
-// Lock-screen push + safe click routing.
-assert.match(sw, /requireInteraction:\s*true/)
+// Standard Android push UX: smaller icon/badge, user-dismissible.
+assert.match(sw, /icon:\s*['"]\/icons\/icon-96x96\.png['"]/)
+assert.match(sw, /badge:\s*['"]\/icons\/icon-72x72\.png['"]/)
+assert.match(sw, /requireInteraction:\s*false/)
 assert.match(sw, /vibrate/)
 assert.match(sw, /notificationclick/)
 assert.match(sw, /normalizeTargetUrl/)

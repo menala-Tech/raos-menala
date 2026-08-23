@@ -71,6 +71,10 @@
     <!-- Camera access for the Staff/Koordinator native scanner and selfie capture. -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- Microphone access for voice messages in chat (user-invoked only). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
     <!-- Required to run the persistent tracking foreground Service at all (API 28+). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Android 14+ (API 34) foreground service type declaration requirement. -->

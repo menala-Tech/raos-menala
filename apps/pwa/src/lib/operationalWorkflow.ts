@@ -131,6 +131,10 @@ export function createWorkReminderPlan(schedule: ScheduleAssignment, settings: R
   }
 }
 
+export function isStaffWorkReminderEligibleRole(role?: string | null): boolean {
+  return String(role ?? '').toLowerCase() === 'staff'
+}
+
 export function diffWorkReminderPlans(previous: WorkReminderPlan | null, next: WorkReminderPlan): {
   cancelKeys: string[]
   schedule: WorkReminderPlan | null

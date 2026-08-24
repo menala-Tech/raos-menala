@@ -163,6 +163,7 @@ export default function SettingsPage() {
       return next
     })
     localStorage.setItem('raos_prefs', JSON.stringify(next))
+    window.dispatchEvent(new Event('raos:prefs-changed'))
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark', next.tema === 'gelap')
       document.documentElement.setAttribute('data-text-size', next.ukuranTeks)
@@ -847,10 +848,10 @@ function SectionHpPermissions() {
       key: 'alarms',
       icon: AlarmClock,
       label: 'Alarm & Pengingat',
-      status: 'Memerlukan akses khusus',
-      purpose: 'Reminder RAOS saat ini server-side; exact alarm tidak diminta otomatis.',
-      actionLabel: native ? 'Akses Khusus' : undefined,
-      action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidAlarmSettings() : undefined,
+      status: osSettings,
+      purpose: 'Pengingat Jadwal Kerja memakai channel Android RAOS Jadwal Kerja.',
+      actionLabel: native ? 'Pengaturan Pengingat' : undefined,
+      action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidWorkReminderNotificationSettings() : undefined,
     },
     {
       key: 'pip',

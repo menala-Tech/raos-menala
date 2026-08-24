@@ -41,6 +41,7 @@ class RaosAndroidSettingsBridgePlugin : Plugin() {
             put("notifications", notifications)
             put("chatChannelId", RaosNotificationChannels.CHANNEL_CHAT)
             put("operationalChannelId", RaosNotificationChannels.CHANNEL_OPERATIONAL)
+            put("workReminderChannelId", RaosNotificationChannels.CHANNEL_WORK_REMINDERS)
             put("callsChannelId", RaosNotificationChannels.CHANNEL_CALLS)
         })
     }
@@ -89,17 +90,27 @@ class RaosAndroidSettingsBridgePlugin : Plugin() {
 
     @PluginMethod
     fun openChatNotificationSettings(call: PluginCall) {
+        openChannelSettings(RaosNotificationChannels.CHANNEL_CHAT)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun openWorkReminderNotificationSettings(call: PluginCall) {
+        openChannelSettings(RaosNotificationChannels.CHANNEL_WORK_REMINDERS)
+        call.resolve()
+    }
+
+    private fun openChannelSettings(channelId: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             open(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
                 putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                putExtra(Settings.EXTRA_CHANNEL_ID, RaosNotificationChannels.CHANNEL_CHAT)
+                putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
             })
         } else {
             open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.fromParts("package", context.packageName, null)
             })
         }
-        call.resolve()
     }
 
     @PluginMethod

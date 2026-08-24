@@ -10,6 +10,7 @@ export interface AndroidPermissionSummary {
   notifications: NativePermissionStatus
   chatChannelId: string
   operationalChannelId: string
+  workReminderChannelId?: string
   callsChannelId: string
 }
 
@@ -19,6 +20,7 @@ interface RaosAndroidSettingsBridge {
   openAppSettings(): Promise<void>
   openNotificationSettings(): Promise<void>
   openChatNotificationSettings(): Promise<void>
+  openWorkReminderNotificationSettings(): Promise<void>
   openAlarmSettings(): Promise<void>
   openPictureInPictureSettings(): Promise<void>
 }
@@ -31,6 +33,7 @@ const RaosAndroidSettingsBridge = registerPlugin<RaosAndroidSettingsBridge>('Rao
       notifications: typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'granted' as const : 'prompt' as const,
       chatChannelId: 'raos_chat',
       operationalChannelId: 'raos_operational',
+      workReminderChannelId: 'raos_work_reminders',
       callsChannelId: 'raos_calls',
     }),
     requestNotificationPermission: async () => {
@@ -41,6 +44,7 @@ const RaosAndroidSettingsBridge = registerPlugin<RaosAndroidSettingsBridge>('Rao
     openAppSettings: async () => undefined,
     openNotificationSettings: async () => undefined,
     openChatNotificationSettings: async () => undefined,
+    openWorkReminderNotificationSettings: async () => undefined,
     openAlarmSettings: async () => undefined,
     openPictureInPictureSettings: async () => undefined,
   }),
@@ -69,6 +73,11 @@ export async function openAndroidNotificationSettings(): Promise<void> {
 export async function openAndroidChatNotificationSettings(): Promise<void> {
   if (!isNativeAndroidShell()) return
   await RaosAndroidSettingsBridge.openChatNotificationSettings()
+}
+
+export async function openAndroidWorkReminderNotificationSettings(): Promise<void> {
+  if (!isNativeAndroidShell()) return
+  await RaosAndroidSettingsBridge.openWorkReminderNotificationSettings()
 }
 
 export async function openAndroidAlarmSettings(): Promise<void> {

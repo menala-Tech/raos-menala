@@ -14,6 +14,10 @@ const code = `
   assert.equal(workflow.shiftCodeFromName('Shift Siang'), 'S')
   assert.equal(workflow.shiftCodeFromName('Malam'), 'M')
   assert.equal(workflow.shiftCodeFromName(null), null)
+  assert.equal(workflow.isStaffWorkReminderEligibleRole('staff'), true)
+  for (const role of ['admin', 'koordinator', 'driver', 'direksi', 'management']) {
+    assert.equal(workflow.isStaffWorkReminderEligibleRole(role), false)
+  }
 
   const pagi = workflow.normalizeScheduleAssignment({
     userId: 'staff-a',
@@ -70,6 +74,10 @@ const code = `
   const duplicate = workflow.diffWorkReminderPlans(nextReminder, nextReminder)
   assert.deepEqual(duplicate.cancelKeys, [])
   assert.equal(duplicate.schedule, null)
+
+  const removed = workflow.diffWorkReminderPlans(nextReminder, liburReminder)
+  assert.deepEqual(removed.cancelKeys, ['work-reminder:staff-a:2026-08-24:S'])
+  assert.equal(removed.schedule, null)
 
   const otherUser = workflow.createWorkReminderPlan({ ...pagi, userId: 'staff-b' }, { enabled: true, leadMinutes: 30 })
   assert.equal(otherUser.key, 'work-reminder:staff-b:2026-08-24:P')

@@ -23,7 +23,8 @@ object RaosNotificationChannels {
 
     const val CHANNEL_CHAT = "raos_chat"
     const val CHANNEL_OPERATIONAL = "raos_operational"
-    const val CHANNEL_REMINDERS = CHANNEL_OPERATIONAL
+    const val CHANNEL_WORK_REMINDERS = "raos_work_reminders"
+    const val CHANNEL_REMINDERS = CHANNEL_WORK_REMINDERS
     const val CHANNEL_CALLS = "raos_calls"
 
     @JvmStatic
@@ -43,12 +44,23 @@ object RaosNotificationChannels {
             lockscreenVisibility = Notification.VISIBILITY_PRIVATE
         }
 
-        val reminders = NotificationChannel(
+        val operational = NotificationChannel(
             CHANNEL_OPERATIONAL,
             "RAOS Operasional / Saldo",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "Reminder shift, absensi, saldo, dan tugas operasional"
+            description = "Saldo dan tugas operasional"
+            enableVibration(true)
+            enableLights(true)
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        }
+
+        val workReminders = NotificationChannel(
+            CHANNEL_WORK_REMINDERS,
+            "RAOS Jadwal Kerja",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "Pengingat jadwal kerja staff"
             enableVibration(true)
             enableLights(true)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
@@ -65,7 +77,7 @@ object RaosNotificationChannels {
             lockscreenVisibility = Notification.VISIBILITY_PRIVATE
         }
 
-        manager.createNotificationChannels(listOf(chat, reminders, calls))
+        manager.createNotificationChannels(listOf(chat, operational, workReminders, calls))
     }
 
     /**
@@ -98,7 +110,7 @@ object RaosNotificationChannels {
             .setContentIntent(contentIntent)
             .setCategory(
                 when (channelId) {
-                    CHANNEL_OPERATIONAL -> NotificationCompat.CATEGORY_REMINDER
+                    CHANNEL_OPERATIONAL, CHANNEL_WORK_REMINDERS -> NotificationCompat.CATEGORY_REMINDER
                     CHANNEL_CALLS -> NotificationCompat.CATEGORY_CALL
                     else -> NotificationCompat.CATEGORY_MESSAGE
                 }

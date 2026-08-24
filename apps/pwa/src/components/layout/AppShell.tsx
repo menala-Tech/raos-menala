@@ -8,6 +8,7 @@ import { useAutoPushSubscribe } from '@/lib/useAutoPushSubscribe'
 import { useNativePushSubscribe } from '@/lib/useNativePushSubscribe'
 import { usePwaUpdateManager } from '@/lib/usePwaUpdateManager'
 import { useNativeLocationAuthBridge } from '@/lib/nativeLocationBridge'
+import { useNativeWorkReminderSync } from '@/lib/useNativeWorkReminderSync'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -21,6 +22,7 @@ export default function AppShell({ children, noSwipe }: AppShellProps) {
   useNativePushSubscribe()
   usePwaUpdateManager()
   useNativeLocationAuthBridge()
+  useNativeWorkReminderSync()
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">

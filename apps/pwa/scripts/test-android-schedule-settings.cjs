@@ -81,6 +81,7 @@ assert.match(settings, /Perizinan &amp; Notifikasi HP/)
 assert.match(settings, /Notifikasi Chat/)
 assert.match(settings, /Suara/)
 assert.match(settings, /Getar/)
+assert.match(settings, /RAOS Jadwal Kerja/)
 
 // Sensitive owner-requested capabilities are represented, not silently granted.
 assert.doesNotMatch(manifest, /android\.permission\.READ_PHONE_STATE/)

@@ -16,8 +16,6 @@ function getEnv(name: string): string | undefined {
 }
 
 export function normalizePrivateKey(pem: string): string {
-  // Supabase secrets may store the PEM with literal \n escapes instead of
-  // actual newlines. Normalize before any PEM parsing.
   return pem.replace(/\\n/g, '\n').trim()
 }
 
@@ -42,9 +40,7 @@ function pemToBuffer(pem: string): ArrayBuffer {
   const binary = atob(cleaned)
   const buffer = new ArrayBuffer(binary.length)
   const view = new Uint8Array(buffer)
-  for (let i = 0; i < binary.length; i++) {
-    view[i] = binary.charCodeAt(i)
-  }
+  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i)
   return buffer
 }
 
@@ -74,8 +70,7 @@ async function signJwt(payload: Record<string, unknown>, privateKeyPem: string):
     key,
     stringToBuffer(signingInput),
   ))
-  const signatureB64 = base64UrlEncode(signature)
-  return `${signingInput}.${signatureB64}`
+  return `${signingInput}.${base64UrlEncode(signature)}`
 }
 
 export async function getFcmAccessToken(): Promise<{ ok: true; token: string } | { ok: false; reason: string }> {
@@ -110,19 +105,15 @@ export async function getFcmAccessToken(): Promise<{ ok: true; token: string } |
     })
 
     if (!res.ok) {
-      const text = await res.text()
+      await res.text()
       return { ok: false, reason: `fcm_auth_error: ${res.status}` }
     }
 
     const data = await res.json() as { access_token?: string }
-    if (!data.access_token) {
-      return { ok: false, reason: 'fcm_auth_no_token' }
-    }
+    if (!data.access_token) return { ok: false, reason: 'fcm_auth_no_token' }
 
     return { ok: true, token: data.access_token }
-  } catch (e) {
-    // Do not log the exception message. It may contain key material, tokens,
-    // or network details. Return a safe, bounded classification.
+  } catch {
     return { ok: false, reason: 'fcm_auth_private_key_invalid' }
   }
 }
@@ -143,26 +134,11 @@ type GoogleApiError = {
 
 function isTokenInvalidatingFcmError(detail: FcmErrorDetail): boolean {
   if (detail['@type'] !== 'type.googleapis.com/google.firebase.fcm.v1.FcmError') return false
-  const code = detail.errorCode
-  if (code === 'UNREGISTERED') return true
-  if (code === 'SENDER_ID_MISMATCH') return true
-  return false
+  return detail.errorCode === 'UNREGISTERED' || detail.errorCode === 'SENDER_ID_MISMATCH'
 }
 
-/**
- * Classify an FCM HTTP v1 send response.
- *
- * Permanent token invalidation is conservative:
- *   - UNREGISTERED or SENDER_ID_MISMATCH FcmError detail => token is dead.
- *   - NOT_FOUND or INVALID_ARGUMENT is only token-fatal if an FcmError detail
- *     explicitly marks the token as the problem.
- *   - All 5xx, auth, quota, network, payload, and transient errors keep the
- *     subscription so it can be retried later.
- */
 export function classifyFcmError(status: number, json: GoogleApiError | null): { invalid: boolean; reason: string } {
-  if (!json?.error) {
-    return { invalid: false, reason: `fcm_http_${status}` }
-  }
+  if (!json?.error) return { invalid: false, reason: `fcm_http_${status}` }
 
   const err = json.error
   const details = err.details ?? []
@@ -170,22 +146,16 @@ export function classifyFcmError(status: number, json: GoogleApiError | null): {
   const statusName = err.status ?? String(status)
   const message = err.message ?? ''
 
-  // Conservative permanent-token cases.
   const hasUnregistered = fcmDetails.some((d) => d.errorCode === 'UNREGISTERED')
   const hasSenderIdMismatch = fcmDetails.some((d) => d.errorCode === 'SENDER_ID_MISMATCH')
-
   if (hasUnregistered || hasSenderIdMismatch) {
     return { invalid: true, reason: `fcm_invalid_token: ${fcmDetails.map((d) => d.errorCode).join(',')}` }
   }
 
-  // NOT_FOUND with token-specific evidence (e.g., FcmError UNREGISTERED already
-  // handled above) or a message that clearly refers to the registration token.
   if (statusName === 'NOT_FOUND' && /registration token/i.test(message)) {
     return { invalid: true, reason: 'fcm_invalid_token: NOT_FOUND (registration token)' }
   }
 
-  // INVALID_ARGUMENT is only token-fatal if the FCM detail points at the token
-  // or the message explicitly says the registration token is invalid.
   if (statusName === 'INVALID_ARGUMENT') {
     if (/registration token/i.test(message) && /invalid/i.test(message)) {
       return { invalid: true, reason: 'fcm_invalid_token: INVALID_ARGUMENT (registration token)' }
@@ -193,8 +163,6 @@ export function classifyFcmError(status: number, json: GoogleApiError | null): {
     return { invalid: false, reason: `fcm_send_failed: INVALID_ARGUMENT ${message}` }
   }
 
-  // Everything else (UNAVAILABLE, INTERNAL, RESOURCE_EXHAUSTED, QUOTA_EXCEEDED,
-  // UNAUTHENTICATED, PERMISSION_DENIED, 5xx, etc.) is transient/config.
   return { invalid: false, reason: `fcm_send_failed: ${statusName} ${message}` }
 }
 
@@ -212,49 +180,41 @@ export async function sendFcm(
   data: Record<string, string>,
   channelId = 'raos_chat',
 ): Promise<FcmSendResult> {
-  const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`
-
-  const payload = {
-    message: {
-      token,
-      notification: {
-        title,
-        body,
-      },
-      data,
-      android: {
-        notification: {
-          channelId,
-        },
-      },
-    },
-  }
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  })
-
-  if (res.ok) {
-    return { ok: true }
-  }
-
-  let json: GoogleApiError | null = null
   try {
-    json = await res.json() as GoogleApiError
+    const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`
+    const payload = {
+      message: {
+        token,
+        notification: { title, body },
+        data,
+        android: { notification: { channelId } },
+      },
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (res.ok) return { ok: true }
+
+    let json: GoogleApiError | null = null
+    try {
+      json = await res.json() as GoogleApiError
+    } catch {
+      // non-JSON FCM errors stay retryable
+    }
+
+    const classification = classifyFcmError(res.status, json)
+    if (classification.invalid) {
+      return { ok: false, invalid: true, reason: classification.reason }
+    }
+    return { ok: false, invalid: false, reason: classification.reason }
   } catch {
-    // Keep json as null; classifyFcmError will treat it as a non-JSON failure.
+    return { ok: false, invalid: false, reason: 'fcm_send_transport_error' }
   }
-
-  const classification = classifyFcmError(res.status, json)
-
-  if (classification.invalid) {
-    return { ok: false, invalid: true, reason: classification.reason }
-  }
-
-  return { ok: false, invalid: false, reason: classification.reason }
 }

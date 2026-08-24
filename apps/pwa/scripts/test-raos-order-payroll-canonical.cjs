@@ -7,13 +7,22 @@ const migrationPath = path.join(
   repoRoot,
   'supabase/migrations/20260824091309_raos_order_payroll_canonical.sql'
 )
+const targetOrderMigrationPath = path.join(
+  repoRoot,
+  'supabase/migrations/20260824095640_raos_staff_target_order_override.sql'
+)
 const sql = fs.readFileSync(migrationPath, 'utf8')
+const targetOrderSql = fs.readFileSync(targetOrderMigrationPath, 'utf8')
 
+assert.match(targetOrderSql, /alter table public\.raos_kpi_targets_staff\s+add column if not exists target_order bigint/i)
+assert.match(targetOrderSql, /comment on column public\.raos_kpi_targets_staff\.target_order/i)
 assert.match(sql, /v_mode\s*=\s*'order'[\s\S]*public\.scan_orders/i)
 assert.match(sql, /s\.status\s*=\s*'valid'/i)
 assert.match(sql, /s\.scanned_at\s*>=\s*v_order_start_ts/i)
 assert.match(sql, /s\.scanned_at\s*<\s*v_order_end_ts/i)
 assert.match(sql, /staff_target\.target_order|st\.target_order|st2\.target_order/i)
+assert.match(sql, /v_mode\s*=\s*'order'[\s\S]*coalesce\(st\.target_order,\s*v_effective_default,\s*0\)/i)
+assert.match(sql, /else[\s\S]*coalesce\(st\.target_saldo,\s*v_effective_default,\s*0\)/i)
 assert.match(sql, /else[\s\S]*raos_target_tercapai_bulan/i)
 assert.match(sql, /on conflict\s*\(\s*staff_id\s*,\s*effective_month\s*\)\s*do update/i)
 
@@ -85,14 +94,16 @@ const monthEnd = '2026-09-01T00:00:00+08:00'
 const branchTargetSaldo = { target_cabang: 4000000, target_staff_default: 1000000 }
 const branchTargetOrder = { target_cabang: 4, target_staff_default: 2 }
 const staffTargets = {
-  staffA: { branch_id: 'branchA', target_saldo: null, target_order: null },
+  staffA: { branch_id: 'branchA', target_saldo: 1000000, target_order: null },
   staffB: { branch_id: 'branchA', target_saldo: null, target_order: 2 },
+  staffC: { branch_id: 'branchA', target_saldo: 5000000, target_order: 4 },
   staffWrongBranch: { branch_id: 'branchB', target_saldo: null, target_order: 1 },
 }
 
 const saldo = [
   { staff_id: 'staffA', effective_month: '2026-08-01', realisasi_saldo: 1000000 },
   { staff_id: 'staffB', effective_month: '2026-08-01', realisasi_saldo: 5000000 },
+  { staff_id: 'staffC', effective_month: '2026-08-01', realisasi_saldo: 5000000 },
 ]
 const scans = [
   { staff_id: 'staffA', status: 'valid', scanned_at: '2026-08-01T01:00:00+08:00' },
@@ -101,6 +112,10 @@ const scans = [
   { staff_id: 'staffA', status: 'rejected', scanned_at: '2026-08-17T11:00:00+08:00' },
   { staff_id: 'staffB', status: 'valid', scanned_at: '2026-08-20T11:00:00+08:00' },
   { staff_id: 'staffB', status: 'valid', scanned_at: '2026-08-21T11:00:00+08:00' },
+  { staff_id: 'staffC', status: 'valid', scanned_at: '2026-08-22T11:00:00+08:00' },
+  { staff_id: 'staffC', status: 'valid', scanned_at: '2026-08-23T11:00:00+08:00' },
+  { staff_id: 'staffC', status: 'valid', scanned_at: '2026-08-24T11:00:00+08:00' },
+  { staff_id: 'staffC', status: 'valid', scanned_at: '2026-08-25T11:00:00+08:00' },
   { staff_id: 'staffWrongBranch', status: 'valid', scanned_at: '2026-08-22T11:00:00+08:00' },
   { staff_id: 'staffA', status: 'valid', scanned_at: '2026-09-01T00:00:00+08:00' },
 ]
@@ -122,6 +137,12 @@ const saldoRow = computePayroll({
 })
 assert.equal(saldoRow.target_pct, 100, 'saldo-mode payroll remains based on saldo realization')
 assert.equal(saldoRow.bonus_saldo, 1500000, 'saldo-mode bonus rule remains unchanged')
+assert.equal(effectiveTarget({
+  mode: 'saldo',
+  staffTarget: staffTargets.staffA,
+  branchTarget: branchTargetSaldo,
+  activePeople: 3,
+}), 1000000, 'saldo mode uses target_saldo staff override')
 
 const orderRow = computePayroll({
   staffId: 'staffA',
@@ -138,6 +159,12 @@ const orderRow = computePayroll({
 })
 assert.equal(orderRow.target_pct, 100, 'order mode counts valid scans only')
 assert.equal(orderRow.bonus_saldo, 1500000, 'order bonus follows target tier from valid scans')
+assert.equal(effectiveTarget({
+  mode: 'order',
+  staffTarget: staffTargets.staffA,
+  branchTarget: branchTargetOrder,
+  activePeople: 3,
+}), 2, 'null target_order falls back to branch target_staff_default')
 
 const staffBOrder = computePayroll({
   staffId: 'staffB',
@@ -153,6 +180,29 @@ const staffBOrder = computePayroll({
   payrollRows,
 })
 assert.equal(staffBOrder.target_pct, 100, 'staff target_order override is respected')
+
+const staffCOrder = computePayroll({
+  staffId: 'staffC',
+  branchId: 'branchA',
+  scopeIds: ['branchA'],
+  mode: 'order',
+  monthStart,
+  monthEnd,
+  branchTarget: branchTargetOrder,
+  staffTargets,
+  saldo,
+  scans,
+  payrollRows,
+})
+assert.equal(staffCOrder.target_pct, 100, 'order mode uses target_order and ignores target_saldo')
+
+const autoProrateTarget = effectiveTarget({
+  mode: 'order',
+  staffTarget: { branch_id: 'branchA', target_saldo: 5000000, target_order: null },
+  branchTarget: { target_cabang: 10, target_staff_default: null },
+  activePeople: 3,
+})
+assert.equal(autoProrateTarget, 4, 'null target_order falls back to CEIL auto-prorate when branch default is null')
 
 const noValidScans = computePayroll({
   staffId: 'staffA',

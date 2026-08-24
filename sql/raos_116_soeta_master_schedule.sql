@@ -1,0 +1,287 @@
+-- ============================================================================
+-- raos_116: SOETA Master Data + Schedule Parity (2026-08-24)
+-- ============================================================================
+--
+-- Business goals:
+--   1. Import SOETA staff from DATABASE STAFF.xlsx without requiring email.
+--   2. Store pre-activation workforce in raos_staff_master (email nullable).
+--   3. Auto-resolve terminal (T1/T2/T3) to branches.id.
+--   4. Future activation: admin adds email, creates auth user, links auth_user_id
+--      → user_profiles created automatically.
+--   5. Schedule board includes koordinator as first-class assignee.
+--
+-- No production mutation. Source-only migration for feature branch.
+-- ============================================================================
+
+-- ---------- 1. raos_staff_master: canonical SOETA pre-activation pool -----
+CREATE TABLE IF NOT EXISTS public.raos_staff_master (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  staff_id        text NOT NULL,
+  full_name       text NOT NULL,
+  email           text,
+  phone           text,
+  role            text NOT NULL CHECK (role IN ('staff','koordinator','admin','management','direksi','driver_manager','driver')),
+  airport         text NOT NULL,
+  terminal        text NOT NULL,
+  status          text NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif','Nonaktif','Pending')),
+  is_activated    boolean NOT NULL DEFAULT false,
+  auth_user_id    uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  branch_id       uuid REFERENCES public.branches(id) ON DELETE SET NULL,
+  source          text NOT NULL DEFAULT 'xlsx_import',
+  imported_at     timestamptz NOT NULL DEFAULT now(),
+  activated_at    timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (staff_id)
+);
+
+CREATE INDEX IF NOT EXISTS raos_staff_master_branch_idx ON public.raos_staff_master (branch_id);
+CREATE INDEX IF NOT EXISTS raos_staff_master_status_idx ON public.raos_staff_master (status);
+CREATE INDEX IF NOT EXISTS raos_staff_master_airport_terminal_idx ON public.raos_staff_master (airport, terminal);
+
+COMMENT ON TABLE public.raos_staff_master IS
+  'Canonical pre-activation SOETA workforce master. Imported from DATABASE STAFF.xlsx; email may be null until admin activates.';
+
+ALTER TABLE public.raos_staff_master ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS raos_staff_master_select ON public.raos_staff_master;
+CREATE POLICY raos_staff_master_select ON public.raos_staff_master
+  FOR SELECT USING (
+    public.is_branch_in_scope(branch_id)
+    OR public.get_my_role() = ANY (ARRAY['admin','management','direksi'])
+  );
+
+DROP POLICY IF EXISTS raos_staff_master_write ON public.raos_staff_master;
+CREATE POLICY raos_staff_master_write ON public.raos_staff_master
+  FOR ALL USING (
+    public.get_my_role() = ANY (ARRAY['admin','management','direksi'])
+  )
+  WITH CHECK (
+    public.get_my_role() = ANY (ARRAY['admin','management','direksi'])
+  );
+
+-- ---------- 2. Auto-resolve terminal (T1/T2/T3) to branch_id ---------------
+CREATE OR REPLACE FUNCTION public.raos_staff_master_resolve_branch()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.terminal IS NOT NULL THEN
+    SELECT b.id INTO NEW.branch_id
+    FROM public.branches b
+    WHERE b.code = NEW.terminal
+      AND b.is_active = true
+    LIMIT 1;
+  END IF;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.raos_staff_master_resolve_branch() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trg_raos_staff_master_resolve_branch ON public.raos_staff_master;
+CREATE TRIGGER trg_raos_staff_master_resolve_branch
+  BEFORE INSERT OR UPDATE OF terminal ON public.raos_staff_master
+  FOR EACH ROW EXECUTE FUNCTION public.raos_staff_master_resolve_branch();
+
+-- ---------- 3. Bulk upsert from GAS / XLSX import --------------------------
+CREATE OR REPLACE FUNCTION public.raos_staff_master_upsert_bulk(p_records jsonb)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  r record;
+  n int := 0;
+BEGIN
+  IF NOT (public.get_my_role() = ANY (ARRAY['admin','management','direksi']))
+     AND auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'forbidden: only admin/management/direksi or service role can upsert master';
+  END IF;
+
+  IF p_records IS NULL OR jsonb_typeof(p_records) <> 'array' OR jsonb_array_length(p_records) = 0 THEN
+    RETURN 0;
+  END IF;
+
+  FOR r IN SELECT * FROM jsonb_array_elements(p_records) AS x(value)
+  LOOP
+    INSERT INTO public.raos_staff_master (
+      staff_id, full_name, email, phone, role, airport, terminal, status, source
+    ) VALUES (
+      r.value->>'staff_id',
+      r.value->>'full_name',
+      NULLIF(r.value->>'email', ''),
+      NULLIF(r.value->>'phone', ''),
+      COALESCE(r.value->>'role', 'staff'),
+      COALESCE(r.value->>'airport', 'Soekarno-Hatta'),
+      COALESCE(r.value->>'terminal', 'T1'),
+      COALESCE(r.value->>'status', 'Aktif'),
+      COALESCE(r.value->>'source', 'xlsx_import')
+    )
+    ON CONFLICT (staff_id) DO UPDATE SET
+      full_name = EXCLUDED.full_name,
+      email     = COALESCE(EXCLUDED.email, raos_staff_master.email),
+      phone     = EXCLUDED.phone,
+      role      = EXCLUDED.role,
+      airport   = EXCLUDED.airport,
+      terminal  = EXCLUDED.terminal,
+      status    = EXCLUDED.status,
+      source    = EXCLUDED.source,
+      updated_at = now();
+    n := n + 1;
+  END LOOP;
+
+  RETURN n;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) TO authenticated, service_role;
+
+COMMENT ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) IS
+  'Bulk upsert SOETA staff master from XLSX import via GAS.';
+
+-- ---------- 4. Activation helpers (email + auth linkage) ------------------
+CREATE OR REPLACE FUNCTION public.raos_staff_master_set_email(
+  p_staff_id text,
+  p_email text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT (public.get_my_role() = ANY (ARRAY['admin','management','direksi']))
+     AND auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'forbidden: only admin/management/direksi or service role can set email';
+  END IF;
+
+  UPDATE public.raos_staff_master
+    SET email = p_email,
+        updated_at = now()
+  WHERE staff_id = p_staff_id;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'staff_id_not_found');
+  END IF;
+
+  RETURN jsonb_build_object('ok', true, 'staff_id', p_staff_id);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.raos_staff_master_set_email(text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.raos_staff_master_set_email(text, text) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.raos_staff_master_link_auth(
+  p_staff_id text,
+  p_auth_user_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  m public.raos_staff_master%rowtype;
+BEGIN
+  IF NOT (public.get_my_role() = ANY (ARRAY['admin','management','direksi']))
+     AND auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'forbidden: only admin/management/direksi or service role can link auth';
+  END IF;
+
+  SELECT * INTO m
+  FROM public.raos_staff_master
+  WHERE staff_id = p_staff_id;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'staff_id_not_found');
+  END IF;
+
+  IF m.auth_user_id IS NOT NULL AND m.auth_user_id <> p_auth_user_id THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'already_linked_to_other_auth_user');
+  END IF;
+
+  INSERT INTO public.user_profiles (
+    id, staff_id, email, full_name, role, phone, branch_id, is_active, source, ssot_synced_at
+  ) VALUES (
+    p_auth_user_id,
+    p_staff_id,
+    m.email,
+    m.full_name,
+    m.role,
+    m.phone,
+    m.branch_id,
+    true,
+    'manual',
+    now()
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    staff_id     = EXCLUDED.staff_id,
+    email        = COALESCE(EXCLUDED.email, user_profiles.email),
+    full_name    = EXCLUDED.full_name,
+    role         = EXCLUDED.role,
+    phone        = EXCLUDED.phone,
+    branch_id    = EXCLUDED.branch_id,
+    is_active    = true,
+    source       = 'manual',
+    ssot_synced_at = now();
+
+  UPDATE public.raos_staff_master
+    SET auth_user_id = p_auth_user_id,
+        is_activated = true,
+        activated_at = now(),
+        updated_at = now()
+  WHERE staff_id = p_staff_id;
+
+  RETURN jsonb_build_object('ok', true, 'staff_id', p_staff_id, 'auth_user_id', p_auth_user_id);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.raos_staff_master_link_auth(text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.raos_staff_master_link_auth(text, uuid) TO authenticated, service_role;
+
+-- ---------- 5. Schedule board includes koordinator as first-class target --
+CREATE OR REPLACE FUNCTION public.raos_shift_schedule_board(
+  p_branch_id uuid,
+  p_tanggal date
+)
+RETURNS TABLE (
+  staff_id        uuid,
+  full_name       text,
+  schedule_id     uuid,
+  shift_id        uuid,
+  shift_name      text,
+  last_changed_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.is_branch_in_scope(p_branch_id) THEN
+    RAISE EXCEPTION 'branch_out_of_scope';
+  END IF;
+
+  RETURN QUERY
+  SELECT up.id, up.full_name, rs.id, rs.shift_id, s.name, rs.last_changed_at
+  FROM public.user_profiles up
+  LEFT JOIN public.raos_shift_schedules rs
+    ON rs.staff_id = up.id AND rs.tanggal = p_tanggal
+  LEFT JOIN public.shifts s ON s.id = rs.shift_id
+  WHERE up.branch_id = p_branch_id
+    AND up.role = ANY (ARRAY['staff','koordinator'])
+    AND up.is_active = true
+  ORDER BY up.full_name;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.raos_shift_schedule_board(uuid, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.raos_shift_schedule_board(uuid, date) TO authenticated;
+
+COMMENT ON FUNCTION public.raos_shift_schedule_board(uuid, date) IS
+  'Roster board for a terminal on a date. Includes staff and koordinator; admin & koordinator can edit.';

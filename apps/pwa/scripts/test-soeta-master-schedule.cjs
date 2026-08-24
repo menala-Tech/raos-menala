@@ -72,8 +72,11 @@ assert(!rifimSql.includes('TO authenticated'), 'RIFIM view must not grant to aut
 assert(rifimSql.includes('REVOKE ALL ON public.raos_staff_master_hris FROM PUBLIC, anon, authenticated'), 'RIFIM view must explicitly revoke from authenticated/anon/public')
 
 // ---------- RIFIM consumer contract ----------
-assert(rifimConsumer.includes('on_conflict=employee_id'), 'RIFIM consumer must use atomic upsert')
-assert(rifimConsumer.includes('resolution=merge-duplicates'), 'RIFIM consumer must use resolution=merge-duplicates')
+assert(rifimConsumer.includes('raos_hris_upsert_employees'), 'RIFIM consumer must call dedicated RAOS HRIS RPC')
+assert(rifimConsumer.includes('p_records'), 'RIFIM consumer must send records to the RPC as p_records')
+assert(rifimConsumer.includes('rest/v1/rpc/raos_hris_upsert_employees'), 'RIFIM consumer must POST to the RAOS HRIS RPC endpoint')
+assert(!rifimConsumer.includes('on_conflict=employee_id'), 'RIFIM consumer must not use generic employees upsert endpoint')
+assert(!rifimConsumer.includes('resolution=merge-duplicates'), 'RIFIM consumer must not use merge-duplicates on employees table')
 assert(rifimConsumer.includes('is_activated !== true'), 'RIFIM consumer must skip non-activated rows')
 
 const payloadStart = rifimConsumer.indexOf('payload.push({')

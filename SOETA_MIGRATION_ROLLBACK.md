@@ -122,6 +122,41 @@ DROP VIEW IF EXISTS public.raos_staff_master_hris CASCADE;
 
 ---
 
+## rifim_002 — HRIS Employee Defaults + Dedicated RPC
+
+### Tables
+- `public.raos_hris_employee_defaults` (new, RLS, service_role only)
+
+### Functions
+- `public.raos_hris_upsert_employees(jsonb)` (new)
+
+### RLS Policies
+- `raos_hris_employee_defaults_service_all`
+
+### Grants
+- `GRANT SELECT, INSERT, UPDATE, DELETE ON public.raos_hris_employee_defaults TO service_role`
+- `GRANT EXECUTE ON FUNCTION public.raos_hris_upsert_employees(jsonb) TO service_role`
+
+### Consumer
+- `automation/apps-script/raosSoetaStaffConsumer.js` calls `POST /rest/v1/rpc/raos_hris_upsert_employees`
+
+### Rollback
+```sql
+REVOKE ALL ON FUNCTION public.raos_hris_upsert_employees(jsonb) FROM service_role;
+DROP FUNCTION IF EXISTS public.raos_hris_upsert_employees(jsonb) CASCADE;
+
+DROP POLICY IF EXISTS raos_hris_employee_defaults_service_all ON public.raos_hris_employee_defaults;
+REVOKE ALL ON public.raos_hris_employee_defaults FROM service_role;
+DROP TABLE IF EXISTS public.raos_hris_employee_defaults CASCADE;
+
+-- Also remove any leftover artifacts from earlier preview iterations.
+DROP TRIGGER IF EXISTS trg_employee_hris_defaults ON public.employees;
+DROP FUNCTION IF EXISTS public.raos_employee_hris_defaults_insert() CASCADE;
+DROP TABLE IF EXISTS public.raos_staff_master_hris_defaults CASCADE;
+```
+
+---
+
 ## GAS / Apps Script Files
 
 ### RAOS

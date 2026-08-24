@@ -47,9 +47,42 @@ DROP FUNCTION IF EXISTS public.raos_staff_master_link_auth(text, uuid) CASCADE;
 DROP FUNCTION IF EXISTS public.raos_staff_master_set_email(text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.raos_staff_master_upsert_bulk(jsonb) CASCADE;
 DROP FUNCTION IF EXISTS public.raos_staff_master_resolve_airport_and_branch() CASCADE;
-DROP FUNCTION IF EXISTS public.raos_shift_schedule_board(uuid, date) CASCADE;
 DROP TABLE IF EXISTS public.raos_staff_master CASCADE;
 ALTER TABLE public.raos_shift_schedules DROP COLUMN IF EXISTS status;
+
+-- Restore the original global raos_shift_schedule_board (pre-raos_116 definition).
+-- Do NOT drop this function; it is part of the global RAOS schedule engine.
+CREATE OR REPLACE FUNCTION public.raos_shift_schedule_board(p_branch_id uuid, p_tanggal date)
+RETURNS TABLE (
+  staff_id         uuid,
+  full_name        text,
+  schedule_id      uuid,
+  shift_id         uuid,
+  shift_name       text,
+  last_changed_at  timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.is_branch_in_scope(p_branch_id) THEN
+    RAISE EXCEPTION 'branch_out_of_scope';
+  END IF;
+
+  RETURN QUERY
+  SELECT up.id, up.full_name, rs.id, rs.shift_id, s.name, rs.last_changed_at
+  FROM public.user_profiles up
+  LEFT JOIN public.raos_shift_schedules rs
+    ON rs.staff_id = up.id AND rs.tanggal = p_tanggal
+  LEFT JOIN public.shifts s ON s.id = rs.shift_id
+  WHERE up.branch_id = p_branch_id AND up.role = 'staff' AND up.is_active = true
+  ORDER BY up.full_name;
+END;
+$$;
+
+COMMENT ON FUNCTION public.raos_shift_schedule_board(uuid, date) IS
+  'Roster jadwal shift 1 cabang utk 1 tanggal — daftar staff aktif cabang + shift terjadwal (kalau ada). Dipakai Settings > Jadwal Kerja.';
 ```
 
 ---

@@ -230,6 +230,7 @@ DECLARE
   m public.raos_staff_master%rowtype;
   v_other_staff_id text;
   v_branch_active boolean;
+  v_existing public.user_profiles%rowtype;
 BEGIN
   IF NOT (public.get_my_role() = ANY (ARRAY['admin','management','direksi']))
      AND auth.role() <> 'service_role' THEN
@@ -275,30 +276,32 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'staff_already_linked_to_other_auth_user');
   END IF;
 
-  INSERT INTO public.user_profiles (
-    id, staff_id, email, full_name, role, phone, branch_id, is_active, source, ssot_synced_at
-  ) VALUES (
-    p_auth_user_id,
-    p_staff_id,
-    m.email,
-    m.full_name,
-    m.role,
-    m.phone,
-    m.branch_id,
-    true,
-    'manual',
-    now()
-  )
-  ON CONFLICT (id) DO UPDATE SET
-    staff_id     = EXCLUDED.staff_id,
-    email        = COALESCE(EXCLUDED.email, user_profiles.email),
-    full_name    = EXCLUDED.full_name,
-    role         = EXCLUDED.role,
-    phone        = EXCLUDED.phone,
-    branch_id    = EXCLUDED.branch_id,
-    is_active    = true,
-    source       = 'manual',
-    ssot_synced_at = now();
+  -- Identity immutability: an auth user must not be reassigned to a different staff.
+  SELECT * INTO v_existing
+  FROM public.user_profiles
+  WHERE id = p_auth_user_id;
+
+  IF FOUND THEN
+    IF v_existing.staff_id IS DISTINCT FROM p_staff_id THEN
+      RETURN jsonb_build_object('ok', false, 'error', 'user_profiles_identity_conflict', 'existing_staff_id', v_existing.staff_id);
+    END IF;
+    -- Idempotent re-call for the same identity is a no-op.
+  ELSE
+    INSERT INTO public.user_profiles (
+      id, staff_id, email, full_name, role, phone, branch_id, is_active, source, ssot_synced_at
+    ) VALUES (
+      p_auth_user_id,
+      p_staff_id,
+      m.email,
+      m.full_name,
+      m.role,
+      m.phone,
+      m.branch_id,
+      true,
+      'manual',
+      now()
+    );
+  END IF;
 
   UPDATE public.raos_staff_master
     SET auth_user_id = p_auth_user_id,

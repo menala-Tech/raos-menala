@@ -37,6 +37,8 @@ assert(sql.includes('auth_user_id_already_linked'), 'link_auth must reject alrea
 assert(sql.includes('airport_id_not_resolved'), 'link_auth must reject unresolved airport_id')
 assert(sql.includes('branch_id_not_resolved'), 'link_auth must reject unresolved branch_id')
 assert(sql.includes('branch_inactive'), 'link_auth must reject inactive branch')
+assert(sql.includes('user_profiles_identity_conflict'), 'link_auth must reject existing user_profiles identity conflict')
+assert(sql.includes('INSERT INTO public.user_profiles (') && !sql.includes('ON CONFLICT (id) DO UPDATE'), 'link_auth must use pure INSERT, no ON CONFLICT that mutates identity')
 
 // ---------- SQL contract: schedule parity ----------
 assert(sql.includes("CREATE OR REPLACE FUNCTION public.raos_shift_schedule_board"), 'schedule board RPC must be redefined')
@@ -67,10 +69,19 @@ assert(rifimSql.includes('raos_staff_master_hris'), 'RIFIM view must exist')
 assert(rifimSql.includes('security_invoker'), 'RIFIM view must use security_invoker')
 assert(rifimSql.includes('GRANT SELECT ON public.raos_staff_master_hris TO service_role'), 'RIFIM view must be granted to service_role only')
 assert(!rifimSql.includes('TO authenticated'), 'RIFIM view must not grant to authenticated')
+assert(rifimSql.includes('REVOKE ALL ON public.raos_staff_master_hris FROM PUBLIC, anon, authenticated'), 'RIFIM view must explicitly revoke from authenticated/anon/public')
 
 // ---------- RIFIM consumer contract ----------
 assert(rifimConsumer.includes('on_conflict=employee_id'), 'RIFIM consumer must use atomic upsert')
 assert(rifimConsumer.includes('resolution=merge-duplicates'), 'RIFIM consumer must use resolution=merge-duplicates')
 assert(rifimConsumer.includes('is_activated !== true'), 'RIFIM consumer must skip non-activated rows')
+
+const payloadStart = rifimConsumer.indexOf('payload.push({')
+const payloadEnd = rifimConsumer.indexOf('});', payloadStart)
+const payloadBlock = payloadStart >= 0 && payloadEnd > payloadStart ? rifimConsumer.substring(payloadStart, payloadEnd) : ''
+assert(!payloadBlock.includes('join_date'), 'RIFIM payload must not overwrite join_date')
+assert(!payloadBlock.includes('created_at'), 'RIFIM payload must not overwrite created_at')
+assert(!payloadBlock.includes('company_code'), 'RIFIM payload must not overwrite HR company_code')
+assert(!payloadBlock.includes('employment_type'), 'RIFIM payload must not overwrite HR employment_type')
 
 console.log('PASS SOETA master data + schedule implementation contract')

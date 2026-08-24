@@ -15,8 +15,15 @@ function getEnv(name: string): string | undefined {
   return Deno.env.get(name)
 }
 
+export function normalizePrivateKey(pem: string): string {
+  // Supabase secrets may store the PEM with literal \n escapes instead of
+  // actual newlines. Normalize before any PEM parsing.
+  return pem.replace(/\\n/g, '\n').trim()
+}
+
 function stripPemHeader(pem: string): string {
-  return pem
+  const normalized = normalizePrivateKey(pem)
+  return normalized
     .replace(/-----BEGIN (.*)-----/g, '')
     .replace(/-----END (.*)-----/g, '')
     .replace(/\s+/g, '')
@@ -72,46 +79,52 @@ async function signJwt(payload: Record<string, unknown>, privateKeyPem: string):
 }
 
 export async function getFcmAccessToken(): Promise<{ ok: true; token: string } | { ok: false; reason: string }> {
-  const projectId = getEnv('RAOS_FCM_PROJECT_ID')
-  const clientEmail = getEnv('RAOS_FCM_CLIENT_EMAIL')
-  const privateKey = getEnv('RAOS_FCM_PRIVATE_KEY')
+  try {
+    const projectId = getEnv('RAOS_FCM_PROJECT_ID')
+    const clientEmail = getEnv('RAOS_FCM_CLIENT_EMAIL')
+    const privateKey = getEnv('RAOS_FCM_PRIVATE_KEY')
 
-  if (!projectId || !clientEmail || !privateKey) {
-    return { ok: false, reason: 'fcm_not_configured' }
+    if (!projectId || !clientEmail || !privateKey) {
+      return { ok: false, reason: 'fcm_not_configured' }
+    }
+
+    const now = Math.floor(Date.now() / 1000)
+    const jwt = await signJwt({
+      iss: clientEmail,
+      sub: clientEmail,
+      scope: FCM_SEND_SCOPE,
+      aud: GOOGLE_AUTH_AUDIENCE,
+      iat: now,
+      exp: now + 3600,
+    }, privateKey)
+
+    const body = new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    })
+
+    const res = await fetch(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+
+    if (!res.ok) {
+      const text = await res.text()
+      return { ok: false, reason: `fcm_auth_error: ${res.status}` }
+    }
+
+    const data = await res.json() as { access_token?: string }
+    if (!data.access_token) {
+      return { ok: false, reason: 'fcm_auth_no_token' }
+    }
+
+    return { ok: true, token: data.access_token }
+  } catch (e) {
+    // Do not log the exception message. It may contain key material, tokens,
+    // or network details. Return a safe, bounded classification.
+    return { ok: false, reason: 'fcm_auth_private_key_invalid' }
   }
-
-  const now = Math.floor(Date.now() / 1000)
-  const jwt = await signJwt({
-    iss: clientEmail,
-    sub: clientEmail,
-    scope: FCM_SEND_SCOPE,
-    aud: GOOGLE_AUTH_AUDIENCE,
-    iat: now,
-    exp: now + 3600,
-  }, privateKey)
-
-  const body = new URLSearchParams({
-    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-    assertion: jwt,
-  })
-
-  const res = await fetch(OAUTH_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    return { ok: false, reason: `fcm_auth_error: ${res.status}` }
-  }
-
-  const data = await res.json() as { access_token?: string }
-  if (!data.access_token) {
-    return { ok: false, reason: 'fcm_auth_no_token' }
-  }
-
-  return { ok: true, token: data.access_token }
 }
 
 type FcmErrorDetail = {

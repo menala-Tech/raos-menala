@@ -253,7 +253,7 @@ Deno.serve(async (req) => {
       if (!fcmAuth?.ok) {
         failed++
         errors.push({
-          endpoint: subscription.token!.slice(0, 30) + '...',
+          endpoint: 'fcm',
           status: fcmAuth?.reason === 'fcm_not_configured' ? 503 : 401,
           msg: `fcm dispatch skipped: ${fcmAuth?.reason ?? 'unknown'}`,
         })
@@ -276,7 +276,7 @@ Deno.serve(async (req) => {
         failed++
         const status = result.invalid ? 410 : 500
         errors.push({
-          endpoint: subscription.token!.slice(0, 30) + '...',
+          endpoint: 'fcm',
           status,
           msg: String(result.reason).slice(0, 200),
         })

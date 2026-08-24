@@ -367,4 +367,108 @@ try {
   try { fs.unlinkSync(runtimeTestFile) } catch {}
 }
 
+// 11. Executable FCM normalization, auth, and token-secrecy tests.
+const fcmTestFile = path.join(__dirname, '.fcm-runtime.test.ts')
+const fcmTest = `
+import { normalizePrivateKey, getFcmAccessToken, sendFcm } from '../../../supabase/functions/raos-send-push/fcm.ts';
+
+// Provide a Deno env shim before the FCM helper runs.
+const env: Record<string, string> = {};
+(globalThis as any).Deno = { env: { get: (n: string) => env[n] } };
+
+// Mock Web Crypto so no real RSA key is needed.
+const subtle = (globalThis as any).crypto.subtle;
+subtle.importKey = async () => ({});
+subtle.sign = async () => new ArrayBuffer(0);
+
+// CASE A: actual-newline PEM normalization.
+const actualPem = '-----BEGIN PRIVATE KEY-----\\nMIIBVgIBADANBgkqhkiG9w0BAQEEFAASCAT4wggE6AgEAAkEA\\n-----END PRIVATE KEY-----';
+const normalizedActual = normalizePrivateKey(actualPem);
+if (!normalizedActual.startsWith('-----BEGIN PRIVATE KEY-----')) throw new Error('CASE A: missing begin header');
+if (!normalizedActual.endsWith('-----END PRIVATE KEY-----')) throw new Error('CASE A: missing end header');
+
+// CASE B: literal \\\\n PEM normalization.
+const escapedPem = '-----BEGIN PRIVATE KEY-----\\\\nMIIBVgIBADANBgkqhkiG9w0BAQEEFAASCAT4wggE6AgEAAkEA\\\\n-----END PRIVATE KEY-----';
+const normalizedEscaped = normalizePrivateKey(escapedPem);
+if (normalizedEscaped !== normalizedActual) throw new Error('CASE B: escaped-newline PEM did not normalize to actual-newline form');
+
+// CASE C: malformed private key must be contained, not throw.
+env.RAOS_FCM_PROJECT_ID = 'p-1';
+env.RAOS_FCM_CLIENT_EMAIL = 'test@example.com';
+env.RAOS_FCM_PRIVATE_KEY = 'not a real private key';
+let result = await getFcmAccessToken();
+if (result.ok) throw new Error('CASE C: malformed key must fail');
+
+// CASE D: OAuth/network failure must be controlled, not throw.
+// Use the synthetic PEM so parsing succeeds and we exercise the OAuth path.
+env.RAOS_FCM_PRIVATE_KEY = actualPem;
+const originalFetch = globalThis.fetch;
+(globalThis as any).fetch = async () => {
+  throw new Error('network down');
+};
+result = await getFcmAccessToken();
+if (result.ok) throw new Error('CASE D: OAuth failure must fail');
+(globalThis as any).fetch = originalFetch;
+
+// CASE D-2: OAuth HTTP 403 with no token.
+(globalThis as any).fetch = async () => ({
+  ok: false,
+  status: 403,
+  text: async () => 'forbidden',
+} as any);
+result = await getFcmAccessToken();
+if (result.ok) throw new Error('CASE D-2: 403 must fail');
+
+// CASE E: FCM token secrecy in send path.
+const SENTINELS = [
+  'FCM_DEVICE_TOKEN_SENTINEL_12345',
+  'FCM_ACCESS_TOKEN_SENTINEL_67890',
+];
+
+(globalThis as any).fetch = async (_url: any, init: any) => {
+  const body = init?.body ? String(init.body) : '';
+  if (body.includes(SENTINELS[0])) {
+    // Token was placed in payload as expected (not leaked in response or logs).
+  } else {
+    throw new Error('CASE E: token missing from payload');
+  }
+  return {
+    ok: false,
+    status: 400,
+    json: async () => ({ error: { status: 'INVALID_ARGUMENT', message: 'bad request' } }),
+  } as any;
+};
+
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+const captured: unknown[][] = [];
+console.log = (...args: unknown[]) => captured.push(args);
+console.warn = (...args: unknown[]) => captured.push(args);
+console.error = (...args: unknown[]) => captured.push(args);
+
+try {
+  const sendResult = await sendFcm('p-1', SENTINELS[1], SENTINELS[0], 't', 'b', { url: '/' });
+  if (sendResult.ok) throw new Error('CASE E: expected send to fail');
+  const flat = JSON.stringify(captured) + JSON.stringify(sendResult);
+  for (const sentinel of SENTINELS) {
+    if (flat.includes(sentinel)) throw new Error('CASE E: FCM token or access token leaked: ' + sentinel[0] + '...');
+  }
+} finally {
+  console.log = originalLog;
+  console.warn = originalWarn;
+  console.error = originalError;
+  (globalThis as any).fetch = originalFetch;
+}
+
+console.log('FCM server 500 fix executable: PASS');
+`;
+
+fs.writeFileSync(fcmTestFile, fcmTest);
+try {
+  execSync(`node --experimental-transform-types "${fcmTestFile}"`, { cwd: __dirname, stdio: 'inherit' });
+} finally {
+  try { fs.unlinkSync(fcmTestFile) } catch {}
+}
+
 console.log('RAOS hybrid push (Web + FCM) contract: PASS')

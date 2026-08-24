@@ -1,13 +1,13 @@
 // ============================================================
-// 23_soeta_master_import.gs — Import SOETA staff master (XLSX → Google Sheet)
+// 23_staff_master_import.gs — Import staff master (XLSX → Google Sheet)
 //
 // Flow:
-//   1. User uploads DATABASE STAFF.xlsx to Google Drive and converts it to
+//   1. User uploads staff master XLSX to Google Drive and converts it to
 //      Google Sheets (File → Save as Google Sheets), or replaces a bound sheet
 //      named 'DATABASE STAFF'.
-//   2. Set Script Property SOETA_MASTER_SHEET_ID, or rename the active-bound
-//      sheet to 'DATABASE STAFF'.
-//   3. Run 🛠️ RAOS System → 👥 Staff → 📥 Import SOETA Master.
+//   2. Set Script Property STAFF_MASTER_SHEET_ID, or use the active-bound
+//      sheet named 'DATABASE STAFF'.
+//   3. Run 🛠️ RAOS System → 👥 Staff → 📥 Import Staff Master.
 //   4. Rows are normalized and upserted to public.raos_staff_master via
 //      RPC raos_staff_master_upsert_bulk.
 //
@@ -17,60 +17,60 @@
 //   - Email (boleh kosong)
 //   - No WA / Phone / Telepon
 //   - Jabatan / Role (STAFF, KOORDINATOR, ADMIN, etc.)
-//   - Airport / Bandara (default Soekarno-Hatta)
+//   - Airport / Bandara (kode atau nama, contoh: SOETA)
 //   - Terminal (T1, T2, T3, atau "Terminal 1" dll)
 //   - Status Aktif / Status (Aktif, Nonaktif, Pending)
 //
 // No fake email is generated. Rows without email become master data only.
-// Activation later: admin fills email then runs activateSoetaStaffMaster().
+// airport_id dan branch_id di-resolve otomatis via Supabase trigger.
 // ============================================================
 
-const SOETA_MASTER_SHEET_ID = PropertiesService.getScriptProperties().getProperty('SOETA_MASTER_SHEET_ID');
-const SOETA_MASTER_TAB_NAME = 'DATABASE STAFF';
+const STAFF_MASTER_SHEET_ID = PropertiesService.getScriptProperties().getProperty('STAFF_MASTER_SHEET_ID');
+const STAFF_MASTER_TAB_NAME = 'DATABASE STAFF';
 
-function _normalizeSoetaHeader_(v) {
+function _normalizeMasterHeader_(v) {
   return String(v || '').trim().toLowerCase().replace(/[\s_]+/g, ' ').replace(/[^a-z0-9 ]/g, '');
 }
 
-function _findSoetaColumn_(h, names) {
-  const a = h.map(_normalizeSoetaHeader_);
+function _findMasterColumn_(h, names) {
+  const a = h.map(_normalizeMasterHeader_);
   for (var i = 0; i < names.length; i++) {
-    const x = a.indexOf(_normalizeSoetaHeader_(names[i]));
+    const x = a.indexOf(_normalizeMasterHeader_(names[i]));
     if (x >= 0) return x;
   }
   return -1;
 }
 
-function _getSoetaMasterColumns_(h) {
+function _getMasterColumns_(h) {
   return {
-    staffId:   _findSoetaColumn_(h, ['id staff', 'employee id', 'id karyawan', 'id karyawan staff']),
-    fullName:  _findSoetaColumn_(h, ['nama', 'full name', 'name', 'nama lengkap']),
-    email:     _findSoetaColumn_(h, ['email', 'e mail', 'surel']),
-    phone:     _findSoetaColumn_(h, ['no wa', 'phone', 'telepon', 'no telepon', 'no hp', 'handphone', 'wa']),
-    role:      _findSoetaColumn_(h, ['jabatan', 'role', 'posisi']),
-    airport:   _findSoetaColumn_(h, ['airport', 'bandara']),
-    terminal:  _findSoetaColumn_(h, ['terminal', 'term']),
-    status:    _findSoetaColumn_(h, ['status aktif', 'status', 'aktif'])
+    staffId:   _findMasterColumn_(h, ['id staff', 'employee id', 'id karyawan', 'id karyawan staff']),
+    fullName:  _findMasterColumn_(h, ['nama', 'full name', 'name', 'nama lengkap']),
+    email:     _findMasterColumn_(h, ['email', 'e mail', 'surel']),
+    phone:     _findMasterColumn_(h, ['no wa', 'phone', 'telepon', 'no telepon', 'no hp', 'handphone', 'wa']),
+    role:      _findMasterColumn_(h, ['jabatan', 'role', 'posisi']),
+    airport:   _findMasterColumn_(h, ['airport', 'bandara']),
+    terminal:  _findMasterColumn_(h, ['terminal', 'term']),
+    status:    _findMasterColumn_(h, ['status aktif', 'status', 'aktif'])
   };
 }
 
-function _parseSoetaTerminal_(raw) {
+function _parseMasterTerminal_(raw) {
   const s = String(raw || '').trim().toUpperCase();
-  if (!s) return 'T1';
+  if (!s) return null;
   if (s === 'T1' || s === 'TERMINAL 1' || s === 'T 1') return 'T1';
   if (s === 'T2' || s === 'TERMINAL 2' || s === 'T 2') return 'T2';
   if (s === 'T3' || s === 'TERMINAL 3' || s === 'T 3') return 'T3';
   return s;
 }
 
-function _parseSoetaAirport_(raw) {
+function _parseMasterAirport_(raw) {
+  // Return the raw airport string; Supabase trigger resolves airport_id from branches.
+  // No hardcoded default; each airport must be configured as a branch hub.
   const s = String(raw || '').trim();
-  if (!s) return 'Soekarno-Hatta';
-  if (/soeta|soekarno|cgk|jakarta/i.test(s)) return 'Soekarno-Hatta';
-  return s;
+  return s || null;
 }
 
-function _parseSoetaStatus_(raw) {
+function _parseMasterStatus_(raw) {
   if (raw === true || raw === 1) return 'Aktif';
   if (raw === false || raw === 0) return 'Nonaktif';
   if (raw === null || raw === undefined || raw === '') return 'Pending';
@@ -81,7 +81,7 @@ function _parseSoetaStatus_(raw) {
   return 'Aktif';
 }
 
-function _mapSoetaRole_(raw) {
+function _mapMasterRole_(raw) {
   const r = mapJabatanToRole_(raw);
   if (r) return r;
   const s = String(raw || '').trim().toLowerCase();
@@ -95,40 +95,40 @@ function _mapSoetaRole_(raw) {
   return 'staff';
 }
 
-function _getSoetaMasterSheet_() {
-  if (SOETA_MASTER_SHEET_ID) {
+function _getMasterSheet_() {
+  if (STAFF_MASTER_SHEET_ID) {
     try {
-      return SpreadsheetApp.openById(SOETA_MASTER_SHEET_ID).getSheetByName(SOETA_MASTER_TAB_NAME);
+      return SpreadsheetApp.openById(STAFF_MASTER_SHEET_ID).getSheetByName(STAFF_MASTER_TAB_NAME);
     } catch (e) {
-      throw new Error('SOETA_MASTER_SHEET_ID tidak valid atau tidak punya tab ' + SOETA_MASTER_TAB_NAME + ': ' + e.message);
+      throw new Error('STAFF_MASTER_SHEET_ID tidak valid atau tidak punya tab ' + STAFF_MASTER_TAB_NAME + ': ' + e.message);
     }
   }
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sh = ss ? ss.getSheetByName(SOETA_MASTER_TAB_NAME) : null;
+  const sh = ss ? ss.getSheetByName(STAFF_MASTER_TAB_NAME) : null;
   if (!sh) {
-    throw new Error('Set Script Property SOETA_MASTER_SHEET_ID atau buka spreadsheet yang berisi tab "DATABASE STAFF"');
+    throw new Error('Set Script Property STAFF_MASTER_SHEET_ID atau buka spreadsheet yang berisi tab "DATABASE STAFF"');
   }
   return sh;
 }
 
 /**
- * Import SOETA staff master from XLSX-backed Google Sheet.
+ * Import staff master from XLSX-backed Google Sheet.
  * Returns summary { imported, skipped, warnings }.
  */
-function importSoetaStaffMasterFromXlsx() {
+function importStaffMasterFromXlsx() {
   const t0 = Date.now();
   const warnings = [];
   let imported = 0;
   let skipped = 0;
 
   try {
-    const sh = _getSoetaMasterSheet_();
+    const sh = _getMasterSheet_();
     const values = sh.getDataRange().getValues();
     if (!values || values.length < 2) {
       throw new Error('Sheet DATABASE STAFF kosong atau tidak ada header');
     }
 
-    const cols = _getSoetaMasterColumns_(values[0]);
+    const cols = _getMasterColumns_(values[0]);
     if (cols.staffId < 0 || cols.fullName < 0) {
       throw new Error('Kolom wajib ID Staff dan Nama tidak ditemukan di header');
     }
@@ -156,10 +156,10 @@ function importSoetaStaffMasterFromXlsx() {
       }
 
       const phone = cols.phone >= 0 ? String(row[cols.phone] || '').trim() || null : null;
-      const role = cols.role >= 0 ? _mapSoetaRole_(row[cols.role]) : 'staff';
-      const airport = cols.airport >= 0 ? _parseSoetaAirport_(row[cols.airport]) : 'Soekarno-Hatta';
-      const terminal = cols.terminal >= 0 ? _parseSoetaTerminal_(row[cols.terminal]) : 'T1';
-      const status = cols.status >= 0 ? _parseSoetaStatus_(row[cols.status]) : 'Aktif';
+      const role = cols.role >= 0 ? _mapMasterRole_(row[cols.role]) : 'staff';
+      const airport = cols.airport >= 0 ? _parseMasterAirport_(row[cols.airport]) : null;
+      const terminal = cols.terminal >= 0 ? _parseMasterTerminal_(row[cols.terminal]) : null;
+      const status = cols.status >= 0 ? _parseMasterStatus_(row[cols.status]) : 'Aktif';
 
       payload.push({
         staff_id: staffId,
@@ -190,7 +190,7 @@ function importSoetaStaffMasterFromXlsx() {
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     const summary = 'imported=' + imported + ' skipped=' + skipped + ' warnings=' + warnings.length + ' elapsed=' + elapsed + 's';
-    logSistem('import', 'importSoetaStaffMasterFromXlsx', warnings.length ? 'warning' : 'success', summary);
+    logSistem('import', 'importStaffMasterFromXlsx', warnings.length ? 'warning' : 'success', summary);
 
     return {
       imported: imported,
@@ -200,7 +200,7 @@ function importSoetaStaffMasterFromXlsx() {
       elapsed_s: Number(elapsed)
     };
   } catch (e) {
-    logSistem('error', 'importSoetaStaffMasterFromXlsx', 'error', e.message);
+    logSistem('error', 'importStaffMasterFromXlsx', 'error', e.message);
     throw e;
   }
 }
@@ -208,17 +208,17 @@ function importSoetaStaffMasterFromXlsx() {
 /**
  * Wrapper menu dengan alert.
  */
-function importSoetaStaffMasterFromXlsx_MENU() {
+function importStaffMasterFromXlsx_MENU() {
   try {
-    const r = importSoetaStaffMasterFromXlsx();
+    const r = importStaffMasterFromXlsx();
     const w = r.warnings.length ? '\n\nPeringatan:\n' + r.warnings.slice(0, 5).join('\n') + (r.warnings.length > 5 ? '\n...' : '') : '';
-    SpreadsheetApp.getUi().alert('✅ Import SOETA Master selesai\n\n' +
+    SpreadsheetApp.getUi().alert('✅ Import Staff Master selesai\n\n' +
       'Imported : ' + r.imported + '\n' +
       'Skipped  : ' + r.skipped + '\n' +
       'Warnings : ' + r.warningCount + '\n' +
       'Elapsed  : ' + r.elapsed_s + 's' + w);
   } catch (e) {
-    SpreadsheetApp.getUi().alert('❌ Import SOETA Master gagal:\n' + e.message);
+    SpreadsheetApp.getUi().alert('❌ Import Staff Master gagal:\n' + e.message);
     throw e;
   }
 }
@@ -227,7 +227,7 @@ function importSoetaStaffMasterFromXlsx_MENU() {
  * Set / update email for a pre-activation master record.
  * Called manually from script editor or a future UI.
  */
-function setSoetaStaffMasterEmail_MENU() {
+function setStaffMasterEmail_MENU() {
   const ui = SpreadsheetApp.getUi();
   const staffId = ui.prompt('ID Staff').getResponseText().trim().toUpperCase();
   if (!staffId) throw new Error('ID Staff wajib diisi');
@@ -246,7 +246,7 @@ function setSoetaStaffMasterEmail_MENU() {
 /**
  * Link an existing Supabase auth user to a master record and create user_profiles.
  */
-function linkSoetaStaffMasterAuth_MENU() {
+function linkStaffMasterAuth_MENU() {
   const ui = SpreadsheetApp.getUi();
   const staffId = ui.prompt('ID Staff').getResponseText().trim().toUpperCase();
   if (!staffId) throw new Error('ID Staff wajib diisi');

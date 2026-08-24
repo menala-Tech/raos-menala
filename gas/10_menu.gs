@@ -25,10 +25,10 @@ function onOpen() {
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('👥 Staff')
         .addItem('🔄 Sync Staff Soeta (SSOT MASTER DATA STAFF)', 'syncStaffFromSSOT')
-        .addItem('� Import SOETA Master (XLSX)', 'importSoetaStaffMasterFromXlsx_MENU')
-        .addItem('✉️ Set Email SOETA Master', 'setSoetaStaffMasterEmail_MENU')
-        .addItem('🔗 Link Auth SOETA Master', 'linkSoetaStaffMasterAuth_MENU')
-        .addItem('�🔐 Sync RAOS Credentials (kolom I RAOS PIN + J RAOS ID)', 'menuSyncRaosCredentials')
+        .addItem('📥 Import Staff Master (XLSX)', 'importStaffMasterFromXlsx_MENU')
+        .addItem('✉️ Set Email Staff Master', 'setStaffMasterEmail_MENU')
+        .addItem('🔗 Link Auth Staff Master', 'linkStaffMasterAuth_MENU')
+        .addItem('🔐 Sync RAOS Credentials (kolom I RAOS PIN + J RAOS ID)', 'menuSyncRaosCredentials')
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('📊 KPI RAOS')

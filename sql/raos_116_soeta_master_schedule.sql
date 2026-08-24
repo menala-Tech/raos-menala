@@ -1,10 +1,10 @@
 -- ============================================================================
--- raos_116: SOETA Master Data + Schedule Parity (2026-08-24)
+-- raos_116: Airport-scoped Staff Master + Schedule Parity (2026-08-24)
 -- ============================================================================
 --
 -- Business goals:
---   1. Import SOETA staff from DATABASE STAFF.xlsx without requiring email.
---   2. Store pre-activation workforce in raos_staff_master (email nullable).
+--   1. Import pre-activation workforce from XLSX without requiring email.
+--   2. Store canonical pre-activation master in raos_staff_master (email nullable).
 --   3. Resolve airport_id (hub) and branch_id (terminal) from branches.
 --   4. Future activation: admin adds email, creates auth user, links auth_user_id
 --      → user_profiles created automatically.
@@ -13,7 +13,7 @@
 -- No production mutation. Source-only migration for feature branch.
 -- ============================================================================
 
--- ---------- 1. raos_staff_master: canonical SOETA pre-activation pool -----
+-- ---------- 1. raos_staff_master: canonical pre-activation workforce -----
 CREATE TABLE IF NOT EXISTS public.raos_staff_master (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   staff_id        text NOT NULL,
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS public.raos_staff_master (
   email           text,
   phone           text,
   airport_id      uuid REFERENCES public.branches(id) ON DELETE SET NULL,
-  airport         text NOT NULL,
-  terminal        text NOT NULL,
+  airport         text,
+  terminal        text,
   branch_id       uuid REFERENCES public.branches(id) ON DELETE SET NULL,
   role            text NOT NULL CHECK (role IN ('staff','koordinator','admin','management','direksi','driver_manager','driver')),
   status          text NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif','Nonaktif','Pending')),
@@ -40,8 +40,13 @@ CREATE INDEX IF NOT EXISTS raos_staff_master_branch_idx ON public.raos_staff_mas
 CREATE INDEX IF NOT EXISTS raos_staff_master_airport_id_idx ON public.raos_staff_master (airport_id);
 CREATE INDEX IF NOT EXISTS raos_staff_master_status_idx ON public.raos_staff_master (status);
 
+-- One auth user can only be linked to one master record.
+CREATE UNIQUE INDEX IF NOT EXISTS raos_staff_master_auth_user_unq
+  ON public.raos_staff_master (auth_user_id)
+  WHERE auth_user_id IS NOT NULL;
+
 COMMENT ON TABLE public.raos_staff_master IS
-  'Canonical pre-activation SOETA workforce master. Imported from DATABASE STAFF.xlsx; email may be null until admin activates.';
+  'Canonical airport-scoped pre-activation workforce master. Imported from XLSX; email may be null until admin activates.';
 
 ALTER TABLE public.raos_staff_master ENABLE ROW LEVEL SECURITY;
 
@@ -72,7 +77,7 @@ DECLARE
   v_hub_id uuid;
 BEGIN
   -- Resolve airport hub id from branches by code, then by name fallback.
-  IF NEW.airport IS NOT NULL THEN
+  IF NEW.airport IS NOT NULL AND NEW.airport <> '' THEN
     SELECT b.id INTO v_hub_id
     FROM public.branches b
     WHERE b.code = NEW.airport
@@ -93,7 +98,7 @@ BEGIN
   END IF;
 
   -- Resolve terminal branch_id scoped to airport_id.
-  IF NEW.terminal IS NOT NULL THEN
+  IF NEW.terminal IS NOT NULL AND NEW.terminal <> '' THEN
     IF NEW.airport_id IS NOT NULL THEN
       SELECT b.id INTO NEW.branch_id
       FROM public.branches b
@@ -152,8 +157,8 @@ BEGIN
       NULLIF(r.value->>'email', ''),
       NULLIF(r.value->>'phone', ''),
       COALESCE(r.value->>'role', 'staff'),
-      COALESCE(r.value->>'airport', 'Soekarno-Hatta'),
-      COALESCE(r.value->>'terminal', 'T1'),
+      NULLIF(r.value->>'airport', ''),
+      NULLIF(r.value->>'terminal', ''),
       COALESCE(r.value->>'status', 'Aktif'),
       COALESCE(r.value->>'source', 'xlsx_import')
     )
@@ -178,7 +183,7 @@ REVOKE ALL ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) FROM PUBLIC, 
 GRANT EXECUTE ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) IS
-  'Bulk upsert SOETA staff master from XLSX import via GAS. airport_id and branch_id are resolved by trigger.';
+  'Bulk upsert airport-scoped staff master from XLSX import via GAS. airport_id and branch_id are resolved by trigger.';
 
 -- ---------- 4. Activation helpers (email + auth linkage) ------------------
 CREATE OR REPLACE FUNCTION public.raos_staff_master_set_email(
@@ -223,6 +228,8 @@ SET search_path = public
 AS $$
 DECLARE
   m public.raos_staff_master%rowtype;
+  v_other_staff_id text;
+  v_branch_active boolean;
 BEGIN
   IF NOT (public.get_my_role() = ANY (ARRAY['admin','management','direksi']))
      AND auth.role() <> 'service_role' THEN
@@ -237,8 +244,35 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'staff_id_not_found');
   END IF;
 
+  -- Activation requires a fully resolved branch.
+  IF m.airport_id IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'airport_id_not_resolved');
+  END IF;
+  IF m.branch_id IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'branch_id_not_resolved');
+  END IF;
+
+  SELECT b.is_active INTO v_branch_active
+  FROM public.branches b
+  WHERE b.id = m.branch_id;
+  IF v_branch_active IS DISTINCT FROM true THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'branch_inactive');
+  END IF;
+
+  -- Prevent one auth user from being linked to multiple master records.
+  SELECT staff_id INTO v_other_staff_id
+  FROM public.raos_staff_master
+  WHERE auth_user_id = p_auth_user_id
+    AND staff_id <> p_staff_id
+  LIMIT 1;
+
+  IF v_other_staff_id IS NOT NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'auth_user_id_already_linked', 'other_staff_id', v_other_staff_id);
+  END IF;
+
+  -- Prevent this staff from being linked to a different auth user.
   IF m.auth_user_id IS NOT NULL AND m.auth_user_id <> p_auth_user_id THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'already_linked_to_other_auth_user');
+    RETURN jsonb_build_object('ok', false, 'error', 'staff_already_linked_to_other_auth_user');
   END IF;
 
   INSERT INTO public.user_profiles (

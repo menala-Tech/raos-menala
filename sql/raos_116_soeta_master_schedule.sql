@@ -5,7 +5,7 @@
 -- Business goals:
 --   1. Import SOETA staff from DATABASE STAFF.xlsx without requiring email.
 --   2. Store pre-activation workforce in raos_staff_master (email nullable).
---   3. Auto-resolve terminal (T1/T2/T3) to branches.id.
+--   3. Resolve airport_id (hub) and branch_id (terminal) from branches.
 --   4. Future activation: admin adds email, creates auth user, links auth_user_id
 --      → user_profiles created automatically.
 --   5. Schedule board includes koordinator as first-class assignee.
@@ -20,13 +20,14 @@ CREATE TABLE IF NOT EXISTS public.raos_staff_master (
   full_name       text NOT NULL,
   email           text,
   phone           text,
-  role            text NOT NULL CHECK (role IN ('staff','koordinator','admin','management','direksi','driver_manager','driver')),
+  airport_id      uuid REFERENCES public.branches(id) ON DELETE SET NULL,
   airport         text NOT NULL,
   terminal        text NOT NULL,
+  branch_id       uuid REFERENCES public.branches(id) ON DELETE SET NULL,
+  role            text NOT NULL CHECK (role IN ('staff','koordinator','admin','management','direksi','driver_manager','driver')),
   status          text NOT NULL DEFAULT 'Aktif' CHECK (status IN ('Aktif','Nonaktif','Pending')),
   is_activated    boolean NOT NULL DEFAULT false,
   auth_user_id    uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  branch_id       uuid REFERENCES public.branches(id) ON DELETE SET NULL,
   source          text NOT NULL DEFAULT 'xlsx_import',
   imported_at     timestamptz NOT NULL DEFAULT now(),
   activated_at    timestamptz,
@@ -36,8 +37,8 @@ CREATE TABLE IF NOT EXISTS public.raos_staff_master (
 );
 
 CREATE INDEX IF NOT EXISTS raos_staff_master_branch_idx ON public.raos_staff_master (branch_id);
+CREATE INDEX IF NOT EXISTS raos_staff_master_airport_id_idx ON public.raos_staff_master (airport_id);
 CREATE INDEX IF NOT EXISTS raos_staff_master_status_idx ON public.raos_staff_master (status);
-CREATE INDEX IF NOT EXISTS raos_staff_master_airport_terminal_idx ON public.raos_staff_master (airport, terminal);
 
 COMMENT ON TABLE public.raos_staff_master IS
   'Canonical pre-activation SOETA workforce master. Imported from DATABASE STAFF.xlsx; email may be null until admin activates.';
@@ -60,32 +61,66 @@ CREATE POLICY raos_staff_master_write ON public.raos_staff_master
     public.get_my_role() = ANY (ARRAY['admin','management','direksi'])
   );
 
--- ---------- 2. Auto-resolve terminal (T1/T2/T3) to branch_id ---------------
-CREATE OR REPLACE FUNCTION public.raos_staff_master_resolve_branch()
+-- ---------- 2. Auto-resolve airport_id and branch_id (terminal) ----------
+CREATE OR REPLACE FUNCTION public.raos_staff_master_resolve_airport_and_branch()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+  v_hub_id uuid;
 BEGIN
-  IF NEW.terminal IS NOT NULL THEN
-    SELECT b.id INTO NEW.branch_id
+  -- Resolve airport hub id from branches by code, then by name fallback.
+  IF NEW.airport IS NOT NULL THEN
+    SELECT b.id INTO v_hub_id
     FROM public.branches b
-    WHERE b.code = NEW.terminal
+    WHERE b.code = NEW.airport
+      AND b.parent_branch_id IS NULL
       AND b.is_active = true
     LIMIT 1;
+
+    IF v_hub_id IS NULL THEN
+      SELECT b.id INTO v_hub_id
+      FROM public.branches b
+      WHERE b.parent_branch_id IS NULL
+        AND (b.name ILIKE '%' || NEW.airport || '%' OR b.code ILIKE '%' || NEW.airport || '%')
+        AND b.is_active = true
+      LIMIT 1;
+    END IF;
+
+    NEW.airport_id := v_hub_id;
   END IF;
+
+  -- Resolve terminal branch_id scoped to airport_id.
+  IF NEW.terminal IS NOT NULL THEN
+    IF NEW.airport_id IS NOT NULL THEN
+      SELECT b.id INTO NEW.branch_id
+      FROM public.branches b
+      WHERE b.code = NEW.terminal
+        AND b.parent_branch_id = NEW.airport_id
+        AND b.is_active = true
+      LIMIT 1;
+    ELSE
+      SELECT b.id INTO NEW.branch_id
+      FROM public.branches b
+      WHERE b.code = NEW.terminal
+        AND b.is_active = true
+      LIMIT 1;
+    END IF;
+  END IF;
+
   NEW.updated_at := now();
   RETURN NEW;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.raos_staff_master_resolve_branch() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.raos_staff_master_resolve_airport_and_branch() FROM PUBLIC, anon, authenticated;
 
-DROP TRIGGER IF EXISTS trg_raos_staff_master_resolve_branch ON public.raos_staff_master;
-CREATE TRIGGER trg_raos_staff_master_resolve_branch
-  BEFORE INSERT OR UPDATE OF terminal ON public.raos_staff_master
-  FOR EACH ROW EXECUTE FUNCTION public.raos_staff_master_resolve_branch();
+DROP TRIGGER IF EXISTS trg_raos_staff_master_resolve_airport_and_branch ON public.raos_staff_master;
+CREATE TRIGGER trg_raos_staff_master_resolve_airport_and_branch
+  BEFORE INSERT OR UPDATE OF airport, terminal ON public.raos_staff_master
+  FOR EACH ROW EXECUTE FUNCTION public.raos_staff_master_resolve_airport_and_branch();
 
 -- ---------- 3. Bulk upsert from GAS / XLSX import --------------------------
 CREATE OR REPLACE FUNCTION public.raos_staff_master_upsert_bulk(p_records jsonb)
@@ -143,7 +178,7 @@ REVOKE ALL ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) FROM PUBLIC, 
 GRANT EXECUTE ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.raos_staff_master_upsert_bulk(jsonb) IS
-  'Bulk upsert SOETA staff master from XLSX import via GAS.';
+  'Bulk upsert SOETA staff master from XLSX import via GAS. airport_id and branch_id are resolved by trigger.';
 
 -- ---------- 4. Activation helpers (email + auth linkage) ------------------
 CREATE OR REPLACE FUNCTION public.raos_staff_master_set_email(
@@ -245,7 +280,14 @@ $$;
 REVOKE ALL ON FUNCTION public.raos_staff_master_link_auth(text, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.raos_staff_master_link_auth(text, uuid) TO authenticated, service_role;
 
--- ---------- 5. Schedule board includes koordinator as first-class target --
+-- ---------- 5. Schedule: status column + koordinator on board -------------
+ALTER TABLE public.raos_shift_schedules
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'confirmed'
+  CHECK (status IN ('draft','confirmed','cancelled'));
+
+COMMENT ON COLUMN public.raos_shift_schedules.status IS
+  'Schedule row state: draft, confirmed (canonical), or cancelled.';
+
 CREATE OR REPLACE FUNCTION public.raos_shift_schedule_board(
   p_branch_id uuid,
   p_tanggal date
@@ -271,7 +313,7 @@ BEGIN
   SELECT up.id, up.full_name, rs.id, rs.shift_id, s.name, rs.last_changed_at
   FROM public.user_profiles up
   LEFT JOIN public.raos_shift_schedules rs
-    ON rs.staff_id = up.id AND rs.tanggal = p_tanggal
+    ON rs.staff_id = up.id AND rs.tanggal = p_tanggal AND rs.status <> 'cancelled'
   LEFT JOIN public.shifts s ON s.id = rs.shift_id
   WHERE up.branch_id = p_branch_id
     AND up.role = ANY (ARRAY['staff','koordinator'])
@@ -284,4 +326,4 @@ REVOKE ALL ON FUNCTION public.raos_shift_schedule_board(uuid, date) FROM PUBLIC,
 GRANT EXECUTE ON FUNCTION public.raos_shift_schedule_board(uuid, date) TO authenticated;
 
 COMMENT ON FUNCTION public.raos_shift_schedule_board(uuid, date) IS
-  'Roster board for a terminal on a date. Includes staff and koordinator; admin & koordinator can edit.';
+  'Roster board for a terminal on a date. Includes staff and koordinator; admin & koordinator can edit. Cancelled schedules are hidden.';

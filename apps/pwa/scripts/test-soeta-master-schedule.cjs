@@ -2,10 +2,12 @@ const fs = require('fs')
 const path = require('path')
 
 const sqlPath = path.resolve(__dirname, '../../../sql/raos_116_soeta_master_schedule.sql')
+const scopedPath = path.resolve(__dirname, '../../../sql/raos_117_soeta_terminal_scoped.sql')
 const gasPath = path.resolve(__dirname, '../../../gas/23_soeta_master_import.gs')
 const menuPath = path.resolve(__dirname, '../../../gas/10_menu.gs')
 
 const sql = fs.readFileSync(sqlPath, 'utf8')
+const scoped = fs.readFileSync(scopedPath, 'utf8')
 const gas = fs.readFileSync(gasPath, 'utf8')
 const menu = fs.readFileSync(menuPath, 'utf8')
 
@@ -13,18 +15,26 @@ function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
 
-// ---------- SQL contract ----------
+// ---------- SQL contract: raos_staff_master ----------
 assert(sql.includes('CREATE TABLE IF NOT EXISTS public.raos_staff_master'), 'raos_staff_master table must be defined')
 assert(/email\s+text\s*[,\n]/.test(sql), 'raos_staff_master.email must be nullable text')
+assert(sql.includes('airport_id      uuid'), 'raos_staff_master.airport_id must be defined')
 assert(sql.includes('is_activated    boolean'), 'raos_staff_master.is_activated must be defined')
 assert(sql.includes('auth_user_id    uuid REFERENCES auth.users'), 'raos_staff_master.auth_user_id must allow auth linkage')
 assert(sql.includes("CREATE OR REPLACE FUNCTION public.raos_staff_master_upsert_bulk"), 'bulk upsert RPC must exist')
 assert(sql.includes('p_records jsonb'), 'bulk upsert must accept p_records jsonb')
 assert(sql.includes("CREATE OR REPLACE FUNCTION public.raos_staff_master_set_email"), 'set_email RPC must exist')
 assert(sql.includes("CREATE OR REPLACE FUNCTION public.raos_staff_master_link_auth"), 'link_auth RPC must exist')
+assert(sql.includes('ALTER TABLE public.raos_staff_master ENABLE ROW LEVEL SECURITY'), 'raos_staff_master RLS must be enabled')
+
+// ---------- SQL contract: schedule parity ----------
 assert(sql.includes("CREATE OR REPLACE FUNCTION public.raos_shift_schedule_board"), 'schedule board RPC must be redefined')
 assert(sql.includes("ARRAY['staff','koordinator']"), 'schedule board must include koordinator')
-assert(sql.includes('ALTER TABLE public.raos_staff_master ENABLE ROW LEVEL SECURITY'), 'raos_staff_master RLS must be enabled')
+assert(sql.includes("ALTER TABLE public.raos_shift_schedules") && sql.includes("status text"), 'raos_shift_schedules.status must be added')
+
+// ---------- SQL contract: terminal scoping ----------
+assert(scoped.includes('DROP CONSTRAINT IF EXISTS branches_code_key'), 'legacy global branches.code unique must be dropped')
+assert(scoped.includes('branches_terminal_code_unq'), 'terminal code must be unique per airport')
 
 // ---------- GAS contract ----------
 assert(gas.includes('function importSoetaStaffMasterFromXlsx'), 'GAS import function must exist')

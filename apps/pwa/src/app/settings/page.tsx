@@ -10,16 +10,18 @@ import AppShell from '@/components/layout/AppShell'
 import SwipeBackWrapper from '@/components/SwipeBackWrapper'
 import MenalaLogo from '@/components/MenalaLogo'
 import {
-  User, Smartphone, Calendar, Bell, Shield,
+  User, Smartphone, Bell, Shield,
   Database, Info, HelpCircle, LogOut, ChevronRight, ChevronLeft,
   MessageCircle, Moon, Wifi, VolumeX, Lock, Eye, EyeOff,
-  Trash2, RefreshCcw, CheckCircle2, Loader2, Sun, Sunset, AlertCircle
+  Trash2, RefreshCcw, CheckCircle2, Loader2,
+  Camera, Mic, Volume2, Vibrate, Image, Phone, Music, Contact,
+  Bluetooth, AlarmClock, PictureInPicture
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
-import type { UserProfile, Branch, Shift, ShiftScheduleBoardRow } from '@/types'
+import type { UserProfile } from '@/types'
 
-type Section = null | 'akun' | 'aplikasi' | 'jadwal' | 'notifikasi' | 'keamanan' | 'data'
+type Section = null | 'akun' | 'aplikasi' | 'notifikasi' | 'keamanan' | 'data'
 
 const ROLE_COLORS: Record<string, string> = {
   staff:       'bg-green-100 text-green-700',
@@ -187,7 +189,7 @@ export default function SettingsPage() {
   if (section) {
     const TITLES: Record<string, string> = {
       akun: 'Pengaturan Akun', aplikasi: 'Pengaturan Aplikasi',
-      jadwal: 'Jadwal Kerja', notifikasi: 'Notifikasi',
+      notifikasi: 'Notifikasi',
       keamanan: 'Keamanan', data: 'Data & Sync',
     }
     return (
@@ -215,7 +217,6 @@ export default function SettingsPage() {
           <div className="px-4 py-4">
             {section === 'akun'       && <SectionAkun user={user} onLogout={handleLogout} />}
             {section === 'aplikasi'   && <SectionAplikasi prefs={prefs} save={savePrefs} />}
-            {section === 'jadwal'     && <SectionJadwalKerja user={user} />}
             {section === 'notifikasi' && <SectionNotifikasi prefs={prefs} save={savePrefs} />}
             {section === 'keamanan'   && <SectionKeamanan />}
             {section === 'data'       && <SectionData />}
@@ -229,7 +230,6 @@ export default function SettingsPage() {
   const MENUS = [
     { key: 'akun',       icon: User,       label: 'Pengaturan Akun',       desc: 'Profil, email, password, foto' },
     { key: 'aplikasi',   icon: Smartphone, label: 'Pengaturan Aplikasi',   desc: 'Tema, bahasa, ukuran teks, suara' },
-    { key: 'jadwal',     icon: Calendar,   label: 'Jadwal Kerja',          desc: 'Shift Pagi/Siang/Malam per cabang' },
     { key: 'notifikasi', icon: Bell,       label: 'Notifikasi',            desc: 'Jenis notifikasi & waktu pengingat' },
     { key: 'keamanan',   icon: Shield,     label: 'Keamanan',              desc: 'Password, sesi, perangkat' },
     { key: 'data',       icon: Database,   label: 'Data & Sync',           desc: 'Backup, cache, sinkronisasi' },
@@ -299,6 +299,8 @@ export default function SettingsPage() {
           branchId={user?.branch_id}
           role={user?.role}
         />
+
+        <SectionHpPermissions />
 
         {/* Menu List */}
         <div className="space-y-1">
@@ -525,253 +527,6 @@ function SectionAplikasi({ prefs, save }: { prefs: AppPrefs; save: (p: AppPrefs)
   )
 }
 
-/* ================= SECTION: LOKASI & PICKUP POINT ================= */
-const SHIFT_META: Record<string, { icon: typeof Sun; color: string }> = {
-  Pagi:  { icon: Sun,    color: 'bg-green-100 text-green-700' },
-  Siang: { icon: Sunset, color: 'bg-orange-100 text-orange-700' },
-  Malam: { icon: Moon,   color: 'bg-indigo-100 text-indigo-700' },
-}
-
-function toDateStr(d: Date): string {
-  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-function addDaysToDateStr(dateStr: string, delta: number): string {
-  const d = new Date(`${dateStr}T00:00:00`)
-  d.setDate(d.getDate() + delta)
-  return toDateStr(d)
-}
-function formatDateLabel(dateStr: string): string {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })
-}
-
-function SectionJadwalKerja({ user }: { user: UserProfile | null }) {
-  // Roster jadwal shift per cabang per tanggal — ganti "Lokasi & Pickup Point"
-  // yang selama ini kosong buat 8/9 cabang (pickup_point_id absensi/scan toh
-  // auto-detect via GPS geofence, bukan dari sini). Cuma admin & koordinator
-  // yang bisa ubah (RLS + trigger rate-limit di server jadi sumber kebenaran;
-  // gate role di sini cuma buat UX supaya staff nggak coba-coba tap).
-  const canBrowseBranches = user?.role === 'admin' || user?.role === 'direksi' || user?.role === 'management'
-  const canEdit = user?.role === 'admin' || user?.role === 'koordinator'
-
-  const [branches, setBranches] = useState<Branch[]>([])
-  const [shifts, setShifts] = useState<Shift[]>([])
-  const [activeBranch, setActiveBranch] = useState<string | null>(user?.branch_id ?? null)
-  const [selectedDate, setSelectedDate] = useState(() => toDateStr(new Date()))
-  const [board, setBoard] = useState<ShiftScheduleBoardRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [editingStaffId, setEditingStaffId] = useState<string | null>(null)
-  const [savingStaffId, setSavingStaffId] = useState<string | null>(null)
-  const [errorMsg, setErrorMsg] = useState('')
-
-  const lockedBranch = useMemo(() => {
-    if (canBrowseBranches) return null
-    return user?.branches ?? branches.find(b => b.id === user?.branch_id) ?? null
-  }, [canBrowseBranches, user, branches])
-
-  useEffect(() => {
-    async function loadStatic() {
-      const [{ data: sh }, brRes] = await Promise.all([
-        supabase.from('shifts').select('*').eq('is_active', true).order('start_time'),
-        canBrowseBranches ? supabase.from('branches').select('*').eq('is_active', true).order('code') : Promise.resolve({ data: null }),
-      ])
-      setShifts(sh ?? [])
-      if (canBrowseBranches) setBranches(brRes.data ?? [])
-    }
-    loadStatic()
-  }, [canBrowseBranches])
-
-  useEffect(() => {
-    if (!canBrowseBranches && lockedBranch && activeBranch !== lockedBranch.id) {
-      setActiveBranch(lockedBranch.id)
-    }
-  }, [activeBranch, canBrowseBranches, lockedBranch])
-
-  const loadBoard = useCallback(async () => {
-    if (!activeBranch) { setBoard([]); setLoading(false); return }
-    setLoading(true)
-    setErrorMsg('')
-    const { data, error } = await supabase.rpc('raos_shift_schedule_board', {
-      p_branch_id: activeBranch, p_tanggal: selectedDate,
-    })
-    if (error) { setErrorMsg('Gagal memuat jadwal.'); setBoard([]) } else { setBoard(data ?? []) }
-    setLoading(false)
-  }, [activeBranch, selectedDate])
-
-  useEffect(() => { loadBoard() }, [loadBoard])
-
-  async function assignShift(staffId: string, scheduleId: string | null, shiftId: string) {
-    setSavingStaffId(staffId)
-    setErrorMsg('')
-    const { error } = scheduleId
-      ? await supabase.from('raos_shift_schedules').update({ shift_id: shiftId }).eq('id', scheduleId)
-      : await supabase.from('raos_shift_schedules').insert({
-          staff_id: staffId, branch_id: activeBranch, tanggal: selectedDate, shift_id: shiftId,
-        })
-    if (error) {
-      setErrorMsg(error.message.includes('rate_limited')
-        ? 'Jadwal staff ini sudah diubah dalam 7 hari terakhir. Coba lagi minggu depan.'
-        : 'Gagal menyimpan jadwal.')
-    } else {
-      setEditingStaffId(null)
-      await loadBoard()
-    }
-    setSavingStaffId(null)
-  }
-
-  async function removeShift(staffId: string, scheduleId: string) {
-    setSavingStaffId(staffId)
-    setErrorMsg('')
-    const { error } = await supabase.from('raos_shift_schedules').delete().eq('id', scheduleId)
-    if (error) {
-      setErrorMsg(error.message.includes('rate_limited')
-        ? 'Jadwal staff ini sudah diubah dalam 7 hari terakhir. Coba lagi minggu depan.'
-        : 'Gagal menghapus jadwal.')
-    } else {
-      setEditingStaffId(null)
-      await loadBoard()
-    }
-    setSavingStaffId(null)
-  }
-
-  const activeBranchData = canBrowseBranches ? branches.find(b => b.id === activeBranch) ?? null : lockedBranch
-  const isToday = selectedDate === toDateStr(new Date())
-
-  return (
-    <div className="space-y-3">
-      <div className="card">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="min-w-0">
-            <p className="text-sm font-bold text-gray-800 truncate">{activeBranchData?.name ?? 'Jadwal Kerja'}</p>
-            <p className="text-xs text-gray-400">Roster shift staff cabang</p>
-          </div>
-          {!canEdit && (
-            <span className="bg-gray-100 text-gray-500 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0">Lihat saja</span>
-          )}
-        </div>
-
-        {canBrowseBranches && (
-          <>
-            <p className="text-xs text-gray-500 font-medium mb-2">Cabang</p>
-            <div className="mb-4 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <div className="flex w-max min-w-full gap-2">
-                {branches.map(b => (
-                  <button
-                    key={b.id}
-                    onClick={() => setActiveBranch(b.id)}
-                    className={clsx(
-                      'flex-none min-w-[72px] px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors',
-                      activeBranch === b.id ? 'bg-primary text-secondary' : 'bg-gray-100 text-gray-500'
-                    )}
-                  >
-                    {b.code}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Navigasi tanggal */}
-        <div className="flex items-center justify-between gap-2 mb-4 bg-gray-50 rounded-xl px-2 py-2">
-          <button onClick={() => setSelectedDate(d => addDaysToDateStr(d, -1))} className="p-1.5 text-gray-500">
-            <ChevronLeft size={18} />
-          </button>
-          <div className="text-center">
-            <p className="text-sm font-bold text-gray-800 capitalize">{formatDateLabel(selectedDate)}</p>
-            {!isToday && (
-              <button onClick={() => setSelectedDate(toDateStr(new Date()))} className="text-[10px] text-primary font-semibold">
-                Kembali ke hari ini
-              </button>
-            )}
-          </div>
-          <button onClick={() => setSelectedDate(d => addDaysToDateStr(d, 1))} className="p-1.5 text-gray-500">
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        {errorMsg && (
-          <div className="mb-3 bg-red-50 border border-red-100 rounded-xl px-3 py-2 flex items-start gap-2 text-red-600 text-xs">
-            <AlertCircle size={14} className="flex-shrink-0 mt-0.5" /> {errorMsg}
-          </div>
-        )}
-
-        {/* Roster */}
-        <div className="space-y-2">
-          {loading && <p className="text-xs text-gray-400 py-3 text-center">Memuat jadwal…</p>}
-          {!loading && board.length === 0 && (
-            <p className="text-xs text-gray-400 py-3 text-center">Belum ada staff aktif di cabang ini</p>
-          )}
-          {!loading && board.map(row => {
-            const meta = row.shift_name ? SHIFT_META[row.shift_name] : null
-            const isEditing = editingStaffId === row.staff_id
-            const isSaving = savingStaffId === row.staff_id
-            return (
-              <div key={row.staff_id} className="rounded-xl border-2 border-gray-100 overflow-hidden">
-                <button
-                  onClick={() => canEdit && setEditingStaffId(isEditing ? null : row.staff_id)}
-                  disabled={!canEdit}
-                  className="w-full flex items-center gap-3 p-3 text-left bg-white disabled:cursor-default"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{row.full_name}</p>
-                  </div>
-                  {meta ? (
-                    <span className={clsx('flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0', meta.color)}>
-                      <meta.icon size={11} /> {row.shift_name}
-                    </span>
-                  ) : (
-                    <span className="bg-gray-100 text-gray-400 text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0">
-                      Belum dijadwalkan
-                    </span>
-                  )}
-                </button>
-                {isEditing && canEdit && (
-                  <div className="px-3 pb-3 pt-1 bg-gray-50 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                    {shifts.map(s => {
-                      const m = SHIFT_META[s.name]
-                      const selected = row.shift_id === s.id
-                      return (
-                        <button
-                          key={s.id}
-                          disabled={isSaving}
-                          onClick={() => assignShift(row.staff_id, row.schedule_id, s.id)}
-                          className={clsx(
-                            'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-colors',
-                            selected ? (m?.color ?? 'bg-primary text-secondary') : 'bg-white border border-gray-200 text-gray-500'
-                          )}
-                        >
-                          {m && <m.icon size={12} />} {s.name}
-                        </button>
-                      )
-                    })}
-                    {row.schedule_id && (
-                      <button
-                        disabled={isSaving}
-                        onClick={() => removeShift(row.staff_id, row.schedule_id!)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-50 text-red-500 border border-red-100"
-                      >
-                        <Trash2 size={12} /> Hapus
-                      </button>
-                    )}
-                    {isSaving && <Loader2 size={14} className="animate-spin text-gray-400" />}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <p className="text-[10px] text-gray-400 px-1">
-        {canEdit
-          ? 'Jadwal masing-masing staff cuma bisa diubah 1x dalam 7 hari terakhir. Mengisi jadwal tanggal baru (belum pernah diisi) tidak kena batas ini.'
-          : 'Jadwal kerja cabang kamu — cuma Admin & Koordinator yang bisa mengubah.'}
-      </p>
-    </div>
-  )
-}
-
 /* ================= SECTION: NOTIFIKASI ================= */
 function SectionNotifikasi({ prefs, save }: { prefs: AppPrefs; save: (p: AppPrefs) => void }) {
   const [pushMsg, setPushMsg] = useState('')
@@ -989,6 +744,164 @@ function SectionKeamanan() {
         Jangan bagikan akun kepada siapapun. Logout setelah selesai menggunakan sistem.
         Hubungi Admin jika mengalami kendala login.
       </p>
+    </div>
+  )
+}
+
+/* ================= SECTION: PERIZINAN HP ================= */
+type HpCapabilityStatus =
+  | 'Diizinkan'
+  | 'Tidak diizinkan'
+  | 'Atur di HP'
+  | 'Belum digunakan'
+  | 'Tidak berlaku'
+  | 'Memerlukan akses khusus'
+
+function SectionHpPermissions() {
+  const [native, setNative] = useState(false)
+  const [summary, setSummary] = useState<{ camera: string; microphone: string; notifications: string } | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    const m = await import('@/lib/nativeAndroidSettings')
+    const isNative = m.isNativeAndroidShell()
+    setNative(isNative)
+    const s = await m.getAndroidPermissionSummary()
+    setSummary({ camera: s.camera, microphone: s.microphone, notifications: s.notifications })
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  async function run(key: string, action: () => Promise<void>) {
+    setBusy(key)
+    try {
+      await action()
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const permissionLabel = (status?: string): HpCapabilityStatus => status === 'granted' ? 'Diizinkan' : 'Tidak diizinkan'
+  const osSettings = native ? 'Atur di HP' : 'Tidak berlaku'
+  const rows: Array<{
+    key: string
+    icon: typeof Bell
+    label: string
+    status: HpCapabilityStatus
+    purpose: string
+    actionLabel?: string
+    action?: () => Promise<void>
+  }> = [
+    {
+      key: 'camera',
+      icon: Camera,
+      label: 'Kamera',
+      status: permissionLabel(summary?.camera),
+      purpose: 'Ambil foto di chat, scan, dan selfie absensi.',
+      actionLabel: native ? 'Buka Pengaturan HP' : undefined,
+      action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidAppSettings() : undefined,
+    },
+    {
+      key: 'microphone',
+      icon: Mic,
+      label: 'Mikrofon',
+      status: permissionLabel(summary?.microphone),
+      purpose: 'Rekam pesan suara di room chat saat tombol mic ditekan.',
+      actionLabel: native ? 'Buka Pengaturan HP' : undefined,
+      action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidAppSettings() : undefined,
+    },
+    {
+      key: 'notifications',
+      icon: Bell,
+      label: 'Notifikasi',
+      status: permissionLabel(summary?.notifications),
+      purpose: 'Menampilkan notifikasi RAOS di notification shade Android.',
+      actionLabel: native ? (summary?.notifications === 'granted' ? 'Pengaturan Notifikasi HP' : 'Minta Izin') : undefined,
+      action: native
+        ? async () => {
+            const m = await import('@/lib/nativeAndroidSettings')
+            if (summary?.notifications === 'granted') await m.openAndroidNotificationSettings()
+            else await m.requestAndroidNotificationPermission()
+          }
+        : undefined,
+    },
+    {
+      key: 'chat-notifications',
+      icon: MessageCircle,
+      label: 'Notifikasi Chat',
+      status: osSettings,
+      purpose: 'Channel Android raos_chat untuk pesan group dan mention.',
+      actionLabel: native ? 'Pengaturan Chat' : undefined,
+      action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidChatNotificationSettings() : undefined,
+    },
+    { key: 'sound', icon: Volume2, label: 'Suara', status: osSettings, purpose: 'Dikontrol oleh channel notifikasi Android.', actionLabel: native ? 'Pengaturan Chat' : undefined, action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidChatNotificationSettings() : undefined },
+    { key: 'vibration', icon: Vibrate, label: 'Getar', status: osSettings, purpose: 'Dikontrol oleh channel notifikasi Android.', actionLabel: native ? 'Pengaturan Chat' : undefined, action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidChatNotificationSettings() : undefined },
+    { key: 'photos', icon: Image, label: 'Foto & Video', status: 'Belum digunakan', purpose: 'Chat memakai photo picker/file picker modern tanpa baca galeri luas.' },
+    { key: 'phone', icon: Phone, label: 'Telepon', status: 'Belum digunakan', purpose: 'Tidak ada fitur panggilan telepon native saat ini.' },
+    { key: 'calllog', icon: Phone, label: 'Log Panggilan', status: 'Belum digunakan', purpose: 'Tidak dibaca dan tidak diminta karena izin sensitif.' },
+    { key: 'audio', icon: Music, label: 'Musik & Audio', status: 'Belum digunakan', purpose: 'Voice message merekam mikrofon; tidak membaca pustaka audio.' },
+    { key: 'contacts', icon: Contact, label: 'Kontak', status: 'Belum digunakan', purpose: 'Direktori RAOS berasal dari Supabase, bukan kontak HP.' },
+    { key: 'nearby', icon: Bluetooth, label: 'Perangkat Sekitar', status: 'Belum digunakan', purpose: 'Tidak ada fitur Bluetooth/perangkat sekitar saat ini.' },
+    {
+      key: 'alarms',
+      icon: AlarmClock,
+      label: 'Alarm & Pengingat',
+      status: 'Memerlukan akses khusus',
+      purpose: 'Reminder RAOS saat ini server-side; exact alarm tidak diminta otomatis.',
+      actionLabel: native ? 'Akses Khusus' : undefined,
+      action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidAlarmSettings() : undefined,
+    },
+    {
+      key: 'pip',
+      icon: PictureInPicture,
+      label: 'Gambar dalam Gambar',
+      status: 'Tidak berlaku',
+      purpose: 'Belum ada fitur video/call PiP di RAOS.',
+      actionLabel: native ? 'Pengaturan PiP' : undefined,
+      action: native ? async () => (await import('@/lib/nativeAndroidSettings')).openAndroidPictureInPictureSettings() : undefined,
+    },
+  ]
+
+  return (
+    <div className="card space-y-3">
+      <div>
+        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Perizinan &amp; Notifikasi HP</p>
+        <p className="mt-1 text-[11px] text-gray-400">
+          Preferensi RAOS tetap di menu Notifikasi; suara/getar mengikuti channel Android.
+        </p>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {rows.map(({ key, icon: Icon, label, status, purpose, actionLabel, action }) => (
+          <div key={key} className="flex items-center gap-3 py-2.5">
+            <Icon size={17} className="text-gray-500 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-800">{label}</p>
+                <span className={clsx(
+                  'rounded-full px-2 py-0.5 text-[9px] font-bold',
+                  status === 'Diizinkan' ? 'bg-green-50 text-green-700'
+                    : status === 'Tidak diizinkan' ? 'bg-red-50 text-red-600'
+                    : 'bg-gray-100 text-gray-500'
+                )}>
+                  {status}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[10px] text-gray-400">{purpose}</p>
+            </div>
+            {action && actionLabel && (
+              <button
+                type="button"
+                disabled={busy === key}
+                onClick={() => run(key, action)}
+                className="rounded-lg bg-gray-100 px-2 py-1.5 text-[10px] font-bold text-gray-600 disabled:opacity-50"
+              >
+                {busy === key ? '...' : actionLabel}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

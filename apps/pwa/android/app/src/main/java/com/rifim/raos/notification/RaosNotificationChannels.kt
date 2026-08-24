@@ -22,7 +22,9 @@ import com.rifim.raos.MainActivity
 object RaosNotificationChannels {
 
     const val CHANNEL_CHAT = "raos_chat"
-    const val CHANNEL_REMINDERS = "raos_reminders"
+    const val CHANNEL_OPERATIONAL = "raos_operational"
+    const val CHANNEL_REMINDERS = CHANNEL_OPERATIONAL
+    const val CHANNEL_CALLS = "raos_calls"
 
     @JvmStatic
     fun createAll(context: Context) {
@@ -42,17 +44,28 @@ object RaosNotificationChannels {
         }
 
         val reminders = NotificationChannel(
-            CHANNEL_REMINDERS,
-            "Pengingat Operasional",
+            CHANNEL_OPERATIONAL,
+            "RAOS Operasional / Saldo",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "Reminder shift, absensi, dan tugas operasional"
+            description = "Reminder shift, absensi, saldo, dan tugas operasional"
             enableVibration(true)
             enableLights(true)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
 
-        manager.createNotificationChannels(listOf(chat, reminders))
+        val calls = NotificationChannel(
+            CHANNEL_CALLS,
+            "RAOS Calls",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "Panggilan atau eskalasi operasional RAOS"
+            enableVibration(true)
+            enableLights(true)
+            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+        }
+
+        manager.createNotificationChannels(listOf(chat, reminders, calls))
     }
 
     /**
@@ -83,7 +96,13 @@ object RaosNotificationChannels {
             .setContentText(body)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            .setCategory(if (channelId == CHANNEL_REMINDERS) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_MESSAGE)
+            .setCategory(
+                when (channelId) {
+                    CHANNEL_OPERATIONAL -> NotificationCompat.CATEGORY_REMINDER
+                    CHANNEL_CALLS -> NotificationCompat.CATEGORY_CALL
+                    else -> NotificationCompat.CATEGORY_MESSAGE
+                }
+            )
 
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.notify(notificationId, builder.build())

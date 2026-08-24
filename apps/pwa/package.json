@@ -10,8 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test:access": "node scripts/test-access-policy-contract.cjs",
     "test:notifications": "node scripts/test-notification-engine-v2.cjs",
+    "test:unread": "node scripts/test-notification-unread.cjs",
+    "test:schedule": "node scripts/test-android-schedule-settings.cjs",
     "test:mobile": "node scripts/test-mobile-chat-media.cjs",
-    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications && npm run test:mobile"
+    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications && npm run test:unread && npm run test:schedule && npm run test:mobile"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

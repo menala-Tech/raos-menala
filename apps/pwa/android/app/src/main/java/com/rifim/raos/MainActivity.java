@@ -6,6 +6,7 @@ import com.rifim.raos.camera.RaosCameraBridgePlugin;
 import com.rifim.raos.location.RaosLocationBridgePlugin;
 import com.rifim.raos.microphone.RaosMicrophoneBridgePlugin;
 import com.rifim.raos.notification.RaosNotificationChannels;
+import com.rifim.raos.settings.RaosAndroidSettingsBridgePlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -13,6 +14,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(RaosLocationBridgePlugin.class);
         registerPlugin(RaosCameraBridgePlugin.class);
         registerPlugin(RaosMicrophoneBridgePlugin.class);
+        registerPlugin(RaosAndroidSettingsBridgePlugin.class);
         super.onCreate(savedInstanceState);
         RaosNotificationChannels.createAll(this);
     }

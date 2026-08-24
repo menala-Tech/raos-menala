@@ -15,7 +15,8 @@
     "test:workflow": "node scripts/test-operational-workflow.cjs",
     "test:work-reminders": "node scripts/test-native-work-reminders.cjs",
     "test:mobile": "node scripts/test-mobile-chat-media.cjs",
-    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications && npm run test:unread && npm run test:schedule && npm run test:workflow && npm run test:work-reminders && npm run test:mobile"
+    "test:payroll-order": "node scripts/test-raos-order-payroll-canonical.cjs",
+    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications && npm run test:unread && npm run test:schedule && npm run test:workflow && npm run test:work-reminders && npm run test:mobile && npm run test:payroll-order"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

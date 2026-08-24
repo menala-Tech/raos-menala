@@ -1,14 +1,17 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, CalendarDays, Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react'
 import clsx from 'clsx'
+import { SHIFT_CODE_LABELS, shiftCodeFromName, type WorkShiftCode } from '@/lib/operationalWorkflow'
 import { supabase } from '@/lib/supabase'
 import type { Branch, Shift, ShiftScheduleBoardRow, UserProfile } from '@/types'
 
 type DayKey = 'sen' | 'sel' | 'rab' | 'kam' | 'jum' | 'sab' | 'min'
 type WeekDay = { key: DayKey; label: string; date: string; day: string }
 type ScheduleCell = { schedule_id: string | null; shift_id: string | null; shift_name: string | null }
+type ShiftChoice = { code: Exclude<WorkShiftCode, '-'>; label: string; shift: Shift }
+type PickerTarget = { row: WeeklyRow; day: WeekDay } | null
 type WeeklyRow = {
   staff_id: string
   full_name: string
@@ -67,6 +70,20 @@ function canBrowseBranches(user: UserProfile | null): boolean {
   return user?.role === 'admin' || user?.role === 'direksi' || user?.role === 'management'
 }
 
+function buildShiftChoices(shifts: Shift[]): ShiftChoice[] {
+  const byCode = new Map<Exclude<WorkShiftCode, '-'>, Shift>()
+  for (const shift of shifts) {
+    const code = shiftCodeFromName(shift.name)
+    if (code && code !== '-' && !byCode.has(code)) byCode.set(code, shift)
+  }
+  return (['P', 'S', 'M'] as const)
+    .map(code => {
+      const shift = byCode.get(code)
+      return shift ? { code, label: SHIFT_CODE_LABELS[code], shift } : null
+    })
+    .filter((choice): choice is ShiftChoice => Boolean(choice))
+}
+
 export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }) {
   const [branches, setBranches] = useState<Branch[]>([])
   const [shifts, setShifts] = useState<Shift[]>([])
@@ -75,6 +92,7 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
   const [rows, setRows] = useState<WeeklyRow[]>([])
   const [loading, setLoading] = useState(true)
   const [savingKey, setSavingKey] = useState<string | null>(null)
+  const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null)
   const [errorMsg, setErrorMsg] = useState('')
 
   const editable = canEditSchedule(user)
@@ -85,7 +103,7 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
   }, [branches, browsable, user])
   const activeBranchData = browsable ? branches.find(b => b.id === activeBranch) ?? null : lockedBranch
   const days = useMemo(() => buildWeek(weekStart), [weekStart])
-  const defaultShift = shifts[0] ?? null
+  const shiftChoices = useMemo(() => buildShiftChoices(shifts), [shifts])
 
   useEffect(() => {
     async function loadStatic() {
@@ -145,25 +163,33 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
 
   useEffect(() => { void loadWeek() }, [loadWeek])
 
-  async function toggleDay(row: WeeklyRow, day: WeekDay) {
-    if (!editable || !activeBranch || !defaultShift) return
+  async function saveDayShift(row: WeeklyRow, day: WeekDay, shiftId: string | null) {
+    if (!editable || !activeBranch) return
     const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
     const key = `${row.staff_id}:${day.date}`
     setSavingKey(key)
     setErrorMsg('')
-    const { error } = cell.schedule_id
-      ? await supabase.from('raos_shift_schedules').delete().eq('id', cell.schedule_id)
-      : await supabase.from('raos_shift_schedules').insert({
+    let result: { error: { message: string } | null }
+    if (shiftId === null) {
+      result = cell.schedule_id
+        ? await supabase.from('raos_shift_schedules').delete().eq('id', cell.schedule_id)
+        : { error: null }
+    } else if (cell.schedule_id) {
+      result = await supabase.from('raos_shift_schedules').update({ shift_id: shiftId }).eq('id', cell.schedule_id)
+    } else {
+      result = await supabase.from('raos_shift_schedules').insert({
           staff_id: row.staff_id,
           branch_id: activeBranch,
           tanggal: day.date,
-          shift_id: defaultShift.id,
+          shift_id: shiftId,
         })
-    if (error) {
-      setErrorMsg(error.message.includes('rate_limited')
+    }
+    if (result.error) {
+      setErrorMsg(result.error.message.includes('rate_limited')
         ? 'Jadwal staff ini sudah diubah dalam 7 hari terakhir.'
         : 'Gagal menyimpan jadwal.')
     } else {
+      setPickerTarget(null)
       await loadWeek()
     }
     setSavingKey(null)
@@ -249,26 +275,26 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
               <div className="px-3 py-2 text-sm font-semibold text-gray-800 truncate">{row.full_name}</div>
               {days.map(day => {
                 const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
-                const checked = !!cell.schedule_id
+                const code = cell.schedule_id ? (shiftCodeFromName(cell.shift_name) ?? '?') : '-'
                 const busy = savingKey === `${row.staff_id}:${day.date}`
                 return (
                   <button
                     key={day.date}
                     type="button"
-                    disabled={!editable || busy || !defaultShift}
-                    onClick={() => toggleDay(row, day)}
-                    aria-label={`${row.full_name} ${day.label} ${checked ? 'terjadwal' : 'belum terjadwal'}`}
+                    disabled={!editable || busy || shiftChoices.length === 0}
+                    onClick={() => setPickerTarget({ row, day })}
+                    aria-label={`${row.full_name} ${day.label} shift ${code}`}
                     className="flex min-h-10 items-center justify-center px-2 py-2 disabled:cursor-default"
                   >
                     <span
                       className={clsx(
-                        'flex h-6 w-6 items-center justify-center rounded border text-[10px]',
-                        checked ? 'border-primary bg-primary text-secondary' : 'border-gray-200 bg-white text-transparent',
+                        'flex h-7 w-7 items-center justify-center rounded border text-xs font-black',
+                        code === '-' ? 'border-gray-200 bg-white text-gray-400' : 'border-primary bg-primary text-secondary',
                         editable && !busy && 'hover:border-primary'
                       )}
-                      title={cell.shift_name ?? 'Checklist'}
+                      title={cell.shift_name ?? 'Libur'}
                     >
-                      {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : <Check size={14} />}
+                      {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : code}
                     </span>
                   </button>
                 )
@@ -278,9 +304,57 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
         </div>
       </div>
 
-      <p className="text-[10px] text-gray-400">
-        Checklist menyimpan Nama, Tanggal, dan status jadwal ke tabel raos_shift_schedules. Admin dapat mengubah semua cabang; Koordinator dikunci ke cabang sendiri; role lain lihat saja.
-      </p>
+      <div className="rounded-lg bg-gray-50 px-3 py-2 text-[10px] text-gray-500">
+        <p className="font-bold text-gray-600">P = Pagi · S = Siang · M = Malam · - = Libur</p>
+        <p className="mt-1">Jadwal menyimpan Nama, Tanggal, dan shift ke raos_shift_schedules. Admin dapat mengubah semua cabang; Koordinator dikunci ke cabang sendiri; role lain lihat saja.</p>
+      </div>
+
+      {pickerTarget && editable && (
+        <div className="fixed inset-0 z-50 bg-black/30">
+          <button
+            type="button"
+            aria-label="Tutup pilihan shift"
+            className="absolute inset-0 h-full w-full"
+            onClick={() => setPickerTarget(null)}
+          />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white p-4 shadow-2xl">
+            <div className="mb-3 flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Pilih Shift</p>
+                <h3 className="truncate text-base font-black text-gray-800">{pickerTarget.row.full_name}</h3>
+                <p className="text-xs text-gray-500">{pickerTarget.day.label}, {pickerTarget.day.date}</p>
+              </div>
+              <button type="button" onClick={() => setPickerTarget(null)} className="rounded-lg bg-gray-100 p-2 text-gray-500">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {shiftChoices.map(choice => (
+                <button
+                  key={choice.code}
+                  type="button"
+                  disabled={savingKey === `${pickerTarget.row.staff_id}:${pickerTarget.day.date}`}
+                  onClick={() => saveDayShift(pickerTarget.row, pickerTarget.day, choice.shift.id)}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-3 text-left active:scale-[0.99]"
+                >
+                  <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded bg-primary text-xs font-black text-secondary">{choice.code}</span>
+                  <span className="text-sm font-bold text-gray-700">{choice.label}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={savingKey === `${pickerTarget.row.staff_id}:${pickerTarget.day.date}`}
+                onClick={() => saveDayShift(pickerTarget.row, pickerTarget.day, null)}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-3 text-left active:scale-[0.99]"
+              >
+                <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded bg-gray-100 text-xs font-black text-gray-500">-</span>
+                <span className="text-sm font-bold text-gray-700">Libur</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useCachedQuery } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
@@ -24,6 +24,7 @@ import { useNetworkStatus } from '@/lib/useNetworkStatus'
 
 export default function DashboardPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [sessionUserId, setSessionUserId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'ringkasan' | 'jadwal'>('ringkasan')
 
@@ -33,6 +34,10 @@ export default function DashboardPage() {
       setSessionUserId(session.user.id)
     })
   }, [router])
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'jadwal') setActiveTab('jadwal')
+  }, [searchParams])
 
   const { data: user } = useCachedQuery<UserProfile>(
     ['user-profile', sessionUserId],

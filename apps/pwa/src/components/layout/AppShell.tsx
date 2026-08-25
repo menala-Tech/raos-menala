@@ -5,8 +5,10 @@ import SwipeBackWrapper from '../SwipeBackWrapper'
 import OnlineStatusBanner from '../OnlineStatusBanner'
 import PwaMaintenancePanel from '../PwaMaintenancePanel'
 import { useAutoPushSubscribe } from '@/lib/useAutoPushSubscribe'
+import { useNativePushSubscribe } from '@/lib/useNativePushSubscribe'
 import { usePwaUpdateManager } from '@/lib/usePwaUpdateManager'
 import { useNativeLocationAuthBridge } from '@/lib/nativeLocationBridge'
+import { useNativeWorkReminderSync } from '@/lib/useNativeWorkReminderSync'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -17,8 +19,10 @@ interface AppShellProps {
 
 export default function AppShell({ children, noSwipe }: AppShellProps) {
   useAutoPushSubscribe()
+  useNativePushSubscribe()
   usePwaUpdateManager()
   useNativeLocationAuthBridge()
+  useNativeWorkReminderSync()
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">

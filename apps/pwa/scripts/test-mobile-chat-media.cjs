@@ -16,6 +16,7 @@ const chat = read(root, 'src/app/chat/page.tsx')
 const composer = read(root, 'src/components/workspace/WorkspaceComposer.tsx')
 const quick = read(root, 'src/components/workspace/WorkspaceQuickAction.tsx')
 const micBridge = read(root, 'src/lib/nativeMicrophoneBridge.ts')
+const androidSettings = read(root, 'src/lib/nativeAndroidSettings.ts')
 const trigger = read(repoRoot, 'sql/raos_113_chat_push_trigger_attach.sql')
 const channels = read(repoRoot, 'apps/pwa/android/app/src/main/java/com/rifim/raos/notification/RaosNotificationChannels.kt')
 
@@ -28,6 +29,7 @@ assert.doesNotMatch(manifest, /android\.permission\.READ_CONTACTS/)
 assert.doesNotMatch(manifest, /android\.permission\.BLUETOOTH/)
 assert.doesNotMatch(manifest, /android\.permission\.SCHEDULE_EXACT_ALARM/)
 assert.match(mainActivity, /RaosMicrophoneBridgePlugin/)
+assert.match(mainActivity, /RaosAndroidSettingsBridgePlugin/)
 assert.match(mainActivity, /RaosNotificationChannels\.createAll/)
 
 // Android debug builds may opt into a preview URL, while default stays production.
@@ -56,7 +58,9 @@ assert.strictEqual(previewUrl, 'https://example-preview.invalid')
 // Chat page wires mic permission bridge and photo capture.
 assert.match(chat, /getMicrophonePermissionStatus/)
 assert.match(chat, /requestMicrophonePermission/)
+assert.match(chat, /openMicrophoneAppSettings/)
 assert.match(chat, /handleCapturePhoto/)
+assert.match(chat, /openCameraAppSettings/)
 assert.match(chat, /cameraInputRef/)
 
 // Composer exposes a native-camera file input and a reachable attachment menu.
@@ -75,6 +79,12 @@ assert.match(micBridge, /getMicrophonePermissionStatus/)
 assert.match(micBridge, /requestMicrophonePermission/)
 assert.match(micBridge, /openMicrophoneAppSettings/)
 
+// Consolidated Android settings bridge exposes only real app/notification
+// settings actions; sensitive capabilities are not silently requested.
+assert.match(androidSettings, /openAndroidNotificationSettings/)
+assert.match(androidSettings, /openAndroidChatNotificationSettings/)
+assert.match(androidSettings, /requestAndroidNotificationPermission/)
+
 // Chat push trigger is attached idempotently.
 assert.match(trigger, /DROP TRIGGER IF EXISTS trg_raos_notify_new_chat_message ON public\.chat_messages/)
 assert.match(trigger, /CREATE TRIGGER trg_raos_notify_new_chat_message/)
@@ -83,6 +93,7 @@ assert.match(trigger, /EXECUTE FUNCTION public\.raos_notify_new_chat_message\(\)
 
 // Native notification channels for chat and reminders.
 assert.match(channels, /raos_chat/)
-assert.match(channels, /raos_reminders/)
+assert.match(channels, /raos_operational/)
+assert.match(channels, /raos_calls/)
 
 console.log('Mobile chat + media + notification foundation: PASS')

@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useCachedQuery } from '@/lib/apiCache'
 import AppShell from '@/components/layout/AppShell'
 import MenalaLogo from '@/components/MenalaLogo'
 import { DateTimeStack } from '@/components/DateTimeHeader'
 import MiniCalendar from '@/components/MiniCalendar'
+import WeeklyScheduleTab from '@/components/WeeklyScheduleTab'
 import {
   ScanLine, Clock, UserCheck, MessageCircle,
   Target, CheckCircle2, AlertCircle, Bell,
@@ -15,6 +16,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react'
 import Link from 'next/link'
+import clsx from 'clsx'
 import type { UserProfile } from '@/types'
 import { can } from '@/lib/accessPolicy'
 import { branchDateKey, branchHour } from '@/lib/branchTime'
@@ -22,7 +24,9 @@ import { useNetworkStatus } from '@/lib/useNetworkStatus'
 
 export default function DashboardPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [sessionUserId, setSessionUserId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'ringkasan' | 'jadwal'>('ringkasan')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -30,6 +34,10 @@ export default function DashboardPage() {
       setSessionUserId(session.user.id)
     })
   }, [router])
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'jadwal') setActiveTab('jadwal')
+  }, [searchParams])
 
   const { data: user } = useCachedQuery<UserProfile>(
     ['user-profile', sessionUserId],
@@ -72,7 +80,7 @@ export default function DashboardPage() {
     { enabled: !!sessionUserId && !!user, ttlMs: 5 * 60 * 1000, refreshIntervalMs: 5 * 60 * 1000 }
   )
 
-  const { data: unreadNotifData } = useCachedQuery(
+  const { data: unreadNotifData, refresh: refreshUnreadNotif } = useCachedQuery(
     ['dashboard-unread-notif', sessionUserId],
     async () => {
       const { count } = await supabase
@@ -80,10 +88,18 @@ export default function DashboardPage() {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', sessionUserId!)
         .eq('is_read', false)
+        .neq('status', 'archived')
       return count ?? 0
     },
-    { enabled: !!sessionUserId, ttlMs: 60 * 1000, refreshIntervalMs: 2 * 60 * 1000 }
+    { enabled: !!sessionUserId, ttlMs: 60 * 1000, refreshIntervalMs: 2 * 60 * 1000, refetchOnFocus: true }
   )
+
+  useEffect(() => {
+    if (!sessionUserId) return
+    const refresh = () => { void refreshUnreadNotif() }
+    window.addEventListener('raos:notifications-read', refresh)
+    return () => window.removeEventListener('raos:notifications-read', refresh)
+  }, [refreshUnreadNotif, sessionUserId])
   const unreadNotif = unreadNotifData ?? 0
   const statsData = stats ?? { total: 0, valid: 0, pending: 0 }
   const online = useNetworkStatus()
@@ -157,6 +173,32 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <div className="px-4 pt-3">
+        <div className="grid grid-cols-2 rounded-lg bg-gray-100 p-1 text-xs font-bold text-gray-500">
+          {([
+            { key: 'ringkasan' as const, label: 'Ringkasan' },
+            { key: 'jadwal' as const, label: 'Jadwal' },
+          ]).map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={clsx(
+                'rounded-md px-3 py-2 transition-colors',
+                activeTab === tab.key ? 'bg-white text-secondary shadow-sm' : 'text-gray-500'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeTab === 'jadwal' ? (
+        <div className="px-4 py-4">
+          <WeeklyScheduleTab user={user} />
+        </div>
+      ) : (
       <div className="px-4 py-4 space-y-4">
         <div>
           <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Menu Utama</h2>
@@ -215,6 +257,7 @@ export default function DashboardPage() {
           <span className="text-[10px] text-gray-500">MENALA AIRPORT OPERATION SYSTEM • {isHeadOffice ? 'Head Office' : (branchLabel || 'Multi Cabang')}</span>
         </div>
       </div>
+      )}
     </AppShell>
   )
 }

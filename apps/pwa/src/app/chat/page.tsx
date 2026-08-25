@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { enrichChatMessages, loadChatDirectory } from '@/lib/chatProfileDirectory'
 import { can } from '@/lib/accessPolicy'
-import { getCameraPermissionStatus, requestCameraPermission, isNativeAndroid } from '@/lib/nativeCameraBridge'
+import { getCameraPermissionStatus, requestCameraPermission, openAppSettings as openCameraAppSettings, isNativeAndroid } from '@/lib/nativeCameraBridge'
 import { getMicrophonePermissionStatus, requestMicrophonePermission, openMicrophoneAppSettings } from '@/lib/nativeMicrophoneBridge'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import { enqueue, isNetworkError } from '@/lib/offlineQueue'
@@ -622,12 +622,13 @@ function ChatPageInner() {
       return
     }
     let { status } = await getCameraPermissionStatus()
-    if (status === 'prompt') {
+    if (status !== 'granted') {
       const res = await requestCameraPermission()
       status = res.status
     }
     if (status !== 'granted') {
-      alert('Izin kamera ditolak atau belum diizinkan. Aktifkan kamera di Pengaturan Aplikasi.')
+      const goSettings = confirm('Izin kamera ditolak. Buka Pengaturan HP untuk mengaktifkan kamera?')
+      if (goSettings) await openCameraAppSettings()
       return
     }
     cameraInputRef.current?.click()
@@ -872,7 +873,7 @@ function ChatPageInner() {
     if (!activeRoom || !user || recording) return
     if (isNativeAndroid()) {
       let { status } = await getMicrophonePermissionStatus()
-      if (status === 'prompt') {
+      if (status !== 'granted') {
         const res = await requestMicrophonePermission()
         status = res.status
       }
@@ -911,6 +912,11 @@ function ChatPageInner() {
         })
       }, 1000)
     } catch {
+      if (isNativeAndroid()) {
+        const goSettings = confirm('Tidak bisa akses mikrofon. Buka Pengaturan HP untuk mengaktifkan mikrofon?')
+        if (goSettings) await openMicrophoneAppSettings()
+        return
+      }
       alert('Tidak bisa akses mikrofon. Cek izin mic di setelan browser.')
     }
   }

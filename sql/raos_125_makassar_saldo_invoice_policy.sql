@@ -1,15 +1,15 @@
 -- ============================================================================
--- raos_125: Makassar saldo net tiers + invoice display policy
+-- raos_125: Makassar net tiers + global saldo invoice rounding
 -- ============================================================================
--- Scope: ONLY canonical Makassar branch code UPG.
--- New net saldo request tiers:
---   45.000, 95.000, 140.000, 190.000
--- Invoice display tiers:
---   50.000, 100.000, 150.000, 200.000
--- Legacy Makassar 145.000 / 195.000 remain display-compatible as
--- 150.000 / 200.000 in history, but are no longer selectable new net tiers.
--- Other branches are unchanged.
--- Raw raos_saldo_requests.nominal and aist_jobs.nominal remain the NET amount.
+-- Net saldo request tiers:
+--   Makassar/UPG ONLY -> 45.000, 95.000, 140.000, 190.000
+--   Other branches -> unchanged from their current saldo_nominal_options.
+-- Invoice display tiers for ALL branches:
+--   45.000 -> 50.000
+--   95.000 -> 100.000
+--   140.000/145.000 -> 150.000
+--   190.000/195.000 -> 200.000
+-- Raw raos_saldo_requests.nominal and aist_jobs.nominal remain NET amounts.
 -- ============================================================================
 
 DO $$
@@ -24,33 +24,29 @@ BEGIN
   END IF;
 END $$;
 
+-- ONLY Makassar transaction choices change.
 UPDATE public.branches
 SET saldo_nominal_options = '[45000,95000,140000,190000]'::jsonb
 WHERE code = 'UPG' AND is_active = true;
 
+-- Invoice presentation policy applies to every branch.
 CREATE OR REPLACE FUNCTION public.raos_saldo_invoice_nominal(
   p_branch_id uuid,
   p_nominal numeric
 )
 RETURNS numeric
 LANGUAGE sql
-STABLE
+IMMUTABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT CASE
-    WHEN EXISTS (
-      SELECT 1 FROM public.branches b
-      WHERE b.id = p_branch_id AND b.code = 'UPG'
-    ) THEN CASE p_nominal
-      WHEN 45000 THEN 50000
-      WHEN 95000 THEN 100000
-      WHEN 140000 THEN 150000
-      WHEN 145000 THEN 150000
-      WHEN 190000 THEN 200000
-      WHEN 195000 THEN 200000
-      ELSE p_nominal
-    END
+  SELECT CASE p_nominal
+    WHEN 45000 THEN 50000
+    WHEN 95000 THEN 100000
+    WHEN 140000 THEN 150000
+    WHEN 145000 THEN 150000
+    WHEN 190000 THEN 200000
+    WHEN 195000 THEN 200000
     ELSE p_nominal
   END;
 $$;
@@ -59,10 +55,10 @@ REVOKE ALL ON FUNCTION public.raos_saldo_invoice_nominal(uuid,numeric) FROM PUBL
 GRANT EXECUTE ON FUNCTION public.raos_saldo_invoice_nominal(uuid,numeric) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.raos_saldo_invoice_nominal(uuid,numeric) IS
-  'Read-only invoice display amount. UPG/Makassar rounds new 45/95/140/190k and legacy 145/195k net values to 50/100/150/200k invoice; other branches unchanged.';
+  'Read-only invoice display amount for all branches: 45/95/140|145/190|195k -> 50/100/150/200k. Raw transaction nominal remains unchanged.';
 
--- Daily invoice totals use the display amount, while AIST mismatch validation
--- continues to compare j.nominal against the raw r.nominal.
+-- Daily invoice totals use rounded invoice display values for ALL branches,
+-- while AIST mismatch validation continues comparing the raw transaction values.
 CREATE OR REPLACE FUNCTION public.aist_refresh_invoice_daily(p_branch_id uuid,p_date date)
 RETURNS public.aist_invoice_daily_validation
 LANGUAGE plpgsql
@@ -89,8 +85,8 @@ BEGIN
   RETURN v_row;
 END $$;
 
--- Backfill only existing Makassar invoice totals so Coordinator/Admin history
--- immediately shows the rounded invoice amount after this migration.
+-- Recalculate existing invoice-history totals for ALL branches using the
+-- rounded invoice presentation policy. No raw saldo request is modified.
 UPDATE public.aist_invoice_daily_validation v
 SET total_nominal = COALESCE((
       SELECT sum(public.raos_saldo_invoice_nominal(r.branch_id,r.nominal))
@@ -100,5 +96,4 @@ SET total_nominal = COALESCE((
         AND (r.requested_at AT TIME ZONE COALESCE(NULLIF(b.timezone,''),'Asia/Jakarta'))::date=v.invoice_date
         AND r.is_processed=true
     ),0),
-    updated_at = now()
-WHERE v.branch_id = (SELECT id FROM public.branches WHERE code='UPG' AND is_active=true LIMIT 1);
+    updated_at = now();

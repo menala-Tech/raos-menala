@@ -2,8 +2,7 @@
 -- raos_127: SOETA KPI/Payroll data-input readiness
 -- ============================================================================
 -- Adds missing admin write paths for the canonical SOETA six-pillar KPI pipeline.
--- SECURITY DEFINER + branch/staff canonical scope.
--- UI pages may still need to be wired.
+-- SOETA is canonical ORDER mode. SECURITY DEFINER + branch/staff canonical scope.
 -- No synthetic production data.
 -- ============================================================================
 
@@ -30,7 +29,33 @@ $$;
 REVOKE ALL ON FUNCTION public._is_soeta_branch(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public._is_soeta_branch(uuid) TO service_role;
 
--- ---------- 1. Branch target upsert (SOETA scope, admin/direksi only) ----------
+-- ---------- helper: canonical SOETA staff membership + activation ----------
+CREATE OR REPLACE FUNCTION public._is_canonical_soeta_staff(p_staff_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.raos_staff_master m
+    JOIN public.raos_soeta_staff_sheet_mirror sm ON sm.staff_id = m.staff_id
+    JOIN public.user_profiles up ON up.id = m.auth_user_id
+    LEFT JOIN public.branches b ON b.id = up.branch_id
+    LEFT JOIN public.branches hub ON hub.id = b.parent_branch_id
+    WHERE m.auth_user_id = p_staff_id
+      AND m.is_activated = true
+      AND up.is_active = true
+      AND up.role IN ('staff','koordinator')
+      AND (b.code = 'SOETA' OR hub.code = 'SOETA')
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public._is_canonical_soeta_staff(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public._is_canonical_soeta_staff(uuid) TO service_role;
+
+-- ---------- 1. Branch target upsert (SOETA scope, order-only, admin/direksi only) ----------
 CREATE OR REPLACE FUNCTION public.raos_kpi_targets_branch_upsert(
   p_branch_id uuid,
   p_month date,
@@ -62,12 +87,20 @@ BEGIN
     RAISE EXCEPTION 'branch_not_soeta';
   END IF;
 
-  IF p_mode NOT IN ('saldo','order') THEN
-    RAISE EXCEPTION 'invalid_mode: %', p_mode;
+  IF p_mode <> 'order' THEN
+    RAISE EXCEPTION 'soeta_requires_order_mode: %', p_mode;
   END IF;
 
   IF p_target_cabang < 0 THEN
     RAISE EXCEPTION 'target_cabang_must_be_non_negative';
+  END IF;
+
+  IF p_target_staff_default IS NOT NULL AND p_target_staff_default < 0 THEN
+    RAISE EXCEPTION 'target_staff_default_must_be_non_negative';
+  END IF;
+
+  IF p_target_gmv IS NOT NULL AND p_target_gmv < 0 THEN
+    RAISE EXCEPTION 'target_gmv_must_be_non_negative';
   END IF;
 
   INSERT INTO public.raos_kpi_targets_branch (
@@ -119,8 +152,6 @@ DECLARE
   v_role text := public.get_my_role();
   v_month date := date_trunc('month', p_month)::date;
   v_row public.raos_kpi_targets_staff%rowtype;
-  v_branch_id uuid;
-  v_target_branch uuid;
 BEGIN
   IF auth.role() <> 'service_role'
      AND v_role <> ALL (ARRAY['admin','direksi']) THEN
@@ -139,29 +170,12 @@ BEGIN
     RAISE EXCEPTION 'target_gmv_must_be_non_negative';
   END IF;
 
-  SELECT up.branch_id, COALESCE(b.parent_branch_id, b.id)
-  INTO v_branch_id, v_target_branch
-  FROM public.user_profiles up
-  JOIN public.branches b ON b.id = up.branch_id
-  WHERE up.id = p_staff_id
-    AND up.is_active = true;
-
-  IF v_branch_id IS NULL THEN
-    RAISE EXCEPTION 'active_staff_not_found';
+  IF COALESCE(p_member_parkir_amount, 0) < 0 THEN
+    RAISE EXCEPTION 'member_parkir_amount_must_be_non_negative';
   END IF;
 
-  IF NOT public._is_soeta_branch(v_branch_id) THEN
-    RAISE EXCEPTION 'staff_not_in_soeta';
-  END IF;
-
-  -- Canonical SOETA staff membership from SSOT mirror.
-  IF NOT EXISTS (
-    SELECT 1
-    FROM public.raos_staff_master m
-    JOIN public.raos_soeta_staff_sheet_mirror sm ON sm.staff_id = m.staff_id
-    WHERE m.auth_user_id = p_staff_id
-  ) THEN
-    RAISE EXCEPTION 'staff_not_canonical_soeta';
+  IF NOT public._is_canonical_soeta_staff(p_staff_id) THEN
+    RAISE EXCEPTION 'staff_not_canonical_activated_soeta';
   END IF;
 
   INSERT INTO public.raos_kpi_targets_staff (
@@ -194,7 +208,7 @@ FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.raos_kpi_targets_staff_upsert(uuid,date,bigint,numeric,int)
 TO authenticated, service_role;
 
--- ---------- 3. Manual KPI inputs upsert (SOETA canonical staff only) ----------
+-- ---------- 3. Manual KPI inputs upsert (canonical SOETA staff only) ----------
 CREATE OR REPLACE FUNCTION public.raos_soeta_kpi_manual_inputs_upsert(
   p_staff_id uuid,
   p_month date,
@@ -212,7 +226,6 @@ DECLARE
   v_role text := public.get_my_role();
   v_month date := date_trunc('month', p_month)::date;
   v_row public.raos_soeta_kpi_manual_inputs%rowtype;
-  v_branch_id uuid;
 BEGIN
   IF auth.role() <> 'service_role'
      AND v_role <> ALL (ARRAY['admin','direksi']) THEN
@@ -235,26 +248,8 @@ BEGIN
     RAISE EXCEPTION 'coordinator_score_out_of_range';
   END IF;
 
-  SELECT up.branch_id INTO v_branch_id
-  FROM public.user_profiles up
-  WHERE up.id = p_staff_id
-    AND up.is_active = true;
-
-  IF v_branch_id IS NULL THEN
-    RAISE EXCEPTION 'active_staff_not_found';
-  END IF;
-
-  IF NOT public._is_soeta_branch(v_branch_id) THEN
-    RAISE EXCEPTION 'staff_not_in_soeta';
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM public.raos_staff_master m
-    JOIN public.raos_soeta_staff_sheet_mirror sm ON sm.staff_id = m.staff_id
-    WHERE m.auth_user_id = p_staff_id
-  ) THEN
-    RAISE EXCEPTION 'staff_not_canonical_soeta';
+  IF NOT public._is_canonical_soeta_staff(p_staff_id) THEN
+    RAISE EXCEPTION 'staff_not_canonical_activated_soeta';
   END IF;
 
   INSERT INTO public.raos_soeta_kpi_manual_inputs (
@@ -325,7 +320,8 @@ BEGIN
   WHERE m.is_activated = true
     AND m.auth_user_id IS NOT NULL
     AND up.is_active = true
-  ORDER BY sm.staff_id;
+    AND up.role IN ('staff','koordinator')
+  ORDER BY m.staff_id;
 END;
 $$;
 
@@ -336,4 +332,4 @@ GRANT EXECUTE ON FUNCTION public.raos_soeta_canonical_staff_list(date)
 TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.raos_soeta_canonical_staff_list(date) IS
-'Returns the canonical 43 linked/activated SOETA staff for the KPI admin UI.';
+'Returns the canonical activated SOETA staff for the KPI admin UI.';

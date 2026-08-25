@@ -7,7 +7,9 @@
 -- refresh cron runs. Finance/coordinator sees a mismatch that no longer exists.
 --
 -- Fix: AFTER UPDATE trigger on aist_jobs that refreshes the daily validation
--- for the matching branch and invoice date whenever a job reaches 'success'.
+-- for the ORIGINAL branch/invoice date whenever a job reaches 'success'.
+-- The invoice business date is derived from raos_saldo_requests.requested_at
+-- in the branch timezone — exactly the same logic as aist_refresh_invoice_daily.
 -- Idempotent: aist_refresh_invoice_daily uses ON CONFLICT DO UPDATE.
 -- Does not mutate the six specific production rows; only refreshes the
 -- validation summary after future state changes.
@@ -21,15 +23,26 @@ SET search_path = public
 AS $$
 DECLARE
   v_invoice_date date;
+  v_branch_id uuid;
+  v_requested_at timestamptz;
 BEGIN
   IF NEW.status = 'success' AND (OLD.status IS DISTINCT FROM 'success') THEN
-    SELECT (NEW.requested_at AT TIME ZONE COALESCE(NULLIF(b.timezone,''),'Asia/Jakarta'))::date
+    SELECT r.requested_at, r.branch_id
+    INTO v_requested_at, v_branch_id
+    FROM public.raos_saldo_requests r
+    WHERE r.id = NEW.request_id;
+
+    IF v_requested_at IS NULL THEN
+      RETURN NEW;
+    END IF;
+
+    SELECT (v_requested_at AT TIME ZONE COALESCE(NULLIF(b.timezone,''),'Asia/Jakarta'))::date
     INTO v_invoice_date
     FROM public.branches b
-    WHERE b.id = NEW.branch_id;
+    WHERE b.id = v_branch_id;
 
     IF v_invoice_date IS NOT NULL THEN
-      PERFORM public.aist_refresh_invoice_daily(NEW.branch_id, v_invoice_date);
+      PERFORM public.aist_refresh_invoice_daily(v_branch_id, v_invoice_date);
     END IF;
   END IF;
 

@@ -1,0 +1,63 @@
+const fs = require('fs')
+const path = require('path')
+const assert = require('assert')
+
+const root = path.resolve(__dirname, '../../..')
+
+const r127 = fs.readFileSync(path.join(root, 'sql/raos_127_soeta_kpi_payroll_final_readiness.sql'), 'utf8')
+const r128 = fs.readFileSync(path.join(root, 'sql/raos_128_soeta_payroll_base_prepare.sql'), 'utf8')
+const aist = fs.readFileSync(path.join(root, 'sql/raos_083d_aist_lifecycle_invoice_refresh.sql'), 'utf8')
+const uiKpi = fs.readFileSync(path.join(root, 'apps/pwa/src/app/admin/soeta-kpi/page.tsx'), 'utf8')
+
+// ---------- RAOS_128 base prepare semantics ----------
+assert(r128.includes("0, 0, 'na', auth.uid()"), 'base prepare values must end with 0,0,na,computed_by')
+assert(r128.includes('canonicalMasterCount'), 'must report canonicalMasterCount')
+assert(r128.includes('linkedActiveCount'), 'must report linkedActiveCount')
+assert(r128.includes('missingProfileCount'), 'must report missingProfileCount')
+assert(r128.includes('existingPayrollRows'), 'must report existingPayrollRows')
+assert(r128.includes('rowsToCreate'), 'must report rowsToCreate')
+assert(r128.includes('rowsToSkip'), 'must report rowsToSkip')
+assert(r128.includes('componentPolicy'), 'must return componentPolicy evidence')
+assert(r128.includes('gapokSource'), 'must report gapokSource')
+assert(r128.includes('bpjsPolicy'), 'must report bpjsPolicy')
+assert(r128.includes('paketDataPolicy'), 'must report paketDataPolicy')
+assert(r128.includes('memberParkirSource'), 'must report memberParkirSource')
+assert(r128.includes('bonusSaldoPolicy'), 'must report bonusSaldoPolicy')
+assert(r128.includes('bonusKpiPolicy'), 'must report bonusKpiPolicy')
+assert(r128.includes('statusTargetPolicy'), 'must report statusTargetPolicy')
+assert(r128.includes("'na until KPI assessed'"), 'statusTargetPolicy must explain na')
+assert(r128.includes("'0 for SOETA order mode'"), 'bonusSaldoPolicy must be 0')
+assert(r128.includes("'0 until six-pillar cutover'"), 'bonusKpiPolicy must be 0')
+assert(r128.includes('reconciliation_blocked'), 'must fail closed on structural blockers')
+assert(r128.includes('duplicate_canonical_master'), 'must detect duplicate canonical master')
+assert(r128.includes('duplicate_canonical_profile'), 'must detect duplicate canonical profile')
+assert(r128.includes('auth_linked_to_wrong_master'), 'must detect auth linked to wrong master')
+assert(r128.includes('inactive_linked_profile'), 'must detect inactive linked profile')
+assert(r128.includes('linked_master_not_activated'), 'must detect not-activated master')
+assert(r128.includes('non_soeta_profile_branch'), 'must detect non-SOETA branch')
+
+// ---------- Order-only SOETA and negative input ----------
+assert(r127.includes("soeta_requires_order_mode"), 'branch upsert must reject non-order mode')
+assert(r127.includes("p_target_staff_default IS NOT NULL AND p_target_staff_default < 0"), 'must validate target_staff_default null or >=0')
+assert(r127.includes("p_target_gmv IS NOT NULL AND p_target_gmv < 0"), 'must validate target_gmv null or >=0')
+assert(r127.includes('m.is_activated = true'), 'canonical staff helper must require is_activated')
+assert(r127.includes('m.auth_user_id = p_staff_id'), 'canonical staff helper must require auth_user_id = p_staff_id')
+
+// ---------- NULL vs zero semantics ----------
+assert(uiKpi.includes('numOrNull'), 'UI must preserve NULL vs explicit zero')
+assert(r127.includes('p_sop_score numeric DEFAULT NULL'), 'sop_score default NULL')
+assert(r127.includes('p_coaching_score numeric DEFAULT NULL'), 'coaching_score default NULL')
+assert(r127.includes('p_coordinator_score numeric DEFAULT NULL'), 'coordinator_score default NULL')
+assert(r127.includes('p_target_order bigint DEFAULT NULL'), 'target_order default NULL')
+assert(r127.includes('p_target_gmv numeric DEFAULT NULL'), 'target_gmv default NULL')
+
+// ---------- AIST original invoice date proof ----------
+assert(aist.includes('raos_saldo_requests r'), 'trigger must read from raos_saldo_requests')
+assert(aist.includes('r.requested_at'), 'trigger must use r.requested_at')
+assert(aist.includes('r.branch_id'), 'trigger must use r.branch_id')
+assert(aist.includes('Asia/Jakarta'), 'trigger must use branch timezone default')
+assert(aist.includes('aist_refresh_invoice_daily(v_branch_id, v_invoice_date)'), 'trigger must call refresh with original invoice date')
+assert(aist.includes('NEW.status = \'success\''), 'trigger must fire on success')
+assert(!aist.includes('NEW.requested_at AT TIME ZONE'), 'trigger must NOT use aist_jobs.requested_at directly')
+
+console.log('✅ SOETA KPI/Payroll Round 2B contract passed')

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { isPushSupported, subscribePush } from './push'
 
 const HEAL_TS_KEY = 'raos_push_heal_v2'
@@ -47,6 +48,7 @@ export function useAutoPushSubscribe(): void {
   const runningRef = useRef(false)
 
   useEffect(() => {
+    if (Capacitor.isNativePlatform()) return
     if (!isPushSupported()) return
 
     const heal = async (force = false) => {

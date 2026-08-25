@@ -3,8 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
+import { cacheInvalidate, cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
+import {
+  markNotificationRead,
+  archiveNotification,
+  unarchiveNotification,
+  countUnread,
+  dashboardUnreadCacheKey,
+} from '@/lib/notificationState'
 import AppShell from '@/components/layout/AppShell'
 import {
   ArrowLeft, Bell, CheckCircle2, ScanLine, UserCheck, Megaphone,
@@ -13,7 +20,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import clsx from 'clsx'
-import type { Notification, NotificationPriority, NotificationStatus } from '@/types'
+import type { Notification, NotificationPriority } from '@/types'
 import { branchDateTimeLabel } from '@/lib/branchTime'
 
 type Filter = 'today' | '7d' | '30d' | 'all'
@@ -83,7 +90,7 @@ export default function NotificationsPage() {
     let q = supabase.from('notifications').select('*').eq('user_id', uid)
     const since = windowStart(f)
     if (since) q = q.gte('created_at', since.toISOString())
-    if (s === 'unread')   q = q.neq('status', 'read').neq('status', 'archived')
+    if (s === 'unread')   q = q.eq('is_read', false).neq('status', 'archived')
     if (s === 'archived') q = q.eq('status', 'archived')
     const { data } = await q.order('created_at', { ascending: false }).limit(100)
     const rows=(data ?? []) as Notification[]
@@ -122,20 +129,55 @@ export default function NotificationsPage() {
     !!userId,
   )
 
-  // Auto-mark read: batch semua unread saat halaman dibuka (RPC cross-device sync)
-  useEffect(() => {
+  async function refreshDashboardCount() {
     if (!userId) return
-    const unread = notifications.filter(n => !n.is_read && n.status !== 'archived').map(n => n.id)
-    if (unread.length === 0) return
-    void supabase.rpc('raos_mark_notifications_read', { p_ids: unread })
-  }, [userId, notifications])
+    cacheInvalidate(dashboardUnreadCacheKey(userId))
+    const { count } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_read', false)
+      .neq('status', 'archived')
+    cacheWriteSync(dashboardUnreadCacheKey(userId), count ?? 0)
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('raos:notifications-read'))
+  }
+
+  async function markRead(id: string, targetUrl: string) {
+    if (!userId) return
+    const { error } = await supabase.rpc('raos_mark_notifications_read', { p_ids: [id] })
+    if (error) {
+      // Do not navigate or update UI on failure; the item is still unread.
+      console.warn('mark notification read failed:', error.message)
+      return
+    }
+    const now = new Date().toISOString()
+    setNotifications((prev) => markNotificationRead(prev, id, now))
+    await refreshDashboardCount()
+    router.push(targetUrl)
+  }
 
   async function archiveOne(id: string) {
-    await supabase.from('notifications').update({ status: 'archived' }).eq('id', id)
+    const { error } = await supabase.from('notifications').update({ status: 'archived' }).eq('id', id)
+    if (error) {
+      console.warn('archive notification failed:', error.message)
+      return
+    }
+    setNotifications((prev) => archiveNotification(prev, id))
+    await refreshDashboardCount()
   }
 
   async function unarchiveOne(id: string) {
-    await supabase.from('notifications').update({ status: 'read', is_read: true, read_at: new Date().toISOString() }).eq('id', id)
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('notifications')
+      .update({ status: 'read', is_read: true, read_at: now })
+      .eq('id', id)
+    if (error) {
+      console.warn('unarchive notification failed:', error.message)
+      return
+    }
+    setNotifications((prev) => unarchiveNotification(prev, id, now))
+    await refreshDashboardCount()
   }
 
   // Group by payload_type untuk header pemisah
@@ -149,7 +191,7 @@ export default function NotificationsPage() {
     return Array.from(map.entries())
   }, [notifications])
 
-  const totalUnread = notifications.filter(n => !n.is_read && n.status !== 'archived').length
+  const totalUnread = countUnread(notifications)
 
   return (
     <AppShell>
@@ -268,11 +310,12 @@ export default function NotificationsPage() {
                         </p>
                         <div className="flex items-center gap-1">
                           {targetUrl && (
-                            <Link href={targetUrl}
+                            <button
+                              onClick={() => markRead(notif.id, targetUrl)}
                               className="text-[10px] font-semibold text-primary hover:underline"
                             >
                               Buka →
-                            </Link>
+                            </button>
                           )}
                           {!isArchived && (
                             <button

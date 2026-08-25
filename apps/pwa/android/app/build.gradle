@@ -29,32 +29,32 @@ android {
         staff {
             dimension "role"
             applicationIdSuffix ".staff"
-            resValue "string", "app_name", "Staff"
+            resValue "string", "app_name", "RAOS Staff"
         }
         driver {
             dimension "role"
             applicationIdSuffix ".driver"
-            resValue "string", "app_name", "Driver"
+            resValue "string", "app_name", "RAOS Driver"
         }
         koordinator {
             dimension "role"
             applicationIdSuffix ".koordinator"
-            resValue "string", "app_name", "Koordinator"
+            resValue "string", "app_name", "RAOS Koordinator"
         }
         management {
             dimension "role"
             applicationIdSuffix ".management"
-            resValue "string", "app_name", "Management"
+            resValue "string", "app_name", "RAOS Management"
         }
         admin {
             dimension "role"
             applicationIdSuffix ".admin"
-            resValue "string", "app_name", "Admin"
+            resValue "string", "app_name", "RAOS Admin"
         }
         direksi {
             dimension "role"
             applicationIdSuffix ".direksi"
-            resValue "string", "app_name", "Direksi"
+            resValue "string", "app_name", "RAOS Direksi"
         }
     }
 }

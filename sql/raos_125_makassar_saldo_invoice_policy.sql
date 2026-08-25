@@ -25,7 +25,7 @@ BEGIN
 END $$;
 
 UPDATE public.branches
-SET saldo_nominal_options = ARRAY[45000,95000,140000,190000]::integer[]
+SET saldo_nominal_options = '[45000,95000,140000,190000]'::jsonb
 WHERE code = 'UPG' AND is_active = true;
 
 CREATE OR REPLACE FUNCTION public.raos_saldo_invoice_nominal(

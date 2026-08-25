@@ -2,10 +2,12 @@
 -- raos_125: Makassar saldo net tiers + invoice display policy
 -- ============================================================================
 -- Scope: ONLY canonical Makassar branch code UPG.
--- Net saldo request tiers:
+-- New net saldo request tiers:
 --   45.000, 95.000, 140.000, 190.000
 -- Invoice display tiers:
 --   50.000, 100.000, 150.000, 200.000
+-- Legacy Makassar 145.000 / 195.000 remain display-compatible as
+-- 150.000 / 200.000 in history, but are no longer selectable new net tiers.
 -- Other branches are unchanged.
 -- Raw raos_saldo_requests.nominal and aist_jobs.nominal remain the NET amount.
 -- ============================================================================
@@ -44,7 +46,9 @@ AS $$
       WHEN 45000 THEN 50000
       WHEN 95000 THEN 100000
       WHEN 140000 THEN 150000
+      WHEN 145000 THEN 150000
       WHEN 190000 THEN 200000
+      WHEN 195000 THEN 200000
       ELSE p_nominal
     END
     ELSE p_nominal
@@ -55,4 +59,4 @@ REVOKE ALL ON FUNCTION public.raos_saldo_invoice_nominal(uuid,numeric) FROM PUBL
 GRANT EXECUTE ON FUNCTION public.raos_saldo_invoice_nominal(uuid,numeric) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.raos_saldo_invoice_nominal(uuid,numeric) IS
-  'Read-only invoice display amount. UPG/Makassar rounds 45/95/140/190k net saldo to 50/100/150/200k invoice; other branches unchanged.';
+  'Read-only invoice display amount. UPG/Makassar rounds new 45/95/140/190k and legacy 145/195k net values to 50/100/150/200k invoice; other branches unchanged.';

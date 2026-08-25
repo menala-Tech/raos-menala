@@ -26,7 +26,8 @@ assert(sql.includes("p_sop_score numeric"), 'manual inputs must accept sop_score
 assert(sql.includes("p_coaching_score numeric"), 'manual inputs must accept coaching_score')
 assert(sql.includes("p_coordinator_score numeric"), 'manual inputs must accept coordinator_score')
 
-assert(sql.includes("p_mode NOT IN ('saldo','order')"), 'branch upsert must validate mode')
+assert(sql.includes("p_mode <> 'order'"), 'branch upsert must validate mode')
+assert(sql.includes('soeta_requires_order_mode'), 'branch upsert must reject non-order mode with soeta_requires_order_mode')
 assert(sql.includes('sop_score_out_of_range'), 'manual inputs must validate sop 0-100')
 assert(sql.includes('coaching_score_out_of_range'), 'manual inputs must validate coaching 0-100')
 assert(sql.includes('coordinator_score_out_of_range'), 'manual inputs must validate coordinator 0-100')

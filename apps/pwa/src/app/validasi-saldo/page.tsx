@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { loadProfileLabels } from '@/lib/chatProfileDirectory'
 import { can } from '@/lib/accessPolicy'
+import { saldoInvoiceNominal } from '@/lib/saldoInvoice'
 import { cacheReadSync, cacheWriteSync } from '@/lib/apiCache'
 import { useRealtimeRefresh } from '@/lib/useRealtimeRefresh'
 import AppShell from '@/components/layout/AppShell'
@@ -99,9 +100,9 @@ export default function ValidasiSaldoPage() {
   })
 
   const totals = {
-    menunggu: requests.filter(r => !r.is_processed && r.status === 'pending').reduce((s, r) => s + Number(r.nominal), 0),
-    sudah:    requests.filter(r => r.is_processed).reduce((s, r) => s + Number(r.nominal), 0),
-    ditolak:  requests.filter(r => r.status === 'rejected' || r.status === 'cancelled').reduce((s, r) => s + Number(r.nominal), 0),
+    menunggu: requests.filter(r => !r.is_processed && r.status === 'pending').reduce((s, r) => s + saldoInvoiceNominal(null, r.nominal), 0),
+    sudah:    requests.filter(r => r.is_processed).reduce((s, r) => s + saldoInvoiceNominal(null, r.nominal), 0),
+    ditolak:  requests.filter(r => r.status === 'rejected' || r.status === 'cancelled').reduce((s, r) => s + saldoInvoiceNominal(null, r.nominal), 0),
   }
 
   // View-only. Finance owns mark-paid mutation.
@@ -195,7 +196,13 @@ export default function ValidasiSaldoPage() {
                     <span className="text-[11px] text-gray-500">
                       {branchDateTimeLabel(req.branch?.timezone, new Date(req.requested_at))}
                     </span>
-                    <span className="text-sm font-black text-primary">Rp{Number(req.nominal).toLocaleString('id-ID')}</span>
+                    <div className="text-right">
+                      <p className="text-[9px] font-bold uppercase text-gray-400">Invoice</p>
+                      <p className="text-sm font-black">Rp{saldoInvoiceNominal(null, req.nominal).toLocaleString('id-ID')}</p>
+                      {saldoInvoiceNominal(null, req.nominal) !== Number(req.nominal) && (
+                        <p className="text-[9px] text-gray-400">Saldo Rp{Number(req.nominal).toLocaleString('id-ID')}</p>
+                      )}
+                    </div>
                   </div>
                   {req.rejection_reason && (
                     <p className="text-[11px] text-red-500 mt-1">{req.rejection_reason}</p>

@@ -24,7 +24,8 @@ function onOpen() {
     )
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('👥 Staff')
-        .addItem('🔄 Sync Staff Soeta (SSOT MASTER DATA STAFF)', 'syncStaffFromSSOT')
+        .addItem('🔄 Sync Staff SOETA (SSOT Database Staff Soeta)', 'syncSoetaStaffDatabaseSsot_MENU')
+        .addItem('🔄 Sync Staff Cabang Lain (MASTER DATA STAFF)', 'syncStaffFromSSOT')
         .addItem('📥 Import Staff Master (XLSX)', 'importStaffMasterFromXlsx_MENU')
         .addItem('✉️ Set Email Staff Master', 'setStaffMasterEmail_MENU')
         .addItem('🔗 Link Auth Staff Master', 'linkStaffMasterAuth_MENU')
@@ -114,7 +115,8 @@ function initSistemConfig() {
     ['COMPANY_NAME',            'PT. Rifim Internasional Gemilang', 'Nama perusahaan'],
     ['APP_VERSION',             '2.0.0-multicabang', 'Versi aplikasi RAOS (P1-P3 multi-cabang)'],
     // ── SSoT sources ──
-    ['SSOT_STAFF_SHEET_ID',     '1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw', 'Spreadsheet MASTER DATA STAFF'],
+    ['SSOT_SOETA_STAFF_SHEET_ID','13aVdbdeS0UOZ1pnfu3J-bJ99oLn4ugdYwFPd9tbg_dQ', 'Spreadsheet Database Staff Soeta — canonical staff SOETA'],
+    ['SSOT_STAFF_SHEET_ID',     '1fcraq3QHqIaD-13Ebzt6stT9aA6j_loTXeAtpNX12kw', 'Spreadsheet MASTER DATA STAFF untuk cabang lain'],
     ['SSOT_DRIVER_SHEET_ID',    '1FEZxyHPx_GCQKw92hLSf6QxxkXgZn5R1sRswOYM_Tlc', 'Spreadsheet Database Driver Airport'],
     ['SUPABASE_URL',            'https://vlievtojpmrbsmzlqswl.supabase.co', 'URL project Supabase RAOS'],
   ]

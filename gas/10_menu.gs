@@ -25,6 +25,9 @@ function onOpen() {
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu('👥 Staff')
         .addItem('🔄 Sync Staff Soeta (SSOT MASTER DATA STAFF)', 'syncStaffFromSSOT')
+        .addItem('📥 Import Staff Master (XLSX)', 'importStaffMasterFromXlsx_MENU')
+        .addItem('✉️ Set Email Staff Master', 'setStaffMasterEmail_MENU')
+        .addItem('🔗 Link Auth Staff Master', 'linkStaffMasterAuth_MENU')
         .addItem('🔐 Sync RAOS Credentials (kolom I RAOS PIN + J RAOS ID)', 'menuSyncRaosCredentials')
     )
     .addSubMenu(

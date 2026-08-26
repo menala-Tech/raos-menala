@@ -1,5 +1,5 @@
 # STATUS.md — RAOS (Menala Multi-Cabang PWA)
-*Diupdate: 2026-08-13 (sesi cek eror — P8 RAOS PIN bridge documented + Jadwal Kerja shift roster ganti Lokasi & Pickup Point)*
+*Diupdate: 2026-08-27 (POST-FIELD-UAT CORRECTIVE PACK final fixes — Item 3/4)*
 
 ## COLLABORATION LOG
 
@@ -9,6 +9,8 @@ Append-only log siapa commit apa kapan — dipakai AI kedua/ketiga tahu
 context terkini sebelum edit file. Baca panduan lengkap di
 [docs/COLLABORATION.md](docs/COLLABORATION.md).
 
+- [2026-08-27 CC] a892a1d fix(Item 3): add raos_verify_login_secret to QA migration — RIFIM Preview auth 5xx root cause identified: RPC exists in production Supabase (vlievtojpmrbsmzlqswl) but missing in QA (cdlkujllqnrurgecoaur, used by Preview). Edge function raos-login-exchange calls RPC → undefined function → 5xx. Migration 20260827100000 adds full function definition. Must apply to QA manually via supabase db push. Commit also documents architect sign-off path.
+- [2026-08-27 CC] fabad3c fix(Item 4): restore Siang (S) shift — architect blocker confirmed: Supabase public.shifts has all four shifts pre-existing (Pagi/Middle/Siang/Malam). Previous code incorrectly mapped both Siang + Middle → MI code, breaking Siang entirely. Corrected: WorkShiftCode now P|MI|S|M|-; shiftCodeFromName maps distinctly; buildShiftChoices/WeeklyScheduleTab/tests all updated. Test suite PASS. All four shifts restored in picker.
 - [2026-08-13 CC] e20e41c feat(settings): Settings > "Lokasi & Pickup
   Point" diganti "Jadwal Kerja" — section lama percuma buat 8/9 cabang
   (cuma T1/T2/T3 Soeta punya pickup_points; pickup_point_id absensi/scan

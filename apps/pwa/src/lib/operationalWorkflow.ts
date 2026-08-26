@@ -1,7 +1,9 @@
-export type WorkShiftCode = 'P' | 'S' | 'M' | '-'
+// Item 4: P = Pagi · MI = Middle · S = Siang · M = Malam · - = Libur.
+export type WorkShiftCode = 'P' | 'MI' | 'S' | 'M' | '-'
 
 export const SHIFT_CODE_LABELS: Record<WorkShiftCode, string> = {
   P: 'Pagi',
+  MI: 'Middle',
   S: 'Siang',
   M: 'Malam',
   '-': 'Libur',
@@ -79,6 +81,7 @@ export function shiftCodeFromName(name?: string | null): WorkShiftCode | null {
   const normalized = String(name ?? '').trim().toLowerCase()
   if (!normalized) return null
   if (normalized.includes('pagi')) return 'P'
+  if (normalized.includes('middle')) return 'MI'
   if (normalized.includes('siang')) return 'S'
   if (normalized.includes('malam')) return 'M'
   if (normalized.includes('libur')) return '-'

@@ -12,6 +12,8 @@ const code = `
 
   assert.equal(workflow.shiftCodeFromName('Pagi'), 'P')
   assert.equal(workflow.shiftCodeFromName('Shift Siang'), 'S')
+  assert.equal(workflow.shiftCodeFromName('Middle'), 'MI')
+  assert.equal(workflow.shiftCodeFromName('Shift Middle'), 'MI')
   assert.equal(workflow.shiftCodeFromName('Malam'), 'M')
   assert.equal(workflow.shiftCodeFromName(null), null)
   assert.equal(workflow.isStaffWorkReminderEligibleRole('staff'), true)
@@ -69,7 +71,36 @@ const code = `
   const nextReminder = workflow.createWorkReminderPlan(siang, { enabled: true, leadMinutes: 30 })
   const changed = workflow.diffWorkReminderPlans(reminder, nextReminder)
   assert.deepEqual(changed.cancelKeys, ['work-reminder:staff-a:2026-08-24:P'])
+  assert.equal(nextReminder.key, 'work-reminder:staff-a:2026-08-24:S')
   assert.equal(changed.schedule?.key, 'work-reminder:staff-a:2026-08-24:S')
+
+  const middle = workflow.normalizeScheduleAssignment({
+    userId: 'staff-a',
+    branchId: 'branch-a',
+    workDate: '2026-08-24',
+    shiftId: 'shift-mi',
+    shiftName: 'Shift Middle',
+    startTime: '10:00',
+    endTime: '18:00',
+  })
+  assert.equal(middle.shiftCode, 'MI')
+  const middleReminder = workflow.createWorkReminderPlan(middle, { enabled: true, leadMinutes: 30 })
+  assert.equal(middleReminder.key, 'work-reminder:staff-a:2026-08-24:MI')
+  assert.notEqual(middle.shiftCode, siang.shiftCode)
+  assert.notEqual(middleReminder.key, nextReminder.key)
+
+  const malam = workflow.normalizeScheduleAssignment({
+    userId: 'staff-a',
+    branchId: 'branch-a',
+    workDate: '2026-08-24',
+    shiftId: 'shift-m',
+    shiftName: 'Malam',
+    startTime: '22:00',
+    endTime: '06:00',
+  })
+  assert.equal(malam.shiftCode, 'M')
+  const malamReminder = workflow.createWorkReminderPlan(malam, { enabled: true, leadMinutes: 30 })
+  assert.equal(malamReminder.key, 'work-reminder:staff-a:2026-08-24:M')
 
   const duplicate = workflow.diffWorkReminderPlans(nextReminder, nextReminder)
   assert.deepEqual(duplicate.cancelKeys, [])

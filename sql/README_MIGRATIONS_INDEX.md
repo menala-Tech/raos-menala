@@ -6,6 +6,11 @@ File `.sql` di folder ini adalah backup/audit trail; kalau tidak ada di sini,
 fetch dari Supabase dashboard atau via MCP `execute_sql SELECT statements
 FROM supabase_migrations.schema_migrations WHERE name='...'`.
 
+## Owner-approved, not yet applied to QA or production
+
+### 2026-08-26 — Shift Middle attendance windows
+- `raos_129_shift_middle_windows.sql` — OWNER-APPROVED; NOT YET APPLIED to QA or production.
+
 ## Belum di-commit ke folder sql/ (debt, 2026-08-06)
 
 Semua di-apply Supabase tapi tidak ada di git RAOS/sql/:

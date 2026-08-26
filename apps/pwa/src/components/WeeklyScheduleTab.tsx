@@ -76,7 +76,8 @@ function buildShiftChoices(shifts: Shift[]): ShiftChoice[] {
     const code = shiftCodeFromName(shift.name)
     if (code && code !== '-' && !byCode.has(code)) byCode.set(code, shift)
   }
-  return (['P', 'S', 'M'] as const)
+  // Item 4 (2026-08-26): expose Middle (MI) di picker sebagai ganti S.
+  return (['P', 'MI', 'M'] as const)
     .map(code => {
       const shift = byCode.get(code)
       return shift ? { code, label: SHIFT_CODE_LABELS[code], shift } : null
@@ -305,7 +306,7 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
       </div>
 
       <div className="rounded-lg bg-gray-50 px-3 py-2 text-[10px] text-gray-500">
-        <p className="font-bold text-gray-600">P = Pagi · S = Siang · M = Malam · - = Libur</p>
+        <p className="font-bold text-gray-600">P = Pagi · MI = Middle · M = Malam · - = Libur</p>
         <p className="mt-1">Jadwal menyimpan Nama, Tanggal, dan shift ke raos_shift_schedules. Admin dapat mengubah semua cabang; Koordinator dikunci ke cabang sendiri; role lain lihat saja.</p>
       </div>
 

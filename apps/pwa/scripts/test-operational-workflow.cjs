@@ -11,7 +11,11 @@ const code = `
   const workflow = await import(${JSON.stringify(workflowUrl)})
 
   assert.equal(workflow.shiftCodeFromName('Pagi'), 'P')
-  assert.equal(workflow.shiftCodeFromName('Shift Siang'), 'S')
+  // Item 4 (2026-08-26): Middle canonical code = 'MI'.
+  // Legacy "Siang" shift name still maps to MI so existing DB rows stay valid.
+  assert.equal(workflow.shiftCodeFromName('Shift Siang'), 'MI')
+  assert.equal(workflow.shiftCodeFromName('Middle'), 'MI')
+  assert.equal(workflow.shiftCodeFromName('Shift Middle'), 'MI')
   assert.equal(workflow.shiftCodeFromName('Malam'), 'M')
   assert.equal(workflow.shiftCodeFromName(null), null)
   assert.equal(workflow.isStaffWorkReminderEligibleRole('staff'), true)
@@ -69,14 +73,14 @@ const code = `
   const nextReminder = workflow.createWorkReminderPlan(siang, { enabled: true, leadMinutes: 30 })
   const changed = workflow.diffWorkReminderPlans(reminder, nextReminder)
   assert.deepEqual(changed.cancelKeys, ['work-reminder:staff-a:2026-08-24:P'])
-  assert.equal(changed.schedule?.key, 'work-reminder:staff-a:2026-08-24:S')
+  assert.equal(changed.schedule?.key, 'work-reminder:staff-a:2026-08-24:MI')
 
   const duplicate = workflow.diffWorkReminderPlans(nextReminder, nextReminder)
   assert.deepEqual(duplicate.cancelKeys, [])
   assert.equal(duplicate.schedule, null)
 
   const removed = workflow.diffWorkReminderPlans(nextReminder, liburReminder)
-  assert.deepEqual(removed.cancelKeys, ['work-reminder:staff-a:2026-08-24:S'])
+  assert.deepEqual(removed.cancelKeys, ['work-reminder:staff-a:2026-08-24:MI'])
   assert.equal(removed.schedule, null)
 
   const otherUser = workflow.createWorkReminderPlan({ ...pagi, userId: 'staff-b' }, { enabled: true, leadMinutes: 30 })

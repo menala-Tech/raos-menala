@@ -1,8 +1,13 @@
-export type WorkShiftCode = 'P' | 'S' | 'M' | '-'
+// Item 4 (2026-08-26): Owner contract — Koordinator picker shows
+//   P = Pagi · MI = Middle · M = Malam · - = Libur
+// DB shift row name (e.g. "Siang") stays intact; only the visible code +
+// label change. `shiftCodeFromName()` maps both "siang" and "middle" → 'MI'
+// so historical rows keep resolving correctly without migration.
+export type WorkShiftCode = 'P' | 'MI' | 'M' | '-'
 
 export const SHIFT_CODE_LABELS: Record<WorkShiftCode, string> = {
   P: 'Pagi',
-  S: 'Siang',
+  MI: 'Middle',
   M: 'Malam',
   '-': 'Libur',
 }
@@ -79,7 +84,8 @@ export function shiftCodeFromName(name?: string | null): WorkShiftCode | null {
   const normalized = String(name ?? '').trim().toLowerCase()
   if (!normalized) return null
   if (normalized.includes('pagi')) return 'P'
-  if (normalized.includes('siang')) return 'S'
+  // Item 4: both legacy "Siang" and new "Middle" map to canonical 'MI'.
+  if (normalized.includes('siang') || normalized.includes('middle')) return 'MI'
   if (normalized.includes('malam')) return 'M'
   if (normalized.includes('libur')) return '-'
   return null

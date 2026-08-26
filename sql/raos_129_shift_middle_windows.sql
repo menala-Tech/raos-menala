@@ -1,4 +1,4 @@
--- RAOS 129 (DRAFT — NOT APPLIED) — canonical Middle (MI) window-based shift
+-- RAOS 129 (NOT YET APPLIED — pending owner final gate) — canonical Middle (MI) window-based shift
 -- 2026-08-26 · post-field-UAT Item 4
 --
 -- OWNER CONTRACT
@@ -23,12 +23,10 @@
 --   That is a payroll change, which is forbidden. Hence explicit window columns,
 --   NULL for Pagi/Siang/Malam so their behaviour and payroll stay bit-identical.
 --
--- OPEN OWNER DECISION (currently implemented = REJECT_EARLY / FLAG_LATE)
---   Out-of-window early is rejected (no attendance row can be opened early).
---   Out-of-window late is recorded as 'terlambat' instead of rejected, matching
---   Pagi/Siang/Malam semantics — a rejected late check-in would leave the staff
---   with no attendance row at all. Flip the two guards marked
---   [OWNER-TOGGLE:HARD_REJECT_LATE] to hard-reject instead.
+-- OWNER-CONFIRMED 2026-08-26: check-in before 10:00 is rejected; check-in
+--   after 12:00 is recorded as 'terlambat' with late measured from 12:00.
+--   Check-out before 19:00 is rejected; check-out after 23:00 is recorded
+--   (not rejected) to preserve the attendance row and avoid forced auto-checkout.
 
 begin;
 
@@ -308,8 +306,7 @@ begin
           detail = 'window=' || to_char(resolved_ci_start,'HH24:MI') || '-' || to_char(resolved_ci_end,'HH24:MI');
       end if;
       if local_minutes > ci_end_min then
-        -- [OWNER-TOGGLE:HARD_REJECT_LATE] replace the two lines below with:
-        --   raise exception 'checkin_after_window' using detail = ...;
+        -- Owner-confirmed: record after 12:00 as 'terlambat', measured from 12:00.
         status_val := 'terlambat';
         late_min := local_minutes - ci_end_min;
       else
@@ -444,10 +441,7 @@ begin
         raise exception 'checkout_before_window' using
           detail = 'window=' || to_char(shift_row.check_out_start,'HH24:MI') || '-' || to_char(shift_row.check_out_end,'HH24:MI');
       end if;
-      -- [OWNER-TOGGLE:HARD_REJECT_LATE] to reject a late check-out add:
-      --   if local_minutes > co_end_min then raise exception 'checkout_after_window'; end if;
-      -- Default keeps the check-out recordable after 23:00 so the shift can be
-      -- closed manually instead of falling to auto_checkout.
+      -- Owner-confirmed: record after 23:00; do not reject or force auto-checkout.
     end if;
   end if;
 

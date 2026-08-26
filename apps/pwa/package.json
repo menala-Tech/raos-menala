@@ -12,10 +12,11 @@
     "test:notifications": "node scripts/test-notification-engine-v2.cjs",
     "test:unread": "node scripts/test-notification-unread.cjs",
     "test:schedule": "node scripts/test-android-schedule-settings.cjs",
+    "test:shift-window": "node scripts/test-shift-window-contract.cjs",
     "test:workflow": "node scripts/test-operational-workflow.cjs",
     "test:work-reminders": "node scripts/test-native-work-reminders.cjs",
     "test:mobile": "node scripts/test-mobile-chat-media.cjs",
-    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications && npm run test:unread && npm run test:schedule && npm run test:workflow && npm run test:work-reminders && npm run test:mobile"
+    "check": "npm run lint && npm run typecheck && npm run test:access && npm run test:notifications && npm run test:unread && npm run test:schedule && npm run test:shift-window && npm run test:workflow && npm run test:work-reminders && npm run test:mobile"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

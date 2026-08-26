@@ -45,7 +45,7 @@ CREATE TABLE public.user_profiles (
 );
 
 CREATE TABLE public.raos_attendance (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   staff_id uuid NOT NULL,
   branch_id uuid,
   date date NOT NULL,
@@ -314,20 +314,231 @@ ORDER BY label;
 
 \ir ../raos_129_shift_middle_windows.sql
 
-CREATE FUNCTION public.harness_assert_equal(
+CREATE FUNCTION public.harness_capture_target(
+  p_target_date date,
+  p_target_time time
+)
+RETURNS timestamptz
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_now timestamptz := clock_timestamp();
+  v_now_local timestamp := v_now AT TIME ZONE 'Asia/Jakarta';
+  v_target_local timestamp := p_target_date::timestamp + p_target_time;
+  v_raw_offset interval := v_now_local - v_target_local;
+  v_offset interval;
+  v_timezone text := 'Asia/Jakarta';
+BEGIN
+  -- Use the requested date/time directly. A future target is represented in
+  -- the past with a temporary UTC+14 branch timezone; this keeps the target
+  -- on the requested local date rather than silently wrapping to yesterday.
+  IF v_raw_offset < interval '0' THEN
+    v_timezone := 'Etc/GMT-14';
+  ELSIF v_raw_offset <= interval '6 minutes' THEN
+    v_timezone := 'Etc/GMT-8';
+  ELSIF v_raw_offset >= interval '23 hours 55 minutes' THEN
+    v_timezone := 'Etc/GMT-6';
+  END IF;
+
+  v_now_local := v_now AT TIME ZONE v_timezone;
+  v_offset := v_now_local - v_target_local;
+  IF v_offset < interval '0' THEN
+    v_offset := v_offset + interval '24 hours';
+  END IF;
+
+  IF v_offset <= interval '5 minutes' OR v_offset >= interval '24 hours' THEN
+    RAISE EXCEPTION
+      'HARNESS TIMESTAMP FAILURE: target % % produced offset % outside permitted band',
+      p_target_date, p_target_time, v_offset;
+  END IF;
+
+  UPDATE public.branches
+  SET timezone = v_timezone
+  WHERE id = '11111111-1111-1111-1111-111111111111';
+
+  RETURN v_now - v_offset;
+END;
+$$;
+
+CREATE FUNCTION public.harness_assert_checkin(
   p_label text,
-  p_expected text,
-  p_actual text
+  p_target_date date,
+  p_target_time time,
+  p_shift_id uuid,
+  p_expected_status text,
+  p_expected_late integer,
+  p_expected_deduction numeric,
+  p_expected_error text,
+  p_expected_shift_id uuid
 )
 RETURNS text
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  v_captured_at timestamptz;
+  v_result jsonb;
+  v_error text;
+  v_status text;
+  v_shift_id uuid;
+  v_late integer;
+  v_deduction numeric;
 BEGIN
-  IF p_actual IS DISTINCT FROM p_expected THEN
-    RAISE EXCEPTION 'ASSERTION FAILED: % expected [%], actual [%]',
-      p_label, p_expected, p_actual;
+  TRUNCATE public.raos_attendance;
+  DELETE FROM public.raos_shift_schedules;
+  v_captured_at := public.harness_capture_target(p_target_date, p_target_time);
+  IF p_shift_id IS NOT NULL THEN
+    INSERT INTO public.raos_shift_schedules (
+      staff_id, branch_id, tanggal, shift_id
+    )
+    VALUES (
+      '22222222-2222-2222-2222-222222222222',
+      '11111111-1111-1111-1111-111111111111',
+      (
+        v_captured_at AT TIME ZONE (
+          SELECT timezone
+          FROM public.branches
+          WHERE id = '11111111-1111-1111-1111-111111111111'
+        )
+      )::date,
+      p_shift_id
+    );
   END IF;
-  RETURN p_label || ' -> ' || p_actual;
+
+  BEGIN
+    v_result := public.raos_attendance_check_in(0, 0, 'harness', v_captured_at);
+  EXCEPTION WHEN OTHERS THEN
+    v_error := SQLERRM;
+  END;
+
+  UPDATE public.branches
+  SET timezone = 'Asia/Jakarta'
+  WHERE id = '11111111-1111-1111-1111-111111111111';
+
+  IF p_expected_error IS NOT NULL THEN
+    IF v_error IS DISTINCT FROM p_expected_error THEN
+      RAISE EXCEPTION
+        'ASSERTION FAILED: % expected exception [%], actual [%]',
+        p_label, p_expected_error, coalesce(v_error, v_result::text);
+    END IF;
+    RETURN p_label || ' -> exception ' || v_error;
+  END IF;
+
+  IF v_error IS NOT NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: % unexpected exception [%]', p_label, v_error;
+  END IF;
+
+  v_status := v_result->'row'->>'status';
+  v_shift_id := (v_result->'row'->>'shift_id')::uuid;
+  v_late := (v_result->'row'->>'late_minutes')::integer;
+  v_deduction := (v_result->'row'->>'late_deduction_idr')::numeric;
+
+  IF p_expected_status IS NOT NULL AND v_status IS DISTINCT FROM p_expected_status THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: % expected status [%], actual [%]',
+      p_label, p_expected_status, v_status;
+  END IF;
+  IF p_expected_late IS NOT NULL AND v_late IS DISTINCT FROM p_expected_late THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: % expected late_minutes [%], actual [%]',
+      p_label, p_expected_late, v_late;
+  END IF;
+  IF p_expected_deduction IS NOT NULL
+     AND v_deduction IS DISTINCT FROM p_expected_deduction THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: % expected deduction [%], actual [%]',
+      p_label, p_expected_deduction, v_deduction;
+  END IF;
+  IF p_expected_shift_id IS NOT NULL AND v_shift_id IS DISTINCT FROM p_expected_shift_id THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: % expected shift_id [%], actual [%]',
+      p_label, p_expected_shift_id, v_shift_id;
+  END IF;
+
+  RETURN p_label || ' -> status=' || v_status
+    || ' shift_id=' || v_shift_id
+    || ' late_minutes=' || v_late
+    || ' late_deduction_idr=' || v_deduction;
+END;
+$$;
+
+CREATE FUNCTION public.harness_assert_checkout(
+  p_label text,
+  p_shift_id uuid,
+  p_checkin_time time,
+  p_checkout_date date,
+  p_checkout_time time,
+  p_checkin_days_before_checkout integer,
+  p_expected_error text
+)
+RETURNS text
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_captured_at timestamptz;
+  v_result jsonb;
+  v_error text;
+  v_checkout_date date;
+  v_seed_date date;
+BEGIN
+  v_captured_at := public.harness_capture_target(p_checkout_date, p_checkout_time);
+  SELECT (
+    v_captured_at AT TIME ZONE timezone
+  )::date
+  INTO v_checkout_date
+  FROM public.branches
+  WHERE id = '11111111-1111-1111-1111-111111111111';
+  UPDATE public.branches
+  SET timezone = 'Asia/Jakarta'
+  WHERE id = '11111111-1111-1111-1111-111111111111';
+
+  v_seed_date := v_checkout_date - p_checkin_days_before_checkout;
+  PERFORM public.harness_assert_checkin(
+    'seed ' || p_label,
+    v_seed_date,
+    p_checkin_time,
+    p_shift_id,
+    'hadir',
+    0,
+    0,
+    NULL,
+    p_shift_id
+  );
+
+  IF p_checkin_days_before_checkout > 0 THEN
+    -- The production RPC keys attendance by the captured local date and does
+    -- not look back for an overnight row. Keep the check-in timestamp created
+    -- by the real RPC, but bridge its attendance date to the next work date so
+    -- the real checkout RPC can exercise the legacy no-window path.
+    UPDATE public.raos_attendance
+    SET date = v_checkout_date
+    WHERE staff_id = '22222222-2222-2222-2222-222222222222';
+  END IF;
+
+  v_captured_at := public.harness_capture_target(p_checkout_date, p_checkout_time);
+  BEGIN
+    v_result := public.raos_attendance_check_out(0, 0, 'harness', v_captured_at);
+  EXCEPTION WHEN OTHERS THEN
+    v_error := SQLERRM;
+  END;
+
+  UPDATE public.branches
+  SET timezone = 'Asia/Jakarta'
+  WHERE id = '11111111-1111-1111-1111-111111111111';
+
+  IF p_expected_error IS NOT NULL THEN
+    IF v_error IS DISTINCT FROM p_expected_error THEN
+      RAISE EXCEPTION
+        'ASSERTION FAILED: % expected exception [%], actual [%]',
+        p_label, p_expected_error, coalesce(v_error, v_result::text);
+    END IF;
+    RETURN p_label || ' -> exception ' || v_error;
+  END IF;
+
+  IF v_error IS NOT NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: % unexpected exception [%]', p_label, v_error;
+  END IF;
+  IF (v_result->>'status') IS DISTINCT FROM 'checked_out'
+     OR (v_result->'row'->>'check_out_at') IS NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: % expected recorded checkout, actual [%]',
+      p_label, v_result;
+  END IF;
+  RETURN p_label || ' -> recorded';
 END;
 $$;
 
@@ -375,320 +586,188 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION public.harness_middle_checkin_guard(p_local_time time)
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  local_minutes integer :=
-    extract(hour FROM p_local_time)::integer * 60
-    + extract(minute FROM p_local_time)::integer;
-  v_check_in_start time;
-  v_check_in_end time;
-BEGIN
-  SELECT check_in_start, check_in_end
-    INTO v_check_in_start, v_check_in_end
-    FROM public.shifts
-    WHERE lower(trim(name)) = 'middle';
-  IF local_minutes <
-     extract(hour FROM v_check_in_start)::integer * 60
-     + extract(minute FROM v_check_in_start)::integer THEN
-    RAISE EXCEPTION 'checkin_before_window';
-  END IF;
-  IF local_minutes >
-     extract(hour FROM v_check_in_end)::integer * 60
-     + extract(minute FROM v_check_in_end)::integer THEN
-    RETURN 'terlambat late_minutes=' || (
-      local_minutes
-      - extract(hour FROM v_check_in_end)::integer * 60
-      - extract(minute FROM v_check_in_end)::integer
-    );
-  END IF;
-  RETURN 'hadir late_minutes=0 late_deduction_idr=0';
-END;
-$$;
-
-CREATE FUNCTION public.harness_middle_checkin_result(p_local_time time)
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RETURN public.harness_middle_checkin_guard(p_local_time);
-EXCEPTION WHEN OTHERS THEN
-  RETURN 'exception ' || SQLERRM;
-END;
-$$;
-
-CREATE FUNCTION public.harness_middle_checkout_guard(p_local_time time)
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  local_minutes integer :=
-    extract(hour FROM p_local_time)::integer * 60
-    + extract(minute FROM p_local_time)::integer;
-  v_check_out_start time;
-BEGIN
-  SELECT check_out_start
-    INTO v_check_out_start
-    FROM public.shifts
-    WHERE lower(trim(name)) = 'middle';
-  IF local_minutes <
-     extract(hour FROM v_check_out_start)::integer * 60
-     + extract(minute FROM v_check_out_start)::integer THEN
-    RAISE EXCEPTION 'checkout_before_window';
-  END IF;
-  RETURN 'recorded';
-END;
-$$;
-
-CREATE FUNCTION public.harness_middle_checkout_result(p_local_time time)
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RETURN public.harness_middle_checkout_guard(p_local_time);
-EXCEPTION WHEN OTHERS THEN
-  RETURN 'exception ' || SQLERRM;
-END;
-$$;
-
-\echo 'Middle fixed-time acceptance matrix (direct guard evaluation)'
-SELECT public.harness_assert_equal(
+\echo 'Middle check-in acceptance matrix (real RPC)'
+SELECT public.harness_assert_checkin(
   'check-in 09:59',
-  'exception checkin_before_window',
-  public.harness_middle_checkin_result('09:59')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '09:59',
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  NULL, NULL, NULL, 'checkin_before_window', NULL
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkin(
   'check-in 10:00',
-  'hadir late_minutes=0 late_deduction_idr=0',
-  public.harness_middle_checkin_result('10:00')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '10:00',
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  'hadir', 0, 0, NULL, (SELECT id FROM public.shifts WHERE name = 'Middle')
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkin(
   'check-in 11:15',
-  'hadir late_minutes=0 late_deduction_idr=0',
-  public.harness_middle_checkin_result('11:15')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '11:15',
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  'hadir', 0, 0, NULL, (SELECT id FROM public.shifts WHERE name = 'Middle')
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkin(
   'check-in 12:00',
-  'hadir late_minutes=0 late_deduction_idr=0',
-  public.harness_middle_checkin_result('12:00')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '12:00',
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  'hadir', 0, 0, NULL, (SELECT id FROM public.shifts WHERE name = 'Middle')
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkin(
   'check-in 12:01',
-  'terlambat late_minutes=1',
-  public.harness_middle_checkin_result('12:01')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '12:01',
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  'terlambat', 1, NULL, NULL, (SELECT id FROM public.shifts WHERE name = 'Middle')
 );
-SELECT public.harness_assert_equal(
+
+\echo 'Middle check-out acceptance matrix (real RPC; each row seeds check-in through real RPC)'
+SELECT public.harness_assert_checkout(
   'check-out 18:59',
-  'exception checkout_before_window',
-  public.harness_middle_checkout_result('18:59')
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  '10:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '18:59',
+  0,
+  'checkout_before_window'
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkout(
   'check-out 19:00',
-  'recorded',
-  public.harness_middle_checkout_result('19:00')
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  '10:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '19:00',
+  0,
+  NULL
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkout(
   'check-out 20:30',
-  'recorded',
-  public.harness_middle_checkout_result('20:30')
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  '10:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '20:30',
+  0,
+  NULL
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkout(
   'check-out 23:00',
-  'recorded',
-  public.harness_middle_checkout_result('23:00')
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  '10:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '23:00',
+  0,
+  NULL
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkout(
   'check-out 23:01',
-  'recorded',
-  public.harness_middle_checkout_result('23:01')
+  (SELECT id FROM public.shifts WHERE name = 'Middle'),
+  '10:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '23:01',
+  0,
+  NULL
 );
 
-CREATE FUNCTION public.harness_legacy_checkout_result(
-  p_shift_id uuid,
-  p_local_time time
-)
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_check_out_start time;
-BEGIN
-  SELECT check_out_start
-    INTO v_check_out_start
-    FROM public.shifts
-    WHERE id = p_shift_id;
-  IF v_check_out_start IS NULL THEN
-    RETURN 'recorded';
-  END IF;
-  IF p_local_time < v_check_out_start THEN
-    RAISE EXCEPTION 'checkout_before_window';
-  END IF;
-  RETURN 'recorded';
-EXCEPTION WHEN OTHERS THEN
-  RETURN 'exception ' || SQLERRM;
-END;
-$$;
+\echo 'Legacy check-in acceptance matrix (real RPC)'
+SELECT public.harness_assert_checkin(
+  'legacy Pagi 07:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '07:00',
+  '5a335fe8-6864-49c1-9c2c-d7753f21e859',
+  'hadir', 0, 0, NULL, '5a335fe8-6864-49c1-9c2c-d7753f21e859'
+);
+SELECT public.harness_assert_checkin(
+  'legacy Pagi 07:10',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '07:10',
+  '5a335fe8-6864-49c1-9c2c-d7753f21e859',
+  'hadir', 10, 10000, NULL, '5a335fe8-6864-49c1-9c2c-d7753f21e859'
+);
+SELECT public.harness_assert_checkin(
+  'legacy Pagi 07:46',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '07:46',
+  '5a335fe8-6864-49c1-9c2c-d7753f21e859',
+  'terlambat', 46, 20000, NULL, '5a335fe8-6864-49c1-9c2c-d7753f21e859'
+);
+SELECT public.harness_assert_checkin(
+  'legacy Siang 13:20',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '13:20',
+  '5098582e-6015-4de5-86fc-4b330e8aa02c',
+  'terlambat', 20, 10000, NULL, '5098582e-6015-4de5-86fc-4b330e8aa02c'
+);
+SELECT public.harness_assert_checkin(
+  'legacy Malam 21:30',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '21:30',
+  '45b7af1e-2a6b-4d6b-92b5-d1ef9b2d58aa',
+  'terlambat', 30, 10000, NULL, '45b7af1e-2a6b-4d6b-92b5-d1ef9b2d58aa'
+);
+SELECT public.harness_assert_checkin(
+  'legacy Malam 00:30',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '00:30',
+  '45b7af1e-2a6b-4d6b-92b5-d1ef9b2d58aa',
+  'terlambat', 210, NULL, NULL, '45b7af1e-2a6b-4d6b-92b5-d1ef9b2d58aa'
+);
 
-\echo 'Legacy check-out window assertions (direct guard evaluation)'
-SELECT public.harness_assert_equal(
+\echo 'Legacy check-outs (real RPC; each row seeds check-in through real RPC)'
+SELECT public.harness_assert_checkout(
   'legacy Pagi check-out 18:00',
-  'recorded',
-  public.harness_legacy_checkout_result(
-    '5a335fe8-6864-49c1-9c2c-d7753f21e859',
-    '18:00'
-  )
+  '5a335fe8-6864-49c1-9c2c-d7753f21e859',
+  '07:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '18:00',
+  0,
+  NULL
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkout(
   'legacy Siang check-out 18:00',
-  'recorded',
-  public.harness_legacy_checkout_result(
-    '5098582e-6015-4de5-86fc-4b330e8aa02c',
-    '18:00'
-  )
+  '5098582e-6015-4de5-86fc-4b330e8aa02c',
+  '13:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '18:00',
+  0,
+  NULL
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkout(
   'legacy Malam check-out 06:00',
-  'recorded',
-  public.harness_legacy_checkout_result(
-    '45b7af1e-2a6b-4d6b-92b5-d1ef9b2d58aa',
-    '06:00'
-  )
+  '45b7af1e-2a6b-4d6b-92b5-d1ef9b2d58aa',
+  '21:00',
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '06:00',
+  1,
+  NULL
 );
 
-CREATE FUNCTION public.harness_rosterless_autodetect(p_local_time time)
-RETURNS text
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT s.name
-  FROM public.shifts s
-  WHERE s.is_active
-    AND s.check_in_start IS NULL
-    AND (
-      (
-        extract(hour FROM s.start_time)::int * 60
-          + extract(minute FROM s.start_time)::int
-        <= extract(hour FROM s.end_time)::int * 60
-          + extract(minute FROM s.end_time)::int
-        AND extract(hour FROM p_local_time)::int * 60
-          + extract(minute FROM p_local_time)::int
-          >= extract(hour FROM s.start_time)::int * 60
-          + extract(minute FROM s.start_time)::int
-        AND extract(hour FROM p_local_time)::int * 60
-          + extract(minute FROM p_local_time)::int
-          < extract(hour FROM s.end_time)::int * 60
-          + extract(minute FROM s.end_time)::int
-      )
-      OR (
-        extract(hour FROM s.start_time)::int * 60
-          + extract(minute FROM s.start_time)::int
-        > extract(hour FROM s.end_time)::int * 60
-          + extract(minute FROM s.end_time)::int
-        AND (
-          extract(hour FROM p_local_time)::int * 60
-            + extract(minute FROM p_local_time)::int
-          >= extract(hour FROM s.start_time)::int * 60
-            + extract(minute FROM s.start_time)::int
-          OR extract(hour FROM p_local_time)::int * 60
-            + extract(minute FROM p_local_time)::int
-          < extract(hour FROM s.end_time)::int * 60
-            + extract(minute FROM s.end_time)::int
-        )
-      )
-    )
-  ORDER BY s.start_time
-  LIMIT 1
-$$;
-
-\echo 'Roster-less auto-detect (direct evaluation of migration predicate)'
-SELECT public.harness_assert_equal(
+\echo 'Roster-less auto-detect check-ins (real RPC; shift_id asserted)'
+SELECT public.harness_assert_checkin(
   'rosterless 14:00',
-  'Pagi',
-  public.harness_rosterless_autodetect('14:00')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '14:00',
+  NULL,
+  'terlambat', NULL, NULL, NULL,
+  '5a335fe8-6864-49c1-9c2c-d7753f21e859'
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkin(
   'rosterless 20:00',
-  'Siang',
-  public.harness_rosterless_autodetect('20:00')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '20:00',
+  NULL,
+  'terlambat', NULL, NULL, NULL,
+  '5098582e-6015-4de5-86fc-4b330e8aa02c'
 );
-SELECT public.harness_assert_equal(
+SELECT public.harness_assert_checkin(
   'rosterless 22:00',
-  'Malam',
-  public.harness_rosterless_autodetect('22:00')
+  (clock_timestamp() AT TIME ZONE 'Asia/Jakarta')::date,
+  '22:00',
+  NULL,
+  'terlambat', NULL, NULL, NULL,
+  '45b7af1e-2a6b-4d6b-92b5-d1ef9b2d58aa'
 );
 
-CREATE FUNCTION public.harness_rpc_checkin_smoke()
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_now timestamptz := clock_timestamp();
-  v_date date := (v_now AT TIME ZONE 'Asia/Jakarta')::date;
-  v_middle uuid;
-  v_result jsonb;
-BEGIN
-  TRUNCATE public.raos_attendance;
-  DELETE FROM public.raos_shift_schedules;
-  SELECT id INTO v_middle FROM public.shifts WHERE name = 'Middle';
-  INSERT INTO public.raos_shift_schedules (
-    staff_id, branch_id, tanggal, shift_id
-  )
-  VALUES (
-    '22222222-2222-2222-2222-222222222222',
-    '11111111-1111-1111-1111-111111111111',
-    v_date,
-    v_middle
-  );
-  v_result := public.raos_attendance_check_in(0, 0, 'rpc-smoke', v_now);
-  RETURN 'real RPC check-in (permitted current timestamp, WIB '
-    || to_char(v_now AT TIME ZONE 'Asia/Jakarta', 'HH24:MI:SS')
-    || ') -> ' || (v_result->>'status');
-EXCEPTION WHEN OTHERS THEN
-  RETURN 'real RPC check-in (permitted current timestamp, WIB '
-    || to_char(v_now AT TIME ZONE 'Asia/Jakarta', 'HH24:MI:SS')
-    || ') -> exception ' || SQLERRM;
-END;
-$$;
-
-CREATE FUNCTION public.harness_rpc_checkout_smoke()
-RETURNS text
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_now timestamptz := clock_timestamp();
-  v_date date := (v_now AT TIME ZONE 'Asia/Jakarta')::date;
-  v_middle uuid;
-  v_result jsonb;
-BEGIN
-  TRUNCATE public.raos_attendance;
-  SELECT id INTO v_middle FROM public.shifts WHERE name = 'Middle';
-  INSERT INTO public.raos_attendance (
-    staff_id, branch_id, date, shift_id, check_in_at, status
-  )
-  VALUES (
-    '22222222-2222-2222-2222-222222222222',
-    '11111111-1111-1111-1111-111111111111',
-    v_date,
-    v_middle,
-    v_now - interval '1 hour',
-    'hadir'
-  );
-  v_result := public.raos_attendance_check_out(0, 0, 'rpc-smoke', v_now);
-  RETURN 'real RPC check-out (permitted current timestamp, WIB '
-    || to_char(v_now AT TIME ZONE 'Asia/Jakarta', 'HH24:MI:SS')
-    || ') -> ' || (v_result->>'status');
-EXCEPTION WHEN OTHERS THEN
-  RETURN 'real RPC check-out (permitted current timestamp, WIB '
-    || to_char(v_now AT TIME ZONE 'Asia/Jakarta', 'HH24:MI:SS')
-    || ') -> exception ' || SQLERRM;
-END;
-$$;
-
-\echo 'Real RPC smoke cases (current permitted timestamp; fixed matrix remains direct)'
-SELECT public.harness_rpc_checkin_smoke();
-SELECT public.harness_rpc_checkout_smoke();
-
-\echo 'Coverage: fixed wall-clock matrix and legacy checkout/autodetect used direct guard evaluation; current-time smoke cases called the real RPCs.'
+\echo 'Coverage: every acceptance row above called the real attendance RPC; timestamp offsets were computed at runtime and guarded against clamp/replay bands.'
 \echo 'PASS: RAOS 129 Middle window acceptance harness'

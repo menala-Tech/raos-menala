@@ -23,7 +23,9 @@ try {
 }
 ```
 
-The fixed wall-clock matrix is evaluated through the migration's window
-predicates directly because the RPCs clamp captured timestamps near `now()`.
-The harness also calls both real attendance RPCs with permitted current
-timestamps and labels those smoke cases separately.
+Every acceptance row calls the real attendance RPCs. The harness computes each
+target timestamp at runtime and temporarily shifts the stub branch timezone by
+an offset if a target would otherwise be future or inside the RPC's
+five-minute clamp.
+It fails explicitly if the resulting offset is outside the permitted
+approximately six-minute-to-24-hour band.

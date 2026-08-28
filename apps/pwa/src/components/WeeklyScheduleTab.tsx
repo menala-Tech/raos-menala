@@ -259,70 +259,96 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
-        <div className="min-w-[620px]">
-          {/* Header row with sticky day/date labels */}
-          <div className="grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500 sticky top-0 z-20">
-            {/* Top-left corner header cell (sticky both axes) */}
-            <div className="px-3 py-2 sticky left-0 z-30 bg-gray-50">Nama</div>
-            {/* Day/date header cells (sticky top only) */}
+      <div className="flex flex-col rounded-lg border border-gray-100 overflow-hidden bg-white">
+        {/* Header row - separate from scroll container for reliable sticky */}
+        <div className="flex bg-gray-50 border-b border-gray-100 text-[10px] font-black uppercase tracking-wider text-gray-500">
+          {/* Frozen NAMA header */}
+          <div className="w-40 flex-shrink-0 px-3 py-2 border-r border-gray-200 bg-gray-50">Nama</div>
+          {/* Scrollable day headers */}
+          <div className="flex overflow-x-auto flex-1">
             {days.map(day => (
-              <div key={day.date} className="px-2 py-2 text-center bg-gray-50">
+              <div key={day.date} className="w-16 flex-shrink-0 px-2 py-2 text-center bg-gray-50">
                 <div>{day.label}</div>
                 <div className="font-semibold text-gray-400 normal-case tracking-normal">{day.day}</div>
               </div>
             ))}
           </div>
+        </div>
 
-          {loading && (
-            <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
-              <Loader2 size={14} className="animate-spin" />
-              Memuat jadwal
-            </div>
-          )}
+        {/* Body with frozen NAMA and scrollable schedule */}
+        <div className="flex overflow-hidden flex-1">
+          {/* Frozen NAMA column */}
+          <div className="w-40 flex-shrink-0 border-r border-gray-200 overflow-y-auto">
+            {loading && (
+              <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
+                <Loader2 size={14} className="animate-spin" />
+                Memuat jadwal
+              </div>
+            )}
 
-          {!loading && rows.length === 0 && (
-            <div className="py-8 text-center text-xs text-gray-400">Belum ada staff aktif di cabang ini</div>
-          )}
+            {!loading && rows.length === 0 && (
+              <div className="py-8 text-center text-xs text-gray-400">Belum ada staff aktif di cabang ini</div>
+            )}
 
-          {!loading && rows.map((row, rowIndex) => {
-            const rowBgClass = getRowBgColor(rowIndex)
-            return (
-              <div key={row.staff_id} className={clsx('grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-50 last:border-0', rowBgClass)}>
-                {/* Staff name cell (sticky left) */}
-                <div className={clsx('px-3 py-2 text-sm font-semibold text-gray-800 truncate sticky left-0 z-10', rowBgClass)}>
+            {!loading && rows.map((row, rowIndex) => {
+              const rowBgClass = getRowBgColor(rowIndex)
+              return (
+                <div key={row.staff_id} className={clsx('h-10 px-3 py-2 text-sm font-semibold text-gray-800 truncate border-b border-gray-50 flex items-center', rowBgClass)}>
                   {row.full_name}
                 </div>
-                {/* Schedule cells for each day */}
-                {days.map(day => {
-                  const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
-                  const code = cell.schedule_id ? (shiftCodeFromName(cell.shift_name) ?? '?') : '-'
-                  const busy = savingKey === `${row.staff_id}:${day.date}`
-                  return (
-                    <button
-                      key={day.date}
-                      type="button"
-                      disabled={!editable || busy || shiftChoices.length === 0}
-                      onClick={() => setPickerTarget({ row, day })}
-                      aria-label={`${row.full_name} ${day.label} shift ${code}`}
-                      className="flex min-h-10 items-center justify-center px-2 py-2 disabled:cursor-default"
-                    >
-                      <span
-                        className={clsx(
-                          'flex h-7 w-7 items-center justify-center rounded border text-xs font-black',
-                          code === '-' ? 'border-gray-200 bg-white text-gray-400' : 'border-primary bg-primary text-secondary',
-                          editable && !busy && 'hover:border-primary'
-                        )}
-                        title={cell.shift_name ?? 'Libur'}
-                      >
-                        {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : code}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
+
+          {/* Scrollable schedule section */}
+          <div className="flex-1 overflow-x-auto">
+            <div className="flex flex-col">
+              {loading && (
+                <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
+                  <Loader2 size={14} className="animate-spin" />
+                  Memuat jadwal
+                </div>
+              )}
+
+              {!loading && rows.length === 0 && (
+                <div className="py-8 text-center text-xs text-gray-400">Belum ada staff aktif di cabang ini</div>
+              )}
+
+              {!loading && rows.map((row, rowIndex) => {
+                const rowBgClass = getRowBgColor(rowIndex)
+                return (
+                  <div key={row.staff_id} className={clsx('flex border-b border-gray-50 last:border-0', rowBgClass)}>
+                    {days.map(day => {
+                      const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
+                      const code = cell.schedule_id ? (shiftCodeFromName(cell.shift_name) ?? '?') : '-'
+                      const busy = savingKey === `${row.staff_id}:${day.date}`
+                      return (
+                        <button
+                          key={day.date}
+                          type="button"
+                          disabled={!editable || busy || shiftChoices.length === 0}
+                          onClick={() => setPickerTarget({ row, day })}
+                          aria-label={`${row.full_name} ${day.label} shift ${code}`}
+                          className="w-16 flex-shrink-0 flex min-h-10 items-center justify-center px-2 py-2 disabled:cursor-default"
+                        >
+                          <span
+                            className={clsx(
+                              'flex h-7 w-7 items-center justify-center rounded border text-xs font-black',
+                              code === '-' ? 'border-gray-200 bg-white text-gray-400' : 'border-primary bg-primary text-secondary',
+                              editable && !busy && 'hover:border-primary'
+                            )}
+                            title={cell.shift_name ?? 'Libur'}
+                          >
+                            {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : code}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         </div>
       </div>
 

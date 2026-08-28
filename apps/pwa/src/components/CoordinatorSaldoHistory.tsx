@@ -19,13 +19,16 @@ interface Row {
 interface RequestSnapshot {
   status: string
   is_processed: boolean
+  is_archived: boolean
   branch_id: string | null
 }
 
 function primaryStatusBadge(req: RequestSnapshot | undefined) {
   if (!req) return { label: 'MENUNGGU', cls: 'bg-yellow-100 text-yellow-700' }
+  if (req.is_archived) return { label: 'DIARSIPKAN', cls: 'bg-gray-100 text-gray-700' }
   if (req.is_processed) return { label: 'SUDAH DIISI', cls: 'bg-green-100 text-green-700' }
-  if (req.status === 'rejected' || req.status === 'cancelled') return { label: 'DITOLAK', cls: 'bg-red-100 text-red-700' }
+  if (req.status === 'cancelled') return { label: 'DIBATALKAN', cls: 'bg-slate-100 text-slate-700' }
+  if (req.status === 'rejected') return { label: 'DITOLAK', cls: 'bg-red-100 text-red-700' }
   return { label: 'MENUNGGU', cls: 'bg-yellow-100 text-yellow-700' }
 }
 
@@ -59,10 +62,10 @@ export default function CoordinatorSaldoHistory() {
         if (requestIds.length > 0) {
           const { data: reqData } = await supabase
             .from('raos_saldo_requests')
-            .select('id, status, is_processed, branch_id')
+            .select('id, status, is_processed, is_archived, branch_id')
             .in('id', requestIds)
           if (!cancelled && reqData) {
-            const snapshots = reqData.map((r: any) => [r.id, { status: r.status, is_processed: r.is_processed, branch_id: r.branch_id }] as const)
+            const snapshots = reqData.map((r: any) => [r.id, { status: r.status, is_processed: r.is_processed, is_archived: !!r.is_archived, branch_id: r.branch_id }] as const)
             setRequestMap(new Map(snapshots))
 
             const branchIds = Array.from(new Set(reqData.map((r: any) => r.branch_id).filter(Boolean))) as string[]

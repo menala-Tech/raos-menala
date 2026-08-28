@@ -67,9 +67,10 @@ export default function ValidasiSaldoPage() {
 
     // RLS enforce scope by is_branch_in_scope — cukup query semua.
     const { data } = await supabase.from('raos_saldo_requests')
-      .select('id, request_no, nominal, status, is_processed, requested_at, processed_at, rejection_reason,' +
+      .select('id, request_no, nominal, status, is_processed, is_archived, requested_at, processed_at, rejection_reason,' +
         'staff_id,' +
         'branch:branches!branch_id(name, slug, timezone)')
+      .eq('is_archived', false)
       .order('requested_at', { ascending: false })
       .limit(500)
     const rawRows=(data ?? []) as any[]
@@ -176,9 +177,11 @@ export default function ValidasiSaldoPage() {
           const isPending = req.status === 'pending' && !isDone
           const badge = isDone
             ? { icon: CheckCircle2, label: 'SUDAH DIISI', cls: 'bg-green-100 text-green-700' }
-            : isRejected
-              ? { icon: XCircle, label: req.status.toUpperCase(), cls: 'bg-red-100 text-red-700' }
-              : { icon: Clock, label: 'MENUNGGU', cls: 'bg-amber-100 text-amber-700' }
+            : req.status === 'cancelled'
+              ? { icon: XCircle, label: 'DIBATALKAN', cls: 'bg-slate-100 text-slate-700' }
+              : isRejected
+                ? { icon: XCircle, label: 'DITOLAK', cls: 'bg-red-100 text-red-700' }
+                : { icon: Clock, label: 'MENUNGGU', cls: 'bg-amber-100 text-amber-700' }
           const BadgeIcon = badge.icon
           return (
             <div key={req.id} className="card">

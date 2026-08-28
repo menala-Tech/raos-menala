@@ -28,6 +28,18 @@ const DAY_LABELS: Array<{ key: DayKey; label: string }> = [
   { key: 'min', label: 'Min' },
 ]
 
+// Subtle, professional row background colors for alternating staff rows
+const ROW_BG_COLORS = [
+  'bg-white',
+  'bg-blue-50',
+  'bg-green-50',
+  'bg-amber-50',
+]
+
+function getRowBgColor(rowIndex: number): string {
+  return ROW_BG_COLORS[rowIndex % ROW_BG_COLORS.length]
+}
+
 function toDateStr(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -249,10 +261,13 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
 
       <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
         <div className="min-w-[620px]">
-          <div className="grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500">
-            <div className="px-3 py-2">Nama</div>
+          {/* Header row with sticky day/date labels */}
+          <div className="grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500 sticky top-0 z-20">
+            {/* Top-left corner header cell (sticky both axes) */}
+            <div className="px-3 py-2 sticky left-0 z-30 bg-gray-50">Nama</div>
+            {/* Day/date header cells (sticky top only) */}
             {days.map(day => (
-              <div key={day.date} className="px-2 py-2 text-center">
+              <div key={day.date} className="px-2 py-2 text-center bg-gray-50">
                 <div>{day.label}</div>
                 <div className="font-semibold text-gray-400 normal-case tracking-normal">{day.day}</div>
               </div>
@@ -270,37 +285,44 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
             <div className="py-8 text-center text-xs text-gray-400">Belum ada staff aktif di cabang ini</div>
           )}
 
-          {!loading && rows.map(row => (
-            <div key={row.staff_id} className="grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-50 last:border-0">
-              <div className="px-3 py-2 text-sm font-semibold text-gray-800 truncate">{row.full_name}</div>
-              {days.map(day => {
-                const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
-                const code = cell.schedule_id ? (shiftCodeFromName(cell.shift_name) ?? '?') : '-'
-                const busy = savingKey === `${row.staff_id}:${day.date}`
-                return (
-                  <button
-                    key={day.date}
-                    type="button"
-                    disabled={!editable || busy || shiftChoices.length === 0}
-                    onClick={() => setPickerTarget({ row, day })}
-                    aria-label={`${row.full_name} ${day.label} shift ${code}`}
-                    className="flex min-h-10 items-center justify-center px-2 py-2 disabled:cursor-default"
-                  >
-                    <span
-                      className={clsx(
-                        'flex h-7 w-7 items-center justify-center rounded border text-xs font-black',
-                        code === '-' ? 'border-gray-200 bg-white text-gray-400' : 'border-primary bg-primary text-secondary',
-                        editable && !busy && 'hover:border-primary'
-                      )}
-                      title={cell.shift_name ?? 'Libur'}
+          {!loading && rows.map((row, rowIndex) => {
+            const rowBgClass = getRowBgColor(rowIndex)
+            return (
+              <div key={row.staff_id} className={clsx('grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-50 last:border-0', rowBgClass)}>
+                {/* Staff name cell (sticky left) */}
+                <div className={clsx('px-3 py-2 text-sm font-semibold text-gray-800 truncate sticky left-0 z-10', rowBgClass)}>
+                  {row.full_name}
+                </div>
+                {/* Schedule cells for each day */}
+                {days.map(day => {
+                  const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
+                  const code = cell.schedule_id ? (shiftCodeFromName(cell.shift_name) ?? '?') : '-'
+                  const busy = savingKey === `${row.staff_id}:${day.date}`
+                  return (
+                    <button
+                      key={day.date}
+                      type="button"
+                      disabled={!editable || busy || shiftChoices.length === 0}
+                      onClick={() => setPickerTarget({ row, day })}
+                      aria-label={`${row.full_name} ${day.label} shift ${code}`}
+                      className="flex min-h-10 items-center justify-center px-2 py-2 disabled:cursor-default"
                     >
-                      {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : code}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
+                      <span
+                        className={clsx(
+                          'flex h-7 w-7 items-center justify-center rounded border text-xs font-black',
+                          code === '-' ? 'border-gray-200 bg-white text-gray-400' : 'border-primary bg-primary text-secondary',
+                          editable && !busy && 'hover:border-primary'
+                        )}
+                        title={cell.shift_name ?? 'Libur'}
+                      >
+                        {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : code}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })}
         </div>
       </div>
 

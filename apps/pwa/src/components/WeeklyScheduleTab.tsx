@@ -28,6 +28,22 @@ const DAY_LABELS: Array<{ key: DayKey; label: string }> = [
   { key: 'min', label: 'Min' },
 ]
 
+// CSS variables for synchronized heights
+const SCHEDULE_ROW_HEIGHT = 40 // px
+const SCHEDULE_HEADER_HEIGHT = 48 // px
+
+// Subtle, professional row background colors for alternating staff rows
+const ROW_BG_COLORS = [
+  'bg-white',
+  'bg-blue-50',
+  'bg-green-50',
+  'bg-amber-50',
+]
+
+function getRowBgColor(rowIndex: number): string {
+  return ROW_BG_COLORS[rowIndex % ROW_BG_COLORS.length]
+}
+
 function toDateStr(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -247,60 +263,114 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
-        <div className="min-w-[620px]">
-          <div className="grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500">
-            <div className="px-3 py-2">Nama</div>
+      {/* TRUE TWO-PANE LAYOUT: Left NAMA pane + Right schedule pane */}
+      <div className="flex rounded-lg border border-gray-100 overflow-hidden bg-white h-[500px]">
+        {/* LEFT PANE: NAMA column (COMPLETELY OUTSIDE horizontal scroll) */}
+        <div className="flex flex-col w-44 flex-shrink-0 border-r border-gray-200 bg-white">
+          {/* Header */}
+          <div className="h-12 px-3 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-black uppercase tracking-wider text-gray-500 flex items-center">
+            Nama
+          </div>
+
+          {/* Body: scrolls vertically with right pane */}
+          <div className="flex-1 overflow-y-auto">
+            {loading && (
+              <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
+                <Loader2 size={14} className="animate-spin" />
+                Memuat jadwal
+              </div>
+            )}
+
+            {!loading && rows.length === 0 && (
+              <div className="py-8 text-center text-xs text-gray-400">Belum ada staff aktif di cabang ini</div>
+            )}
+
+            {!loading && rows.map((row, rowIndex) => {
+              const rowBgClass = getRowBgColor(rowIndex)
+              return (
+                <div
+                  key={row.staff_id}
+                  className={clsx(
+                    'px-3 py-2 text-sm font-semibold text-gray-800 truncate border-b border-gray-50 flex items-center',
+                    rowBgClass
+                  )}
+                  style={{ height: `${SCHEDULE_ROW_HEIGHT}px` }}
+                >
+                  {row.full_name}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* RIGHT PANE: Schedule (ONLY horizontal scroller) */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Header: day/date labels */}
+          <div className="flex h-12 border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500 flex-shrink-0">
             {days.map(day => (
-              <div key={day.date} className="px-2 py-2 text-center">
-                <div>{day.label}</div>
-                <div className="font-semibold text-gray-400 normal-case tracking-normal">{day.day}</div>
+              <div
+                key={day.date}
+                className="px-2 py-2 text-center border-r border-gray-100 last:border-r-0 bg-gray-50 flex items-center justify-center"
+                style={{ width: '64px', flexShrink: 0 }}
+              >
+                <div className="text-center">
+                  <div>{day.label}</div>
+                  <div className="font-semibold text-gray-400 normal-case tracking-normal text-[9px]">{day.day}</div>
+                </div>
               </div>
             ))}
           </div>
 
-          {loading && (
-            <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
-              <Loader2 size={14} className="animate-spin" />
-              Memuat jadwal
-            </div>
-          )}
+          {/* Body: horizontally scrollable schedule cells */}
+          <div className="flex-1 overflow-x-auto overflow-y-hidden">
+            <div className="flex flex-col">
+              {loading && (
+                <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
+                  <Loader2 size={14} className="animate-spin" />
+                  Memuat jadwal
+                </div>
+              )}
 
-          {!loading && rows.length === 0 && (
-            <div className="py-8 text-center text-xs text-gray-400">Belum ada staff aktif di cabang ini</div>
-          )}
+              {!loading && rows.length === 0 && (
+                <div className="py-8 text-center text-xs text-gray-400">Belum ada staff aktif di cabang ini</div>
+              )}
 
-          {!loading && rows.map(row => (
-            <div key={row.staff_id} className="grid grid-cols-[minmax(160px,1.5fr)_repeat(7,minmax(58px,1fr))] border-b border-gray-50 last:border-0">
-              <div className="px-3 py-2 text-sm font-semibold text-gray-800 truncate">{row.full_name}</div>
-              {days.map(day => {
-                const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
-                const code = cell.schedule_id ? (shiftCodeFromName(cell.shift_name) ?? '?') : '-'
-                const busy = savingKey === `${row.staff_id}:${day.date}`
+              {!loading && rows.map((row, rowIndex) => {
+                const rowBgClass = getRowBgColor(rowIndex)
                 return (
-                  <button
-                    key={day.date}
-                    type="button"
-                    disabled={!editable || busy || shiftChoices.length === 0}
-                    onClick={() => setPickerTarget({ row, day })}
-                    aria-label={`${row.full_name} ${day.label} shift ${code}`}
-                    className="flex min-h-10 items-center justify-center px-2 py-2 disabled:cursor-default"
-                  >
-                    <span
-                      className={clsx(
-                        'flex h-7 w-7 items-center justify-center rounded border text-xs font-black',
-                        code === '-' ? 'border-gray-200 bg-white text-gray-400' : 'border-primary bg-primary text-secondary',
-                        editable && !busy && 'hover:border-primary'
-                      )}
-                      title={cell.shift_name ?? 'Libur'}
-                    >
-                      {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : code}
-                    </span>
-                  </button>
+                  <div key={row.staff_id} className={clsx('flex border-b border-gray-50 last:border-0', rowBgClass)}>
+                    {days.map(day => {
+                      const cell = row.byDate[day.date] ?? { schedule_id: null, shift_id: null, shift_name: null }
+                      const code = cell.schedule_id ? (shiftCodeFromName(cell.shift_name) ?? '?') : '-'
+                      const busy = savingKey === `${row.staff_id}:${day.date}`
+                      return (
+                        <button
+                          key={day.date}
+                          type="button"
+                          disabled={!editable || busy || shiftChoices.length === 0}
+                          onClick={() => setPickerTarget({ row, day })}
+                          aria-label={`${row.full_name} ${day.label} shift ${code}`}
+                          className="flex items-center justify-center px-2 py-2 disabled:cursor-default border-r border-gray-100 last:border-r-0"
+                          style={{ width: '64px', height: `${SCHEDULE_ROW_HEIGHT}px`, flexShrink: 0 }}
+                        >
+                          <span
+                            className={clsx(
+                              'flex h-7 w-7 items-center justify-center rounded border text-xs font-black',
+                              code === '-' ? 'border-gray-200 bg-white text-gray-400' : 'border-primary bg-primary text-secondary',
+                              editable && !busy && 'hover:border-primary'
+                            )}
+                            title={cell.shift_name ?? 'Libur'}
+                          >
+                            {busy ? <Loader2 size={12} className="animate-spin text-gray-400" /> : code}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 )
               })}
             </div>
-          ))}
+          </div>
         </div>
       </div>
 

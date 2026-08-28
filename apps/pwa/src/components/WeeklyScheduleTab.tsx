@@ -28,6 +28,10 @@ const DAY_LABELS: Array<{ key: DayKey; label: string }> = [
   { key: 'min', label: 'Min' },
 ]
 
+// CSS variables for synchronized heights
+const SCHEDULE_ROW_HEIGHT = 40 // px
+const SCHEDULE_HEADER_HEIGHT = 48 // px
+
 // Subtle, professional row background colors for alternating staff rows
 const ROW_BG_COLORS = [
   'bg-white',
@@ -259,26 +263,17 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
         </div>
       )}
 
-      <div className="flex flex-col rounded-lg border border-gray-100 overflow-hidden bg-white">
-        {/* Header row - separate from scroll container for reliable sticky */}
-        <div className="flex bg-gray-50 border-b border-gray-100 text-[10px] font-black uppercase tracking-wider text-gray-500">
-          {/* Frozen NAMA header */}
-          <div className="w-40 flex-shrink-0 px-3 py-2 border-r border-gray-200 bg-gray-50">Nama</div>
-          {/* Scrollable day headers */}
-          <div className="flex overflow-x-auto flex-1">
-            {days.map(day => (
-              <div key={day.date} className="w-16 flex-shrink-0 px-2 py-2 text-center bg-gray-50">
-                <div>{day.label}</div>
-                <div className="font-semibold text-gray-400 normal-case tracking-normal">{day.day}</div>
-              </div>
-            ))}
+      {/* TRUE TWO-PANE LAYOUT: Left NAMA pane + Right schedule pane */}
+      <div className="flex rounded-lg border border-gray-100 overflow-hidden bg-white h-[500px]">
+        {/* LEFT PANE: NAMA column (COMPLETELY OUTSIDE horizontal scroll) */}
+        <div className="flex flex-col w-44 flex-shrink-0 border-r border-gray-200 bg-white">
+          {/* Header */}
+          <div className="h-12 px-3 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-black uppercase tracking-wider text-gray-500 flex items-center">
+            Nama
           </div>
-        </div>
 
-        {/* Body with frozen NAMA and scrollable schedule */}
-        <div className="flex overflow-hidden flex-1">
-          {/* Frozen NAMA column */}
-          <div className="w-40 flex-shrink-0 border-r border-gray-200 overflow-y-auto">
+          {/* Body: scrolls vertically with right pane */}
+          <div className="flex-1 overflow-y-auto">
             {loading && (
               <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
                 <Loader2 size={14} className="animate-spin" />
@@ -293,15 +288,41 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
             {!loading && rows.map((row, rowIndex) => {
               const rowBgClass = getRowBgColor(rowIndex)
               return (
-                <div key={row.staff_id} className={clsx('h-10 px-3 py-2 text-sm font-semibold text-gray-800 truncate border-b border-gray-50 flex items-center', rowBgClass)}>
+                <div
+                  key={row.staff_id}
+                  className={clsx(
+                    'px-3 py-2 text-sm font-semibold text-gray-800 truncate border-b border-gray-50 flex items-center',
+                    rowBgClass
+                  )}
+                  style={{ height: `${SCHEDULE_ROW_HEIGHT}px` }}
+                >
                   {row.full_name}
                 </div>
               )
             })}
           </div>
+        </div>
 
-          {/* Scrollable schedule section */}
-          <div className="flex-1 overflow-x-auto">
+        {/* RIGHT PANE: Schedule (ONLY horizontal scroller) */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Header: day/date labels */}
+          <div className="flex h-12 border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500 flex-shrink-0">
+            {days.map(day => (
+              <div
+                key={day.date}
+                className="px-2 py-2 text-center border-r border-gray-100 last:border-r-0 bg-gray-50 flex items-center justify-center"
+                style={{ width: '64px', flexShrink: 0 }}
+              >
+                <div className="text-center">
+                  <div>{day.label}</div>
+                  <div className="font-semibold text-gray-400 normal-case tracking-normal text-[9px]">{day.day}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Body: horizontally scrollable schedule cells */}
+          <div className="flex-1 overflow-x-auto overflow-y-hidden">
             <div className="flex flex-col">
               {loading && (
                 <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
@@ -329,7 +350,8 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
                           disabled={!editable || busy || shiftChoices.length === 0}
                           onClick={() => setPickerTarget({ row, day })}
                           aria-label={`${row.full_name} ${day.label} shift ${code}`}
-                          className="w-16 flex-shrink-0 flex min-h-10 items-center justify-center px-2 py-2 disabled:cursor-default"
+                          className="flex items-center justify-center px-2 py-2 disabled:cursor-default border-r border-gray-100 last:border-r-0"
+                          style={{ width: '64px', height: `${SCHEDULE_ROW_HEIGHT}px`, flexShrink: 0 }}
                         >
                           <span
                             className={clsx(

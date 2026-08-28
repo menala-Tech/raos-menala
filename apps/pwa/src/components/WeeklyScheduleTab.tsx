@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react'
 import clsx from 'clsx'
 import { SHIFT_CODE_LABELS, shiftCodeFromName, type WorkShiftCode } from '@/lib/operationalWorkflow'
@@ -110,6 +110,8 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const scheduleHeaderRef = useRef<HTMLDivElement>(null)
+  const scheduleBodyRef = useRef<HTMLDivElement>(null)
 
   const editable = canEditSchedule(user)
   const browsable = canBrowseBranches(user)
@@ -120,6 +122,13 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
   const activeBranchData = browsable ? branches.find(b => b.id === activeBranch) ?? null : lockedBranch
   const days = useMemo(() => buildWeek(weekStart), [weekStart])
   const shiftChoices = useMemo(() => buildShiftChoices(shifts), [shifts])
+
+  // Sync header and body horizontal scroll
+  const handleScheduleBodyScroll = useCallback(() => {
+    if (scheduleBodyRef.current && scheduleHeaderRef.current) {
+      scheduleHeaderRef.current.scrollLeft = scheduleBodyRef.current.scrollLeft
+    }
+  }, [])
 
   useEffect(() => {
     async function loadStatic() {
@@ -305,8 +314,11 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
 
         {/* RIGHT PANE: Schedule (ONLY horizontal scroller) */}
         <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Header: day/date labels */}
-          <div className="flex h-12 border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500 flex-shrink-0">
+          {/* Header: day/date labels (scrollable, synced with body) */}
+          <div
+            ref={scheduleHeaderRef}
+            className="flex h-12 border-b border-gray-100 bg-gray-50 text-[10px] font-black uppercase tracking-wider text-gray-500 flex-shrink-0 overflow-x-auto overflow-y-hidden"
+          >
             {days.map(day => (
               <div
                 key={day.date}
@@ -322,7 +334,11 @@ export default function WeeklyScheduleTab({ user }: { user: UserProfile | null }
           </div>
 
           {/* Body: horizontally scrollable schedule cells */}
-          <div className="flex-1 overflow-x-auto overflow-y-hidden">
+          <div
+            ref={scheduleBodyRef}
+            onScroll={handleScheduleBodyScroll}
+            className="flex-1 overflow-x-auto overflow-y-auto"
+          >
             <div className="flex flex-col">
               {loading && (
                 <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">

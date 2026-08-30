@@ -76,6 +76,8 @@ function onOpen() {
         .addItem('Sync Foto Absensi ke Drive', 'syncSelfiePhotosToGDrive')
         .addItem('Test Koneksi Supabase', 'testSupabaseConnection')
         .addItem('Hapus Riwayat Lama', 'autoHapusRiwayatLama')
+        .addSeparator()
+        .addItem('🚀 Pre-Launch Cleanup (1 Sep 2026)', 'preLaunchCleanupRAOS_MENU')
     )
     .addToUi()
 }

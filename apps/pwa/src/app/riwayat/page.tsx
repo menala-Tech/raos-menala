@@ -159,7 +159,7 @@ export default function RiwayatPage() {
           .order('date', { ascending: false }).limit(60),
         supabase.from('raos_saldo_requests')
           .select(
-            'id, request_no, nominal, status, is_processed, requested_at,' +
+            'id, request_no, nominal, status, is_processed, is_archived, requested_at,' +
             'approved_at, processed_at, rejection_reason, note, driver_name, approved_by, processed_by'
           )
           .eq('staff_id', userId)
@@ -908,7 +908,7 @@ export default function RiwayatPage() {
 }
 
 interface SaldoLifecycleMeta {
-  status: 'pending' | 'approved' | 'paid' | 'rejected'
+  status: 'pending' | 'approved' | 'paid' | 'rejected' | 'cancelled' | 'archived'
   label: string
   emoji: string
   icon: typeof Wallet
@@ -919,26 +919,40 @@ interface SaldoLifecycleMeta {
 }
 
 /**
- * 4-state lifecycle Isi Saldo — dipetakan dari kolom SSOT
- * raos_saldo_requests (tidak ada kolom baru diperkenalkan):
- *   🟡 Pending  = status='pending' && !is_processed
- *   🟢 Approved = status='approved' && !is_processed (koord validasi, tunggu Finance)
- *   🔵 Paid     = is_processed=true (Finance/admin lunasi)
- *   🔴 Rejected = status='rejected' | 'cancelled'
+ * Lifecycle Isi Saldo — dipetakan dari kolom SSOT raos_saldo_requests:
+ *   🟡 Pending    = status='pending' && !is_processed && !is_archived
+ *   🟢 Approved   = status='approved' && !is_processed && !is_archived (koord validasi, tunggu Finance)
+ *   🔵 Paid       = is_processed=true && !is_archived (Finance/admin lunasi)
+ *   � Cancelled  = status='cancelled' && !is_archived (admin cancel via RIFIM)
+ *   �🔴 Rejected   = status='rejected' && !is_archived
+ *   ⚫ Archived   = is_archived=true
  */
 function saldoLifecycleMeta(req: {
   status: string
   is_processed: boolean
+  is_archived?: boolean
 }): SaldoLifecycleMeta {
+  if (req.is_archived) {
+    return {
+      status: 'archived', label: 'DIARSIPKAN', emoji: '📦', icon: Wallet,
+      badgeCls: 'bg-gray-100 text-gray-600', bgSoft: 'bg-gray-50', textStrong: 'text-gray-500', dot: 'bg-gray-400',
+    }
+  }
   if (req.is_processed) {
     return {
       status: 'paid', label: 'SUDAH DIISI', emoji: '✅', icon: Wallet,
       badgeCls: 'bg-sky-100 text-sky-700', bgSoft: 'bg-sky-50', textStrong: 'text-sky-600', dot: 'bg-sky-500',
     }
   }
-  if (req.status === 'rejected' || req.status === 'cancelled') {
+  if (req.status === 'cancelled') {
     return {
-      status: 'rejected', label: req.status.toUpperCase(), emoji: '🔴', icon: XCircle,
+      status: 'cancelled', label: 'DIBATALKAN', emoji: '🚫', icon: XCircle,
+      badgeCls: 'bg-slate-100 text-slate-700', bgSoft: 'bg-slate-50', textStrong: 'text-slate-600', dot: 'bg-slate-500',
+    }
+  }
+  if (req.status === 'rejected') {
+    return {
+      status: 'rejected', label: 'DITOLAK', emoji: '🔴', icon: XCircle,
       badgeCls: 'bg-red-100 text-red-700', bgSoft: 'bg-red-50', textStrong: 'text-red-600', dot: 'bg-red-500',
     }
   }

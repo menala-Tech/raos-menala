@@ -1,8 +1,16 @@
 // ============================================================
 // 07_backup.gs — Backup Otomatis ke Google Drive
 // ============================================================
+//
+// CATATAN (2026-08-29): backupHarian() versi lama (xlsx export ke
+// CONFIG.DRIVE.BACKUP_FOLDER_ID + 30-day retention) DI-DEPRECATE.
+// Versi kanonik ada di `11_drive_sync.gs` yang pakai
+// raosCanonicalBackupActiveSpreadsheet_. Karena GAS load order
+// alphabetical, versi 11_* menang otomatis — versi lama di sini
+// jadi dead code kalau namanya sama. Di-rename ke *_legacy_ untuk
+// menghindari shadow-conflict silent.
 
-function backupHarian() {
+function backupHarian_legacy_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet()
   const folderId = CONFIG.DRIVE.BACKUP_FOLDER_ID
   if (!folderId) { Logger.log('BACKUP_FOLDER_ID belum diset'); return }
@@ -19,7 +27,7 @@ function backupHarian() {
   })
 
   folder.createFile(resp.getBlob().setName(namaFile))
-  logSistem('backup', 'backupHarian', 'success', namaFile)
+  logSistem('backup', 'backupHarian_legacy_', 'success', namaFile)
 
   // Hapus backup lebih dari 30 hari
   bersihkanBackupLama(folder, 30)

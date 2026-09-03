@@ -46,7 +46,53 @@ export default function AbsensiPage() {
   const [selfieBlob, setSelfieBlob] = useState<Blob | null>(null)
   const [shift, setShift] = useState<Shift | null>(null)
   const [recentAttendance, setRecentAttendance] = useState<Attendance[]>([])
+  // Koordinator cabang untuk fallback WA saat absensi ditolak server
+  // (mis. profile_inactive) — di-prefetch sekali saat init supaya siap dipakai
+  // di showFailure() tanpa await tambahan.
+  const [koordWa, setKoordWa] = useState<{ phone: string; name: string } | null>(null)
   const { value: geofenceTolerance } = useSystemConfigNumber('GEOFENCE_TOLERANCE_METER', GEOFENCE_TOLERANCE_METERS)
+
+  // Terjemahkan error mentah dari RPC (raos_attendance_check_in/out + guard
+  // trigger raos_attendance_write_guard) menjadi pesan Indonesian yang tidak
+  // membingungkan staff. Fallback pakai pesan asli supaya debug tetap mungkin.
+  function explainAttendanceError(msg: string): string {
+    const m = (msg || '').toLowerCase()
+    if (m.includes('profile_inactive'))
+      return 'Akun Anda sedang NONAKTIF di HRIS. Absensi belum bisa diproses — hubungi koordinator cabang untuk aktivasi.'
+    if (m.includes('geofence_blocked'))
+      return 'Absensi ditolak: lokasi Anda di luar radius pickup point cabang.'
+    if (m.includes('branch_mismatch') || m.includes('branch_not_assigned'))
+      return 'Anda belum di-assign ke cabang yang benar di HRIS. Hubungi koordinator cabang.'
+    if (m.includes('staff_mismatch'))
+      return 'Identitas staff tidak cocok. Silakan logout lalu login ulang.'
+    if (m.includes('role_not_allowed'))
+      return 'Peran Anda tidak diizinkan absensi via PWA. Hubungi koordinator.'
+    if (m.includes('shift_out_of_window') || m.includes('shift_not_active'))
+      return 'Di luar jendela waktu shift saat ini. Cek jadwal shift Anda.'
+    if (m.includes('checkout_already_set') || m.includes('checkout_must_be_separate'))
+      return 'Absensi pulang sudah pernah tercatat hari ini.'
+    if (m.includes('check_in_required'))
+      return 'Anda belum absen masuk. Lakukan absen masuk terlebih dahulu.'
+    return `Absensi gagal: ${msg}`
+  }
+
+  function showFailure(msg: string) {
+    const friendly = explainAttendanceError(msg)
+    if (typeof window === 'undefined') return
+    if (koordWa?.phone) {
+      const waNum = koordWa.phone.replace(/\D/g, '').replace(/^0/, '62')
+      const waHref =
+        'https://wa.me/' +
+        waNum +
+        '?text=' +
+        encodeURIComponent(`Halo Koordinator ${koordWa.name}, mohon bantuan — saya gagal absensi di PWA RAOS: ${friendly}`)
+      if (window.confirm(friendly + `\n\nHubungi Koordinator ${koordWa.name} via WhatsApp?`)) {
+        window.open(waHref, '_blank', 'noopener,noreferrer')
+      }
+    } else {
+      window.alert(friendly)
+    }
+  }
 
   useEffect(() => {
     // Init dulu untuk dapat user.branch_id (cabang yang di-assign admin di
@@ -64,6 +110,23 @@ export default function AbsensiPage() {
       setUser(profile)
 
       const userBranchId: string | null = profile?.branch_id ?? null
+
+      // Prefetch koordinator cabang → dipakai showFailure() untuk tombol WA
+      // saat error mentah dari server (mis. profile_inactive) muncul.
+      if (userBranchId) {
+        try {
+          const { data: koords } = await supabase
+            .from('user_profiles')
+            .select('full_name, phone')
+            .eq('branch_id', userBranchId)
+            .eq('role', 'koordinator')
+            .eq('is_active', true)
+            .limit(1)
+          const k = koords?.[0]
+          if (k?.phone) setKoordWa({ phone: String(k.phone), name: String(k.full_name || 'Koordinator') })
+        } catch {}
+      }
+
       abortGps = requestLocationTiered({
         onFix: async fix => {
           setLocation({ lat: fix.lat, lng: fix.lng })
@@ -179,9 +242,7 @@ export default function AbsensiPage() {
         logActivity('absensi_masuk_offline', `queued @ ${geofence?.nearestPointName ?? '-'}`)
         outcome = 'queued'
       } else if (error) {
-        alert(error.message === 'geofence_blocked'
-          ? 'Absensi ditolak server: di luar radius pickup point.'
-          : `Absensi gagal: ${error.message}`)
+        showFailure(error.message)
         outcome = 'failed'
       } else {
         const result = data as { status?: string; row?: Attendance } | null
@@ -205,7 +266,7 @@ export default function AbsensiPage() {
         logActivity('absensi_pulang_offline', `queued @ ${geofence?.nearestPointName ?? '-'}`)
         outcome = 'queued'
       } else if (error) {
-        alert(`Absensi pulang gagal: ${error.message}`)
+        showFailure(`pulang · ${error.message}`)
         outcome = 'failed'
       } else {
         const result = data as { status?: string; row?: Attendance } | null
